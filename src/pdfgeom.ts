@@ -6,16 +6,19 @@ export type TItem = { str: string; x: number; y: number; w: number; h: number };
 
 /* ---------------- §3-3 서술 페이지 자동 선택 ---------------- */
 
-export type PageInfo = { n: number; rowItems: number; ko: number; sizes: Set<string>; gauge: boolean };
+export type PageInfo = { n: number; rowItems: number; ko: number; sizes: Set<string>; gauge: boolean; instr: number };
 
 export function pageInfo(n: number, items: TItem[]): PageInfo {
   const all = items.map((i) => i.str || "").join(" ");
-  const rowItems = items.filter((i) => /^\s*\*?\d{1,3}\s*단(\s*\((RS|WS)\)|\s*[~\-]|\s|$)/i.test(i.str || "")).length;
-  const ko = (all.match(/[가-힣]/g) || []).length;
+  const rowItems = items.filter((i) => /^\s*\*?\d{1,3}\s*단(\s*\((RS|WS)\)|\s*[~\-:：.)]|\s|$)|^\s*(?:rounds?|rnds?|rows?)\s*\d{1,3}\b|^\s*\d{1,3}(?:st|nd|rd|th)\s+(?:rounds?|rows?|rnds?)\b/i.test(i.str || "")).length;
+  // 글자 수: 한글 + 영문(라틴) — 영어 도안도 '글자 있는 PDF'로
+  const ko = (all.match(/[가-힣]/g) || []).length + Math.round((all.match(/[A-Za-zÀ-ÿ]/g) || []).length / 2);
   const sizes = new Set<string>();
   for (const m of all.matchAll(/((\d?XL|S|M|L)(\s*,\s*(\d?XL|S|M|L))*)\s*사이즈/g)) m[1].split(/\s*,\s*/).forEach((x) => sizes.add(x));
-  const gauge = /게이지|gauge/i.test(all) && /\d+\s*코\s*\d+\s*단/.test(all);
-  return { n, rowItems, ko, sizes, gauge };
+  const gauge = /게이지|gauge|tension/i.test(all) && /\d+\s*코\s*\d+\s*단|\d+\s*(?:sts?|stitches)\b/i.test(all);
+  // 서술형(줄글) 도안용: 뜨개 지시 낱말 수
+  const instr = (all.match(/\b(?:knit|purl|k2tog|ssk|cast on|bind off|rep|rnds?|rows?|sts|inc|dec|dc|sc|ch|sl st)\b|겉뜨기|안뜨기|코잡기|코막음|코줄임|코늘림|사슬|짧은뜨기|한길긴뜨기/gi) || []).length;
+  return { n, rowItems, ko, sizes, gauge, instr };
 }
 
 export function normSize(v: string): string {
@@ -28,9 +31,12 @@ export function autoPick(info: PageInfo[], sizeIn: string, alreadyRead: number[]
   const size = normSize(sizeIn);
   const done = new Set(alreadyRead);
   if (!info.some((x) => x.ko > 0)) return { pages: info.map((x) => x.n).filter((n) => !done.has(n)), scanned: true };
+  // 단 번호 표가 거의 없는 줄글 도안이면 지시 낱말이 많은 쪽을 고른다
+  const prose = info.filter((x) => x.rowItems >= 2).length <= 2;
+  const isInstr = (x: PageInfo) => x.rowItems >= 2 || (prose && x.instr >= 12);
   const pick = new Set(
     info
-      .filter((x) => x.rowItems >= 2 && x.ko >= 60 && (!size || x.sizes.size < 2 || x.sizes.has(size)) && !done.has(x.n))
+      .filter((x) => isInstr(x) && x.ko >= 60 && (!size || x.sizes.size < 2 || x.sizes.has(size)) && !done.has(x.n))
       .map((x) => x.n),
   );
   const g = info.find((x) => x.gauge);
@@ -181,8 +187,11 @@ export function findLegend(items: TItem[]): { x0: number; y0: number; x1: number
 
 /* ---------------- 텍스트 항목 → 줄 (내장 읽기) ---------------- */
 
-/** 같은 높이(기준선 차이 < 글자 높이 0.5)의 항목을 왼→오로 이어 한 줄로. 숫자만 있는 차트 축은 뺀다 */
-export function toLines(items: TItem[]): string[] {
+/**
+ * 같은 높이(기준선 차이 < 글자 높이 0.5)의 항목을 왼→오로 이어 한 줄로. 숫자만 있는 차트 축은 뺀다.
+ * 두 단 편집(왼쪽 단·오른쪽 단)이면 큰 간격에서 끊어 왼쪽 단을 다 읽은 뒤 오른쪽 단을 읽는다.
+ */
+export function toLines(items: TItem[], pageW = 0): string[] {
   const its = items.filter((i) => i.str.trim() && !/^\s*\d{1,3}\s*$/.test(i.str)).sort((a, b) => a.y - b.y || a.x - b.x);
   const rows: TItem[][] = [];
   for (const it of its) {
@@ -190,15 +199,44 @@ export function toLines(items: TItem[]): string[] {
     if (r && Math.abs(r[0].y - it.y) < Math.max(2, Math.min(r[0].h, it.h) * 0.5)) r.push(it);
     else rows.push([it]);
   }
-  return rows.map((r) => {
+  type Seg = { x: number; y: number; t: string; row: number };
+  const segs: Seg[] = [];
+  const W = pageW || Math.max(...its.map((i) => i.x + i.w), 1);
+  rows.forEach((r, ri) => {
     r.sort((a, b) => a.x - b.x);
-    let s = "";
+    let cur: Seg | null = null;
     let end = -Infinity;
     for (const it of r) {
-      if (s && it.x - end > 1) s += " ";
-      s += it.str;
+      const gap = it.x - end;
+      if (cur && gap > Math.max(24, W * 0.04) && it.x > W * 0.38) {
+        segs.push(cur);
+        cur = null;
+      }
+      if (!cur) cur = { x: it.x, y: it.y, t: it.str, row: ri };
+      else {
+        // 자간 때문에 숫자가 쪼개진 경우("2" "7단")는 붙인다
+        const glued = /\d$/.test(cur.t) && /^\d/.test(it.str) && gap < Math.max(1.5, it.h * 0.45);
+        cur.t += (gap > 1 && !glued ? " " : "") + it.str;
+      }
       end = it.x + it.w;
     }
-    return s.replace(/\s+/g, " ").trim();
+    if (cur) segs.push(cur);
   });
+  // 오른쪽 단 시작이 여러 줄에서 반복되면 두 단 편집으로 본다
+  const rightStarts = segs.filter((s) => s.x > W * 0.38).length;
+  const twoCol = rightStarts >= 4 && segs.filter((s) => s.x < W * 0.38).length >= 4;
+  const clean = (s: Seg) => s.t.replace(/\s+/g, " ").trim();
+  if (!twoCol) {
+    // 한 단: 같은 줄 조각을 다시 잇는다
+    const out: string[] = [];
+    let last = -1;
+    for (const s of segs) {
+      if (s.row === last) out[out.length - 1] += " " + clean(s);
+      else out.push(clean(s));
+      last = s.row;
+    }
+    return out;
+  }
+  const left = segs.filter((s) => s.x <= W * 0.38), right = segs.filter((s) => s.x > W * 0.38);
+  return [...left, ...right].map(clean);
 }

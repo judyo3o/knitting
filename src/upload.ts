@@ -12,7 +12,7 @@ import { b64, blobB64, canvasBlob, extractPages, openPdf, renderWidth, sha256, t
 import { autoPick, findCharts, normSize, pageInfo, toLines, type PageInfo } from "./pdfgeom";
 import { STRUCTURE_SCHEMA, structurePrompt } from "./prompts";
 import { commit, forgetPdf, setActive, state } from "./store";
-import { $, h, toast } from "./ui";
+import { $, dialog, h, toast } from "./ui";
 import type { AiResult, AiSection, Pattern, Yarn } from "./types";
 import { clearBitmaps } from "./chart";
 import { findGauges } from "./gauge";
@@ -225,6 +225,8 @@ export function openUpload(o: Opts) {
           local = r.sections;
           good = localGoodEnough(local, r.text);
         }
+        const nLocal = local.reduce((a, x) => a + x.rows.length, 0);
+        if (!good.ok && !useClaude.checked && nLocal >= 3 && (await chooseLocal(good.why, nLocal))) good = { ok: true, why: "" };
         if (good.ok && !useClaude.checked) {
           sections = local;
           localNote = true;
@@ -311,6 +313,20 @@ export function openUpload(o: Opts) {
     close();
   }
 
+  /** 기기에서 다 못 읽었을 때: 그대로 시작할지, Claude로 읽을지 */
+  function chooseLocal(why: string, n: number): Promise<boolean> {
+    return new Promise((res) => {
+      let v = false;
+      const dl = dialog("기기에서 일부만 읽었어요", [
+        h("p", { text: `${why}. 기기에서 ${n}줄을 읽었어요.` }),
+        h("p", { class: "hint", text: "그대로 시작하면 틀린 단은 '이 단 서술 수정'으로 고칠 수 있어요. Claude로 읽으면 사이즈별 숫자와 반복 지시까지 풀어 써요." }),
+        h("div", { class: "actions" },
+          h("button", { class: "btn primary", type: "button", text: hasKey(state.ai) ? "Claude로 정확하게 (내 키)" : "Claude로 정확하게 (claude.ai 복사·붙여넣기)", on: { click: () => { v = false; dl.close(); } } }),
+          h("button", { class: "btn", type: "button", text: "기기에서 읽은 대로 시작", on: { click: () => { v = true; dl.close(); } } })),
+      ], { onClose: () => res(v) });
+    });
+  }
+
   /** Claude 결과 캐시: (PDF 해시, 페이지 묶음, 사이즈, 프롬프트 버전) → JSON */
   async function structure(parts: Part[], cacheKey: string, label: string): Promise<AiResult> {
     const k = `v${PROMPT_VERSION}:${cacheKey}`;
@@ -344,7 +360,7 @@ async function readLocally(pdf: Pdf, pages: number[], size: string, info: PageIn
   const perPage: { n: number; lines: string[]; items: any[]; w: number }[] = [];
   for (const n of pages) {
     const t = await textItems(pdf, n);
-    perPage.push({ n, lines: toLines(t.items), items: t.items, w: t.w });
+    perPage.push({ n, lines: toLines(t.items, t.w), items: t.items, w: t.w });
   }
   const text = perPage.map((x) => x.lines.join("\n")).join("\n");
   const order = sizeOrder(text);
@@ -370,7 +386,7 @@ async function readLocally(pdf: Pdf, pages: number[], size: string, info: PageIn
 async function gaugesFrom(text: string | null, pdf: Pdf | null, info: PageInfo[]) {
   let src = text || "";
   if (!src && pdf) for (const pi of info.filter((x) => x.gauge).slice(0, 2)) src += " " + (await textItems(pdf, pi.n)).items.map((i) => i.str).join(" ");
-  return findGauges(src).map((g) => ({ label: g.label, pattern: { st: g.st, rows: g.rows }, before: null, after: null }));
+  return findGauges(src).map((g) => ({ label: g.label, needle: g.needle, pattern: { st: g.st, rows: g.rows }, before: null, after: null }));
 }
 
 /** 배치를 본문 한도 안으로: 너무 크면 쪽을 나누고, 한 쪽도 크면 그 쪽은 이미지로 */

@@ -208,7 +208,10 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
     return wrap;
   }
   if (!page) {
-    cv.append(h("p", { class: "empty", text: p.src === "pdf" ? "이 파트에 지정된 차트 쪽이 없어요. '차트 쪽 바꾸기'로 고르거나, 배색이면 '배색 그리기'로 직접 그릴 수 있어요." : "차트가 없는 파트예요. 배색 도안이면 '배색 그리기'로 직접 그려서 단마다 표시할 수 있어요." }));
+    // 차트 없는 파트(코바늘·서술형): 큰 상자 대신 한 줄
+    box.remove();
+    t.prepend(h("span", { class: "gen", text: "차트 없음 ·" }));
+    for (const b of [...t.querySelectorAll("button")].filter((b) => /^[−+]$|차트 전체/.test(b.textContent || ""))) b.remove();
     return wrap;
   }
   cv.append(h("p", { class: "empty", text: "차트를 그리는 중…" }));
@@ -238,8 +241,10 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
     }
     // 배색 차트면 띠에서 실제 색을 뽑아 보여준다
     // 회색·검정(격자선·기호)은 빼고 채도 있는 색만 → 흑백 차트에선 안 보인다
+    // 기호표 색칸(SSK 등)을 실 색으로 오해하지 않게: 배색 도안이거나, 두 색 이상이 넉넉히 칠해진 단만
     const cols = sampleRowColors(bmp, r.n).filter((c2) => c2.share > 0.04 && chroma(c2.hex) > 40);
-    if (cols.length) {
+    const colorwork = p.colors.length > 0 || cols.filter((c2) => c2.share > 0.15).length >= 2;
+    if (cols.length && colorwork) {
       for (const c2 of cols.slice(0, 5)) yarnBox.append(h("span", { class: "yarn sample", title: "차트에서 뽑은 색" }, h("i", { style: { background: c2.hex } }), Math.round(c2.share * 100) + "%"));
       if (!yarnBox.querySelector(".gen")) yarnBox.prepend(h("span", { class: "gen", text: "차트 색" }));
     }
