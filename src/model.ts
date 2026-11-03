@@ -104,7 +104,7 @@ export function markStart(list: Row[]) {
   const text = list.slice(0, 3).map((r) => r.t).join(" ");
   if (first.n === 1 && CAST_ON_ROW1.test(text)) first.castOn = true;
   // 코줍기로 시작하는 파트: 1단 서술이 코줍기뿐(코 지시 없음)이면 코줍기 자체가 1단 (차트 1단도 코줍기 표시)
-  if (first.n === 1 && /코를?\s*줍|코\s*줍기|pick\s*up/i.test(first.t) && !/(?:겉|안)\s*\d|\b[kp]\d|겉뜨기\s*\d|안뜨기\s*\d/i.test(first.t)) first.castOn = true;
+  if (first.n === 1 && /코를?\s*줍|코\s*줍기|주워|감아\s*코|pick\s*up|cast\s*on/i.test(first.t) && !/(?:겉|안)\s*\d|\b[kp]\d|겉뜨기\s*\d|안뜨기\s*\d/i.test(first.t)) first.castOn = true;
   const m = text.match(START_SIDE);
   if (m) {
     const n = +(m[1] || m[3]);
@@ -535,7 +535,7 @@ export function workIn(p: Pattern, a: number, b: number, now = Date.now()): numb
 export const workUsed = (p: Pattern) => !!(p.work && (p.work.on || p.work.spans.length));
 
 /** 코잡기 단인지 코줍기 단인지 (이름만) */
-export const castLabel = (r: Row) => (/줍|pick\s*up/i.test(r.t) ? "코줍기" : "코잡기");
+export const castLabel = (r: Row) => (/줍|주워|pick\s*up/i.test(r.t) ? "코줍기" : "코잡기");
 
 /** 파트 s에서 n보다 뒤 단 번호를 d만큼 민다 (단·완료·묶음 진행·현재 위치 키도 같이) */
 export function shiftRows(p: Pattern, s: string, after: number, d: number) {
