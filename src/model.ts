@@ -357,3 +357,15 @@ export function applyDrawing(p: Pattern, s: string): number {
   p.rows = order.flatMap((name) => (name === s ? mine : others.filter((r) => r.s === name)));
   return changed;
 }
+
+/** 파트 콧수: 기초코 문장("110코를 만듭니다", "38코 기초코", "cast on 60 sts") > 단 끝 콧수 중 가장 많이 나온 값 */
+export function partStitches(rows: Row[]): number | null {
+  for (const r of rows.slice(0, 3)) {
+    const m = (r.t || "").match(/(\d{1,4})\s*코\s*(?:를|을)?\s*(?:기초코|만듭|만들|잡|일반코|코잡기)|(?:기초코|코잡기|cast\s*on)\s*(\d{1,4})\s*(?:코|sts?|stitches)?/i);
+    if (m) return +(m[1] || m[2]);
+  }
+  const cnt = new Map<number, number>();
+  for (const r of rows) { const m = (r.st || "").match(/\d{1,4}/); if (m) cnt.set(+m[0], (cnt.get(+m[0]) || 0) + 1); }
+  const best = [...cnt.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0];
+  return best ? best[0] : null;
+}

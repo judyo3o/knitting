@@ -7,15 +7,15 @@ import { chartBitmap, clearBitmaps, drawGrid, drawPdfFull, drawPdfRows, explainS
 import { getFile, putFile } from "./db";
 import { getCell, longestFloat, rowColors } from "./drawing";
 import {
-  applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, sideOf, stepNext, stepPrev,
+  applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, sideOf, stepNext, stepPrev,
 } from "./model";
-import { blobB64, canvasBlob } from "./pdf";
-import { findLegend, LEGEND_RE } from "./pdfgeom";
+import { blobB64, canvasBlob, textItems } from "./pdf";
+import { chartFor, findCharts, findLegend, LEGEND_RE, stitchAxis } from "./pdfgeom";
 import { explainCheck, explainDraft, explainHead } from "./prompts";
 import { active, commit, exportJson, importJson, load, pdfOf, removePattern, saveNow, setActive, startAutosave, state, syncRemote } from "./store";
 import { openSettings, manualHandler, openViewer } from "./dialogs";
 import { openUpload } from "./upload";
-import { openEditor } from "./drawui";
+import { openEditor, type DrawSize } from "./drawui";
 import { gaugeSummary, openGauge } from "./gaugeui";
 import { $, dialog, download, fmtFull, fmtShort, fmtSmart, fmtTime, h, toast } from "./ui";
 import type { Pattern, Row } from "./types";
@@ -201,7 +201,7 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
     !p.example && h("button", { class: "btn ghost", type: "button", text: "차트 쪽 바꾸기", on: { click: () => chartPicker(p, r) } }),
     h("label", {}, h("input", { type: "checkbox", checked: round, on: { change: (e: Event) => { p.secs[r.s] = { ...p.secs[r.s], round: (e.target as HTMLInputElement).checked }; if (p.draw[r.s]) applyDrawing(p, r.s); commit(p); render(); } } }), "원통뜨기"),
     !!(d && page) && h("button", { class: "btn ghost", type: "button", text: useDraw ? "PDF 차트 보기" : "그린 배색 보기", on: { click: () => { view.useDrawing[r.s] = !useDraw; saveView(); render(); } } }),
-    h("button", { class: "btn ghost", type: "button", text: d ? "배색 고치기" : "배색 그리기", on: { click: () => openEditor(p, r.s, { onSave: () => render() }) } }),
+    h("button", { class: "btn ghost", type: "button", text: d ? "배색 고치기" : "배색 그리기", on: { click: async () => openEditor(p, r.s, { onSave: () => render(), size: await drawSize(p, r.s).catch(() => null) }) } }),
   );
   wrap.append(box, t);
 
@@ -497,6 +497,30 @@ function narrative(p: Pattern, r: Row) {
   }
   wrap.append(chunkBox(p, r, chunks));
   return wrap;
+}
+
+/** 배색 격자 크기를 도안에서: 콧수는 차트 코 번호 축 > 기초코·단 끝 콧수, 단수는 파트의 단 범위(차트 단 번호까지) */
+async function drawSize(p: Pattern, s: string): Promise<DrawSize | null> {
+  const rows = partRows(p, s);
+  if (!rows.length) return null;
+  const n0 = rows[0].n;
+  let n1 = rows[rows.length - 1].n;
+  let w: number | null = null, why = "";
+  const page = p.secs[s]?.ch || rows.find((x) => x.ch)?.ch || null;
+  if (page && p.src === "pdf") {
+    const pdf = await pdfOf(p);
+    if (pdf) {
+      const t = await textItems(pdf, page);
+      const charts = findCharts(t.items, t.w);
+      const c = chartFor(charts, n1) || charts[0];
+      const ax = c ? stitchAxis(t.items, c) : null;
+      if (ax) { w = ax.max; why = `차트 p${page}의 코 번호`; }
+      if (c && c.nMax > n1 && c.nMin <= n0 + 1) n1 = c.nMax;
+    }
+  }
+  if (!w) { w = partStitches(rows); if (w) why = "도안 서술의 콧수"; }
+  if (!w || w > 400) return null;
+  return { w, h: Math.min(400, n1 - n0 + 1), start: n0, why };
 }
 
 /** 서술 묶음 버튼 (누른 묶음까지 뜬 것으로 저장) + 진행 정보 */

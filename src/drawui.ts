@@ -17,9 +17,12 @@ type Tool = "select" | "pen" | "fill" | "erase" | "paste";
 const CODES = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const IDX = "0123456789abcdefghijklmnopqrstuvwxyz";
 
-export function openEditor(p: Pattern, part: string, o: { onSave: () => void; startImage?: File }) {
+export type DrawSize = { w: number; h: number; start: number; why: string };
+export function openEditor(p: Pattern, part: string, o: { onSave: () => void; startImage?: File; size?: DrawSize | null }) {
   const rowsOf = partRows(p, part);
-  let d: Drawing = p.draw[part] ? structuredClone(p.draw[part]) : newDrawing(24, Math.max(10, rowsOf.length || 20), rowsOf[0]?.n || 1);
+  // 새로 그릴 때는 도안의 콧수·단수 그대로 (모르면 24코)
+  const fresh = !p.draw[part];
+  let d: Drawing = p.draw[part] ? structuredClone(p.draw[part]) : newDrawing(o.size?.w || 24, o.size?.h || Math.max(10, rowsOf.length || 20), o.size?.start || rowsOf[0]?.n || 1);
   if (!d.opt) d.opt = {};
   if (d.opt.gauge === undefined) d.opt.gauge = primaryGauge(p.gauges);
   let colors: Yarn[] = p.colors.length ? p.colors.map((y) => ({ ...y })) : [{ code: "A", name: "바탕색", hex: "#EFE8D8" }, { code: "B", name: "배색", hex: "#2F5D8A" }];
@@ -73,6 +76,7 @@ export function openEditor(p: Pattern, part: string, o: { onSave: () => void; st
       btn("닫기", closeAsk),
     ),
     selBar,
+    sizeBar(),
     body,
     h("div", { class: "ed-foot", style: "flex-direction:column;align-items:stretch" },
       desc,
@@ -85,6 +89,17 @@ export function openEditor(p: Pattern, part: string, o: { onSave: () => void; st
   setTool("pen");
   if (o.startImage) importImage(o.startImage);
 
+  /** 도안 크기 안내: 새로 만들면 어디서 가져왔는지, 기존 격자가 도안과 다르면 맞추기 버튼 */
+  function sizeBar() {
+    const z = o.size;
+    if (!z) return fresh ? h("div", { class: "ed-bar" }, h("span", { class: "gen", text: "도안에서 콧수를 찾지 못해 24코로 시작했어요. ⚙ 설정에서 바꿀 수 있어요." })) : null;
+    if (fresh) return h("div", { class: "ed-bar" }, h("span", { class: "gen", text: `도안대로 ${z.w}코 × ${z.h}단(${z.start}단부터)으로 시작했어요 · ${z.why}` }));
+    if (d.w === z.w && d.h === z.h && d.start === z.start) return null;
+    const bar = h("div", { class: "ed-bar" },
+      h("span", { class: "gen", text: `지금 격자 ${d.w}코 × ${d.h}단 · 도안은 ${z.w}코 × ${z.h}단 (${z.why})` }),
+      btn("도안 크기로 맞추기", () => { edit({ ...resize(d, z.w, z.h), start: z.start, opt: d.opt }); bar.remove(); toast(`${z.w}코 × ${z.h}단으로 맞췄어요. 넘친 칸은 잘렸어요.`); }));
+    return bar;
+  }
   function btn(text: string, fn: () => void, label?: string) {
     return h("button", { class: "btn", type: "button", text, "aria-label": label || null, on: { click: fn } });
   }

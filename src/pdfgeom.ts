@@ -151,6 +151,31 @@ function splitByGap(col: Pt[]): Pt[][] {
 }
 
 /** 단 n에 맞는 차트 (범위 안 우선, 없으면 2단 여유, 그래도 없으면 가장 가까운 것) */
+/**
+ * 코 번호 축: 차트 아래(또는 위)의 숫자 줄("38 34 … 5 1") → 가장 왼쪽·오른쪽 숫자의 가운데 x(pt)와 가장 큰 번호(= 콧수)
+ */
+export function stitchAxis(items: TItem[], c: Chart): { x0: number; x1: number; max: number } | null {
+  const h = rowH(c);
+  const yBot = rowY(c, c.nMin) + h / 2, yTopC = rowY(c, c.nMax) - h / 2;
+  const nearAxis = (x: number) => c.axes.some((a) => Math.abs(a - x) < h * 1.5);
+  const pick = (lo: number, hi: number) => items.filter((i) => /^\s*\d{1,3}\s*$/.test(i.str) && i.y > lo && i.y < hi && i.x >= c.x0 - 2 && i.x + i.w <= c.x1 + 2 && !nearAxis(i.x + i.w / 2));
+  for (const nums of [pick(yBot, yBot + h * 3.5), pick(yTopC - h * 3, yTopC)]) {
+    if (nums.length < 3) continue;
+    const pts = nums.map((i) => ({ x: i.x + i.w / 2, v: +i.str.trim() })).sort((a, b) => a.x - b.x);
+    // 숫자가 한 방향으로만 늘거나 줄어야 코 번호 축
+    const up = pts.every((q, j) => j === 0 || q.v > pts[j - 1].v), down = pts.every((q, j) => j === 0 || q.v < pts[j - 1].v);
+    if (!up && !down) continue;
+    // 코 번호라면 번호 1 차이 = 칸 하나: x가 번호에 정비례하고(어긋남 < 칸 0.4개), 칸 너비가 단 높이와 비슷해야 한다
+    const n = pts.length, mv = pts.reduce((a, q) => a + q.v, 0) / n, mx = pts.reduce((a, q) => a + q.x, 0) / n;
+    const b = pts.reduce((a, q) => a + (q.v - mv) * (q.x - mx), 0) / Math.max(1e-9, pts.reduce((a, q) => a + (q.v - mv) ** 2, 0));
+    const cell = Math.abs(b);
+    if (cell < h * 0.4 || cell > h * 2.5) continue;
+    if (pts.some((q) => Math.abs(mx + b * (q.v - mv) - q.x) > cell * 0.4)) continue;
+    return { x0: pts[0].x, x1: pts[pts.length - 1].x, max: Math.max(...pts.map((q) => q.v)) };
+  }
+  return null;
+}
+
 export function chartFor(charts: Chart[], n: number): Chart | null {
   if (!charts.length) return null;
   const inside = charts.find((c) => n >= c.nMin && n <= c.nMax);

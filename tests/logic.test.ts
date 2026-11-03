@@ -470,3 +470,15 @@ describe("차트 한 단 → 서술", () => {
     expect(rowText([pu, pu, k, pu, k, pu, k, pu, k, pu, k], false)).toBe("안2, (겉1, 안1) 4번 반복, 겉1");
   });
 });
+
+describe("배색 격자 크기", () => {
+  it("기초코 문장 > 단 끝 콧수에서 파트 콧수", async () => {
+    const { partStitches } = await import("../src/model");
+    const R = (n: number, t: string, st: string | null = null) => ({ s: "a", n, t, st, side: null, pg: null, ch: null, span: null });
+    expect(partStitches([R(1, "5.5mm 바늘로 38코 기초코. 코잡기가 1단입니다.")])).toBe(38);
+    expect(partStitches([R(1, "5.5mm 바늘로 110 코를 만듭니다.")])).toBe(110);
+    expect(partStitches([R(1, "Cast on 60 sts")])).toBe(60);
+    expect(partStitches([R(1, "겉뜨기", "48코"), R(2, "안뜨기", "48코"), R(3, "늘림", "50코")])).toBe(48);
+    expect(partStitches([R(1, "겉뜨기")])).toBe(null);
+  });
+});
