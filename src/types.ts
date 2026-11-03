@@ -41,6 +41,7 @@ export type Pattern = {
   legend?: Legend;
   colors: Yarn[];
   draw: Record<string, Drawing>; // 파트별 직접 그린 배색 격자
+  gauges: GaugeSet[]; // 무늬별 게이지 (도안 · 세탁 전 · 세탁 후)
   src: "pdf" | "images" | "text" | null;
   srcPages: number | null;
   readPages: number[];
@@ -68,4 +69,27 @@ export type AiResult = { title?: string | null; sections: AiSection[]; notes?: s
  * 직접 그린 배색 격자. cells는 아래 단부터 한 줄씩(왼→오), 한 글자 = 한 코.
  * "." = 빈칸, "0-9a-z" = colors 배열 인덱스.
  */
-export type Drawing = { w: number; h: number; start: number; cells: string };
+export type Drawing = { w: number; h: number; start: number; cells: string; opt?: DrawOpt };
+
+/** 격자 보기·표시 설정 (편집기 ⚙ 설정) */
+export type DrawOpt = {
+  gauge?: { st: number; rows: number } | null; // 10cm 안 콧수·단수 → 칸 비율
+  view?: "grid" | "stitch"; // 칸 그리기: 격자 / 코 모양(V)
+  legend?: boolean; // 색 범례 보이기
+  outline?: boolean; // 색 경계선 굵게
+  rep?: { c0: number; r0: number; c1: number; r1: number } | null; // 반복 단위 표시
+  bold?: number; // 굵은 선 간격 (기본 10)
+  numEvery?: number; // 번호 간격 (기본: 칸 크기에 따라)
+  colsFromLeft?: boolean; // 코 번호 왼쪽부터 (기본 오른쪽부터)
+};
+
+/** 10cm(기본) 안 콧수·단수 */
+export type Gauge = { st: number; rows: number };
+export type GaugeSet = {
+  label: string; // 예: "메리야스", "무늬"
+  needle?: string; // 예: "4.5mm"
+  pattern: Gauge | null; // 도안 게이지
+  before: Gauge | null; // 내 스와치 세탁 전
+  after: Gauge | null; // 내 스와치 세탁 후
+  at?: number; // 마지막 수정 시각
+};

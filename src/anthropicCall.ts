@@ -1,5 +1,5 @@
 /**
- * Anthropic Messages 호출 — 브라우저(내 키)와 서버 함수(api/claude.ts)가 같이 쓴다.
+ * Anthropic Messages 호출 — 내 Claude API 키로 브라우저에서 직접.
  * 스트리밍 + finalMessage로 긴 응답의 타임아웃을 피하고, 사용 가능하면 structured outputs와
  * 서버측 거절 폴백(fallbacks: "default")을 켠다. 그 조합이 400이면 한 번만 기본 요청으로 다시 보낸다.
  */

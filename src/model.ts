@@ -234,6 +234,7 @@ export function newPattern(init: Partial<Pattern> & { id: string; name: string }
     readPages: [],
     colors: [],
     draw: {},
+    gauges: [],
     rev: 1,
     updatedAt: Date.now(),
     ...init,
@@ -249,6 +250,7 @@ export function normalize(p: Partial<Pattern> & { id: string }): Pattern {
   if (!Array.isArray(out.rows)) out.rows = [];
   if (!Array.isArray(out.readPages)) out.readPages = [];
   if (!Array.isArray(out.colors)) out.colors = [];
+  if (!Array.isArray(out.gauges)) out.gauges = [];
   for (const s of partNames(out)) {
     out.secs[s] = out.secs[s] || {};
     if (!out.secs[s].odd) out.secs[s].odd = inferOdd(partRows(out, s));

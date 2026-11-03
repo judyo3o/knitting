@@ -257,3 +257,88 @@ export function gridFromPixels(get: (x: number, y: number) => [number, number, n
     }
   return { ...d, cells: cells.join("") };
 }
+
+/* ---------- 이미지 → 팔레트 (k-평균) ---------- */
+
+type RGB = [number, number, number];
+const d2 = (a: RGB, b: RGB) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2;
+
+/** 픽셀들을 k개 대표색으로 (k-means, 가장 먼 점 초기화 — 결과가 매번 같다) */
+export function quantize(px: RGB[], k: number, iters = 12): string[] {
+  if (!px.length) return [];
+  k = Math.max(1, Math.min(k, px.length));
+  const centers: RGB[] = [];
+  // 첫 중심: 가장 흔한 색 근처(평균), 다음부터 가장 먼 점
+  const mean: RGB = [0, 1, 2].map((i) => px.reduce((s, p) => s + p[i], 0) / px.length) as RGB;
+  centers.push(px.reduce((best, p) => (d2(p, mean) < d2(best, mean) ? p : best), px[0]));
+  while (centers.length < k) {
+    let far = px[0], fd = -1;
+    for (const p of px) {
+      const m = Math.min(...centers.map((c) => d2(p, c)));
+      if (m > fd) { fd = m; far = p; }
+    }
+    if (fd <= 0) break;
+    centers.push(far);
+  }
+  for (let it = 0; it < iters; it++) {
+    const sum = centers.map(() => [0, 0, 0, 0]);
+    for (const p of px) {
+      let bi = 0, bd = Infinity;
+      centers.forEach((c, i) => { const v = d2(p, c); if (v < bd) { bd = v; bi = i; } });
+      sum[bi][0] += p[0]; sum[bi][1] += p[1]; sum[bi][2] += p[2]; sum[bi][3]++;
+    }
+    let moved = false;
+    sum.forEach((s, i) => {
+      if (!s[3]) return;
+      const n: RGB = [s[0] / s[3], s[1] / s[3], s[2] / s[3]];
+      if (d2(n, centers[i]) > 0.5) moved = true;
+      centers[i] = n;
+    });
+    if (!moved) break;
+  }
+  // 많이 쓰인 색부터
+  const count = centers.map(() => 0);
+  for (const p of px) {
+    let bi = 0, bd = Infinity;
+    centers.forEach((c, i) => { const v = d2(p, c); if (v < bd) { bd = v; bi = i; } });
+    count[bi]++;
+  }
+  return centers.map((c, i) => ({ c, n: count[i] })).filter((x) => x.n).sort((a, b) => b.n - a.n).map((x) => rgbToHex(...x.c));
+}
+
+/** 이미지 영역(crop, 원본 픽셀)을 w×h칸으로: 칸마다 3×3 점 평균 → 가장 가까운 팔레트 */
+export function gridFromImage(get: (x: number, y: number) => RGB, crop: { x: number; y: number; w: number; h: number }, w: number, h: number, palette: (string | null)[], start = 1): Drawing {
+  const cw = crop.w / w, ch = crop.h / h;
+  return gridFromPixels((c, r) => {
+    const x0 = crop.x + c * cw, y0 = crop.y + (h - 1 - r) * ch;
+    const acc = [0, 0, 0];
+    for (const fx of [0.25, 0.5, 0.75]) for (const fy of [0.25, 0.5, 0.75]) {
+      const v = get(x0 + cw * fx, y0 + ch * fy);
+      acc[0] += v[0]; acc[1] += v[1]; acc[2] += v[2];
+    }
+    return [acc[0] / 9, acc[1] / 9, acc[2] / 9];
+  }, w, h, palette, start);
+}
+
+/** 색별 코 수 (범례용) */
+export function colorCounts(d: Drawing): number[] {
+  const out: number[] = [];
+  for (const ch of d.cells) {
+    if (ch === ".") continue;
+    const v = IDX.indexOf(ch);
+    out[v] = (out[v] || 0) + 1;
+  }
+  return out;
+}
+
+/** 게이지 → 칸 높이/너비 (뜨개 코는 보통 납작하다) */
+export const cellAspect = (d: Drawing) => {
+  const g = d.opt?.gauge;
+  return g && g.st > 0 && g.rows > 0 ? Math.max(0.4, Math.min(2, g.st / g.rows)) : 1;
+};
+
+/** 게이지를 지키며 너비에 맞는 단수 */
+export function rowsForWidth(w: number, imgW: number, imgH: number, gauge?: { st: number; rows: number } | null) {
+  const ratio = gauge && gauge.st > 0 ? gauge.rows / gauge.st : 1;
+  return Math.max(1, Math.round((w * imgH * ratio) / imgW));
+}

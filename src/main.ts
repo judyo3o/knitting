@@ -1,7 +1,7 @@
 import "./style.css";
 import { chunksOf, stitchesThrough } from "./chunks";
 import { MAX_TOKENS } from "./config";
-import { callAi, errCopy } from "./ai";
+import { callAi, errCopy, hasKey } from "./ai";
 import { chartBitmap, drawGrid, drawPdfFull, drawPdfRows, explainStrip, legendCanvas, sampleRowColors, yarnHex } from "./chart";
 import { getFile, putFile } from "./db";
 import { longestFloat, rowColors } from "./drawing";
@@ -15,6 +15,7 @@ import { active, commit, exportJson, importJson, load, pdfOf, removePattern, sav
 import { openSettings, manualHandler, openViewer } from "./dialogs";
 import { openUpload } from "./upload";
 import { openEditor } from "./drawui";
+import { gaugeSummary, openGauge } from "./gaugeui";
 import { $, dialog, download, fmtFull, fmtShort, fmtSmart, fmtTime, h, toast } from "./ui";
 import type { Pattern, Row } from "./types";
 
@@ -138,6 +139,8 @@ function nowCard(p: Pattern, r: Row) {
     ),
     h("div", { class: "rowno" }, h("b", { text: String(r.n) }), h("span", { class: "unit", text: "단" }), h("span", { class: "st", text: r.st || "" })),
   );
+  const gs = gaugeSummary(p);
+  if (gs) card.append(h("button", { class: "link gauge-line", type: "button", text: gs, on: { click: () => openGauge(p, render) } }));
   const yarnBox = h("div", { class: "yarns" });
   card.append(yarnBox);
   fillYarns(p, r, yarnBox);
@@ -412,7 +415,7 @@ async function explainRow(p: Pattern, r: Row, side: "RS" | "WS", round: boolean,
     const head = explainHead(r.n, side, round, hasLegend, p.colors);
     const draftQ = explainDraft(p.colors.length > 0);
     let out: string;
-    if (state.ai.provider === "manual") {
+    if (!hasKey(state.ai)) {
       out = await callAi(state.ai, { parts: [...parts, { kind: "text", text: head + "\n" + draftQ + "\n그다음 " + explainCheck("(방금 쓴 초안)") }], maxTokens: MAX_TOKENS.explain },
         { manual: manualHandler, label: `${r.s} ${r.n}단 차트 풀기` });
     } else {
@@ -443,8 +446,9 @@ function tools(p: Pattern, s: string) {
     commit(p, false);
     render();
   };
+  const gauge = h("button", { class: "btn ghost", type: "button", text: "게이지", on: { click: () => openGauge(p, render) } });
   const wake = h("button", { class: "btn ghost", type: "button", "aria-pressed": String(wantWake), text: wantWake ? "화면 켜두는 중" : "화면 켜두기", on: { click: () => setWake(!wantWake) } });
-  return h("div", { class: "tools" }, form, wake);
+  return h("div", { class: "tools" }, form, p.example ? null : gauge, wake);
 }
 
 function rowList(p: Pattern, s: string) {

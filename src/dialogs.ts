@@ -1,5 +1,5 @@
 /** 설정 · 복사/붙여넣기 모드 · 원본 보기 */
-import { AiError, providerLabel, type AiSettings, type Provider } from "./ai";
+import { AiError, providerLabel } from "./ai";
 import type { CallReq } from "./anthropicCall";
 import { getFile } from "./db";
 import { openPdf, renderWidth } from "./pdf";
@@ -8,39 +8,27 @@ import { dialog, download, h, toast } from "./ui";
 import type { Pattern } from "./types";
 
 export function openSettings(onSaved: () => void) {
-  const s: AiSettings = { ...state.ai };
-  const radios = (["manual", "anthropic", "openai", "server"] as Provider[]).map((p) =>
-    h("label", {},
-      h("input", { type: "radio", name: "prov", value: p, checked: s.provider === p, on: { change: () => { s.provider = p; sync(); } } }),
-      h("span", {}, providerLabel(p), h("small", { text: ({
-        manual: "키 없이 써요. 앱이 만든 프롬프트와 파일을 내 Claude나 ChatGPT 채팅에 넣고, 답을 붙여넣어요. 내 구독 사용량만 써요.",
-        anthropic: "console.anthropic.com에서 만든 API 키. 이 기기 안에만 저장되고 Anthropic으로만 보내요. 사용량만큼 요금이 나가요.",
-        openai: "platform.openai.com에서 만든 API 키. 이 기기 안에만 저장돼요. 모델 이름은 직접 바꿀 수 있어요.",
-        server: "직접 배포한 /api/claude 함수 (키는 서버 환경변수). 접근 비밀번호가 필요해요.",
-      } as Record<Provider, string>)[p] })),
-    ));
-  const ak = h("input", { type: "password", autocomplete: "off", placeholder: "sk-ant-…", value: s.anthropicKey || "" });
-  const ok = h("input", { type: "password", autocomplete: "off", placeholder: "sk-…", value: s.openaiKey || "" });
-  const om = h("input", { type: "text", value: s.openaiModel || "gpt-5" });
-  const su = h("input", { type: "text", value: s.serverUrl || "/api/claude" });
-  const sp = h("input", { type: "password", autocomplete: "off", value: s.serverPassword || "" });
-  const fa = h("label", { class: "field" }, "Anthropic API 키", ak);
-  const fo = h("div", { style: "display:flex;flex-direction:column;gap:8px" }, h("label", { class: "field" }, "OpenAI API 키", ok), h("label", { class: "field" }, "OpenAI 모델", om, h("small", { text: "PDF·이미지를 읽을 수 있는 모델이어야 해요." })));
-  const fs = h("div", { style: "display:flex;flex-direction:column;gap:8px" }, h("label", { class: "field" }, "서버 주소", su), h("label", { class: "field" }, "접근 비밀번호", sp));
-  const sync = () => {
-    fa.hidden = s.provider !== "anthropic";
-    fo.hidden = s.provider !== "openai";
-    fs.hidden = s.provider !== "server";
-  };
+  const key = h("input", { type: "password", autocomplete: "off", placeholder: "sk-ant-api…", value: state.ai.claudeKey || "", "aria-label": "Claude API 키" });
+  const useKey = h("input", { type: "radio", name: "prov", value: "claude", checked: state.ai.provider === "claude" });
+  const noKey = h("input", { type: "radio", name: "prov", value: "manual", checked: state.ai.provider !== "claude" });
+  const keyBox = h("label", { class: "field" }, "Claude API 키", key,
+    h("small", {}, "console.anthropic.com → API Keys에서 만들어요. 이 기기 안에만 저장되고 Anthropic으로만 보내요. 쓴 만큼 요금이 나가요. ",
+      "Claude 구독(Pro/Max) 로그인 토큰은 다른 앱에서 쓸 수 없어서, API 키가 필요해요."));
+  const sync = () => (keyBox.hidden = !useKey.checked);
+  useKey.onchange = noKey.onchange = sync;
   sync();
-  const dl = dialog("AI 연결", [
-    h("p", { class: "hint", text: "도안 읽기와 '차트를 글로 풀기'에만 AI를 써요. 단 세기·차트 표시·배색 그리기는 AI 없이 이 기기에서 돼요." }),
-    h("div", { class: "radio", role: "radiogroup" }, radios),
-    fa, fo, fs,
+  const dl = dialog("Claude 연결", [
+    h("p", { class: "hint", text: "단 세기·차트 표시·기호표·서술 묶음·배색 그리기·게이지, 그리고 글자가 있는 PDF와 텍스트 도안 읽기는 이 기기에서 해요. Claude는 기기에서 못 끝내는 도안(사진·스캔 PDF·'1단과 동일' 같은 지시)과 '차트를 글로 풀기'에만 써요." }),
+    h("div", { class: "radio", role: "radiogroup" },
+      h("label", {}, useKey, h("span", {}, providerLabel("claude"), h("small", { text: "버튼 한 번에 바로 읽어요." }))),
+      h("label", {}, noKey, h("span", {}, providerLabel("manual"), h("small", { text: "키 없이 claude.ai 채팅을 써요. 앱이 만든 프롬프트와 파일을 넣고 답을 붙여넣어요." })))),
+    keyBox,
     h("div", { class: "actions" },
       h("button", { class: "btn primary", type: "button", text: "저장", on: { click: async () => {
-        Object.assign(s, { anthropicKey: ak.value.trim(), openaiKey: ok.value.trim(), openaiModel: om.value.trim() || "gpt-5", serverUrl: su.value.trim() || "/api/claude", serverPassword: sp.value });
-        await saveAi(s);
+        const k = key.value.trim();
+        if (useKey.checked && !k) return toast("API 키를 넣어 주세요.");
+        if (useKey.checked && /^sk-ant-oat/.test(k)) return toast("구독 로그인 토큰은 쓸 수 없어요. console.anthropic.com의 API 키를 넣어 주세요.", 4200);
+        await saveAi({ provider: useKey.checked ? "claude" : "manual", claudeKey: k });
         dl.close();
         toast("설정을 저장했어요.");
         onSaved();
@@ -57,7 +45,7 @@ export function manualHandler(req: CallReq, label: string): Promise<string> {
     let prompt = req.parts.filter((p) => p.kind === "text").map((p: any) => p.text).join("\n\n");
     if (req.followUp) prompt += "\n\n" + req.followUp.user;
     const ta = h("textarea", { rows: 8, readOnly: true, class: "mono", value: prompt });
-    const ans = h("textarea", { rows: 6, placeholder: "Claude/ChatGPT의 답을 여기에 붙여넣으세요" });
+    const ans = h("textarea", { rows: 6, placeholder: "Claude의 답을 여기에 붙여넣으세요" });
     const fileBtns = files.map((f: any, i) => {
       const isPdf = f.kind === "pdf";
       const name = isPdf ? `도안-${label.replace(/[^\w가-힣-]+/g, "_")}.pdf` : `이미지-${i + 1}.${f.media === "image/png" ? "png" : "jpg"}`;
@@ -67,7 +55,7 @@ export function manualHandler(req: CallReq, label: string): Promise<string> {
     const dl = dialog(label, [
       h("ol", { class: "steps" },
         files.length ? h("li", {}, "아래 파일을 받아요: ", h("span", { class: "actions", style: "display:inline-flex" }, fileBtns)) : null,
-        h("li", {}, "Claude.ai나 ChatGPT에서 ", h("b", { text: "새 채팅" }), "을 열고 ", files.length ? "받은 파일을 첨부한 뒤 " : "", "아래 프롬프트를 붙여넣어 보내요."),
+        h("li", {}, "claude.ai에서 ", h("b", { text: "새 채팅" }), "을 열고 ", files.length ? "받은 파일을 첨부한 뒤 " : "", "아래 프롬프트를 붙여넣어 보내요."),
         h("li", { text: req.schema ? "답(JSON)을 전부 복사해서 맨 아래 칸에 붙여넣어요." : "답을 복사해서 맨 아래 칸에 붙여넣어요." }),
       ),
       ta,

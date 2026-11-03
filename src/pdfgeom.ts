@@ -178,3 +178,27 @@ export function findLegend(items: TItem[]): { x0: number; y0: number; x1: number
   const x1 = Math.max(title.x + title.w, ...take.map((i) => i.x + i.w)) + 8;
   return { x0: Math.max(0, x0), y0: title.y - title.h - 4, x1, y1: lastY + 8 };
 }
+
+/* ---------------- 텍스트 항목 → 줄 (내장 읽기) ---------------- */
+
+/** 같은 높이(기준선 차이 < 글자 높이 0.5)의 항목을 왼→오로 이어 한 줄로. 숫자만 있는 차트 축은 뺀다 */
+export function toLines(items: TItem[]): string[] {
+  const its = items.filter((i) => i.str.trim() && !/^\s*\d{1,3}\s*$/.test(i.str)).sort((a, b) => a.y - b.y || a.x - b.x);
+  const rows: TItem[][] = [];
+  for (const it of its) {
+    const r = rows[rows.length - 1];
+    if (r && Math.abs(r[0].y - it.y) < Math.max(2, Math.min(r[0].h, it.h) * 0.5)) r.push(it);
+    else rows.push([it]);
+  }
+  return rows.map((r) => {
+    r.sort((a, b) => a.x - b.x);
+    let s = "";
+    let end = -Infinity;
+    for (const it of r) {
+      if (s && it.x - end > 1) s += " ";
+      s += it.str;
+      end = it.x + it.w;
+    }
+    return s.replace(/\s+/g, " ").trim();
+  });
+}

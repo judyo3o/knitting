@@ -1,7 +1,7 @@
 /** 차트 표시 (§1-4 ③, §3-1) — PDF 차트 비트맵 / 직접 그린 배색 격자 */
 import { chartFor, findCharts, rowH, rowY, type Chart } from "./pdfgeom";
 import { renderPage, textItems, pageSize, type Pdf } from "./pdf";
-import { dominantColors, getCell, hasRow, rowIndex } from "./drawing";
+import { cellAspect, dominantColors, getCell, hasRow, rowIndex } from "./drawing";
 import type { Drawing, Side, Yarn } from "./types";
 
 export const MARK = "rgba(232, 62, 140, 0.28)";
@@ -170,18 +170,29 @@ export async function legendCanvas(pdf: Pdf, lg: { page: number; x0: number; y0:
 
 export const yarnHex = (y: Yarn | undefined, i: number) => y?.hex || ["#E8E2D4", "#B23A48", "#2F5D8A", "#E0A526", "#3E7C59", "#6B4E9B"][i % 6];
 
-export type GridGeom = { cell: number; rows: [number, number]; ox: number; oy: number; w: number; h: number };
+export type GridGeom = { cell: number; ch: number; rows: [number, number]; ox: number; oy: number; w: number; h: number };
+type Sel = { c0: number; r0: number; c1: number; r1: number };
+
+const shade = (hex: string, f: number) => {
+  const v = parseInt(hex.slice(1), 16);
+  const m = (x: number) => Math.max(0, Math.min(255, Math.round(x * f)));
+  return `rgb(${m(v >> 16)},${m((v >> 8) & 255)},${m(v & 255)})`;
+};
 
 /**
  * 격자 그리기. rows = [아래 단 r0, 위 단 r1] (drawing 인덱스, 포함). 위가 높은 단.
- * 왼쪽·오른쪽에 단 번호를 붙인다(차트처럼).
+ * 양옆에 단 번호, 위·아래에 코 번호(기본 오른쪽부터). 칸 비율·코 모양·경계선·반복 단위는 d.opt.
  */
-export function drawGrid(out: HTMLCanvasElement, d: Drawing, yarns: Yarn[], cell: number, o: Partial<ViewOpts> & { rows?: [number, number]; sel?: { c0: number; r0: number; c1: number; r1: number } | null; numbers?: boolean }): GridGeom {
+export function drawGrid(out: HTMLCanvasElement, d: Drawing, yarns: Yarn[], cell: number, o: Partial<ViewOpts> & { rows?: [number, number]; sel?: Sel | null; numbers?: boolean }): GridGeom {
+  const opt = d.opt || {};
   const r0 = o.rows ? o.rows[0] : 0, r1 = o.rows ? o.rows[1] : d.h - 1;
   const nr = r1 - r0 + 1;
-  const num = o.numbers === false ? 0 : Math.max(18, cell * 1.4);
+  const ch = Math.max(4, cell * cellAspect(d));
+  const showNum = o.numbers !== false;
+  const num = showNum ? Math.max(20, Math.min(30, cell * 1.4)) : 0;
+  const top = showNum ? 14 : 0, bottom = showNum ? 14 : 0;
   const dpr = Math.min(2, window.devicePixelRatio || 1);
-  const W = num * 2 + d.w * cell, H = nr * cell + (o.numbers === false ? 0 : 14);
+  const W = num * 2 + d.w * cell, H = top + nr * ch + bottom;
   out.width = Math.round(W * dpr);
   out.height = Math.round(H * dpr);
   out.style.width = W + "px";
@@ -190,48 +201,100 @@ export function drawGrid(out: HTMLCanvasElement, d: Drawing, yarns: Yarn[], cell
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, W, H);
-  const yOf = (r: number) => (r1 - r) * cell;
+  const X = (c: number) => num + c * cell;
+  const Y = (r: number) => top + (r1 - r) * ch;
+  const stitch = opt.view === "stitch";
   for (let r = r0; r <= r1; r++)
     for (let c = 0; c < d.w; c++) {
       const v = getCell(d, c, r);
       if (v < 0) continue;
-      ctx.fillStyle = yarnHex(yarns[v], v);
-      ctx.fillRect(num + c * cell, yOf(r), cell, cell);
+      const hex = yarnHex(yarns[v], v);
+      if (!stitch) {
+        ctx.fillStyle = hex;
+        ctx.fillRect(X(c), Y(r), cell, ch);
+      } else {
+        // 코 모양: 바탕은 조금 어둡게, 그 위에 V 두 다리
+        ctx.fillStyle = shade(hex, 0.72);
+        ctx.fillRect(X(c), Y(r), cell, ch);
+        ctx.fillStyle = hex;
+        const x = X(c), y = Y(r), w2 = cell / 2;
+        for (const side of [0, 1]) {
+          ctx.beginPath();
+          const xo = side ? x + w2 : x;
+          ctx.ellipse(xo + w2 / 2 + (side ? -w2 * 0.08 : w2 * 0.08), y + ch * 0.55, w2 * 0.42, ch * 0.62, side ? -0.5 : 0.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
     }
-  // 격자선 (10칸마다 굵게)
+  // 격자선 (굵은 선 간격 opt.bold, 기본 10) — 코 모양에선 아주 옅게
+  const bold = opt.bold || 10;
+  const thin = stitch ? "rgba(0,0,0,.06)" : "rgba(0,0,0,.18)";
   ctx.lineWidth = 1;
   for (let c = 0; c <= d.w; c++) {
-    ctx.strokeStyle = c % 10 === 0 ? "rgba(0,0,0,.55)" : "rgba(0,0,0,.18)";
-    ctx.beginPath(); ctx.moveTo(num + c * cell + 0.5, 0); ctx.lineTo(num + c * cell + 0.5, nr * cell); ctx.stroke();
+    const k = opt.colsFromLeft ? c : d.w - c;
+    ctx.strokeStyle = k % bold === 0 && c > 0 && c < d.w ? "rgba(0,0,0,.6)" : thin;
+    ctx.beginPath(); ctx.moveTo(X(c) + 0.5, top); ctx.lineTo(X(c) + 0.5, top + nr * ch); ctx.stroke();
   }
   for (let r = r0; r <= r1 + 1; r++) {
-    ctx.strokeStyle = (r + d.start - 1) % 10 === 0 ? "rgba(0,0,0,.55)" : "rgba(0,0,0,.18)";
-    const y = yOf(r) + cell;
+    const n = r + d.start - 1; // 이 선 아래 단 번호
+    ctx.strokeStyle = n % bold === 0 && r > r0 && r <= r1 ? "rgba(0,0,0,.6)" : thin;
+    const y = Y(r) + ch;
     ctx.beginPath(); ctx.moveTo(num, y - 0.5); ctx.lineTo(num + d.w * cell, y - 0.5); ctx.stroke();
   }
-  if (num) {
+  ctx.strokeStyle = "rgba(0,0,0,.7)";
+  ctx.strokeRect(num + 0.5, top + 0.5, d.w * cell - 1, nr * ch - 1);
+  // 색 경계선
+  if (opt.outline) {
+    ctx.strokeStyle = "#111";
+    ctx.lineWidth = Math.max(1.5, cell / 10);
+    ctx.beginPath();
+    for (let r = r0; r <= r1; r++)
+      for (let c = 0; c < d.w; c++) {
+        const v = getCell(d, c, r);
+        if (c + 1 < d.w && getCell(d, c + 1, r) !== v) { ctx.moveTo(X(c + 1), Y(r)); ctx.lineTo(X(c + 1), Y(r) + ch); }
+        if (r + 1 <= r1 && getCell(d, c, r + 1) !== v) { ctx.moveTo(X(c), Y(r)); ctx.lineTo(X(c) + cell, Y(r)); }
+      }
+    ctx.stroke();
+    ctx.lineWidth = 1;
+  }
+  // 반복 단위
+  if (opt.rep) {
+    const q = opt.rep;
+    const ra = Math.max(r0, Math.min(q.r0, q.r1)), rb = Math.min(r1, Math.max(q.r0, q.r1));
+    if (ra <= rb) {
+      ctx.strokeStyle = "#D7263D";
+      ctx.lineWidth = 2.5;
+      ctx.strokeRect(X(Math.min(q.c0, q.c1)) + 1, Y(rb) + 1, (Math.abs(q.c1 - q.c0) + 1) * cell - 2, (rb - ra + 1) * ch - 2);
+      ctx.lineWidth = 1;
+    }
+  }
+  // 번호
+  if (showNum) {
     ctx.fillStyle = "#333";
-    ctx.font = `${Math.min(12, Math.max(9, cell * 0.6))}px ui-monospace, monospace`;
+    ctx.font = `${Math.min(12, Math.max(9, Math.min(cell, ch) * 0.6))}px ui-monospace, monospace`;
     ctx.textBaseline = "middle";
+    const every = opt.numEvery || (Math.min(cell, ch) < 12 ? 5 : 1);
     for (let r = r0; r <= r1; r++) {
       const n = r + d.start;
-      if (cell < 12 && n % 5 && n !== d.start) continue;
-      const y = yOf(r) + cell / 2;
+      if (n % every && n !== d.start) continue;
+      const y = Y(r) + ch / 2;
       ctx.textAlign = "right"; ctx.fillText(String(n), num - 3, y);
       ctx.textAlign = "left"; ctx.fillText(String(n), num + d.w * cell + 3, y);
     }
     ctx.textAlign = "center";
+    const cEvery = opt.numEvery || (cell < 16 ? 5 : 1);
     for (let c = 0; c < d.w; c++) {
-      const st = d.w - c; // 코 번호는 오른쪽부터
-      if (st % 5 && st !== 1) continue;
-      ctx.fillText(String(st), num + c * cell + cell / 2, nr * cell + 7);
+      const st = opt.colsFromLeft ? c + 1 : d.w - c;
+      if (st % cEvery && st !== 1) continue;
+      const x = X(c) + cell / 2;
+      ctx.fillText(String(st), x, top / 2);
+      ctx.fillText(String(st), x, top + nr * ch + bottom / 2);
     }
   }
   if (o.n != null && hasRow(d, o.n)) {
-    const geom = { band: (n: number): [number, number] => [yOf(rowIndex(d, n)), yOf(rowIndex(d, n)) + cell] };
     ctx.save();
     ctx.translate(num, 0);
-    overlay(ctx, d.w * cell, geom.band, { n: o.n, side: o.side || "RS", round: !!o.round, rowPx: cell }, Math.max(d.start, r0 + d.start), 1);
+    overlay(ctx, d.w * cell, (n: number): [number, number] => [Y(rowIndex(d, n)), Y(rowIndex(d, n)) + ch], { n: o.n, side: o.side || "RS", round: !!o.round, rowPx: ch }, Math.max(d.start, r0 + d.start), 1);
     ctx.restore();
   }
   if (o.sel) {
@@ -239,16 +302,31 @@ export function drawGrid(out: HTMLCanvasElement, d: Drawing, yarns: Yarn[], cell
     ctx.strokeStyle = "#1D4ED8";
     ctx.setLineDash([4, 3]);
     ctx.lineWidth = 2;
-    ctx.strokeRect(num + Math.min(s.c0, s.c1) * cell, yOf(Math.max(s.r0, s.r1)), (Math.abs(s.c1 - s.c0) + 1) * cell, (Math.abs(s.r1 - s.r0) + 1) * cell);
+    ctx.strokeRect(X(Math.min(s.c0, s.c1)), Y(Math.max(s.r0, s.r1)), (Math.abs(s.c1 - s.c0) + 1) * cell, (Math.abs(s.r1 - s.r0) + 1) * ch);
     ctx.setLineDash([]);
   }
-  return { cell, rows: [r0, r1], ox: num, oy: 0, w: d.w, h: nr };
+  return { cell, ch, rows: [r0, r1], ox: num, oy: top, w: d.w, h: nr };
 }
 
 /** 화면 좌표 → 칸 (격자 밖이면 null) */
 export function hitCell(g: GridGeom, x: number, y: number): { c: number; r: number } | null {
   const c = Math.floor((x - g.ox) / g.cell);
-  const ry = Math.floor((y - g.oy) / g.cell);
+  const ry = Math.floor((y - g.oy) / g.ch);
   if (c < 0 || c >= g.w || ry < 0 || ry >= g.h) return null;
   return { c, r: g.rows[1] - ry };
+}
+
+/** 픽셀 보기: 1코 = 1픽셀 PNG (색만) */
+export function pixelCanvas(d: Drawing, yarns: Yarn[], scale = 1): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  c.width = d.w * scale;
+  c.height = d.h * scale;
+  const ctx = c.getContext("2d")!;
+  for (let r = 0; r < d.h; r++)
+    for (let x = 0; x < d.w; x++) {
+      const v = getCell(d, x, r);
+      ctx.fillStyle = v < 0 ? "#ffffff" : yarnHex(yarns[v], v);
+      ctx.fillRect(x * scale, (d.h - 1 - r) * scale, scale, scale);
+    }
+  return c;
 }
