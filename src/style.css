@@ -250,3 +250,6 @@ details.sheet>summary::after{content:" ▾";color:var(--ink-2)}
 .bubble{padding:8px 12px;border-radius:12px;max-width:88%;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.55;font-size:.95rem}
 .bubble.me{align-self:flex-end;background:var(--accent);color:var(--accent-ink);border-bottom-right-radius:4px}
 .bubble.ai{align-self:flex-start;background:var(--paper);border:1px solid var(--rule);border-bottom-left-radius:4px}
+
+.info-list{margin:0;padding:0 16px 8px 34px;font-size:.9rem;line-height:1.5}
+.info-list li{margin:2px 0;overflow-wrap:anywhere}

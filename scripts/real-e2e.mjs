@@ -64,6 +64,8 @@ for (const arg of process.argv.slice(2)) {
   console.log("  파트:", tabs.join(" / "));
   const g = await page.locator(".gauge-line").count() ? await page.textContent(".gauge-line") : "-";
   console.log("  게이지:", g);
+  const info = await page.$$eval(".info-list li", (els) => els.map((e) => e.textContent));
+  console.log("  도안 정보:", info.length ? "\n     " + info.slice(0, 8).join("\n     ") : "(없음)");
   await shot("4-tracker");
   let k = 0;
   for (const t of tabs.slice(0, 8)) {

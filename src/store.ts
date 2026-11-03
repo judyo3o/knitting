@@ -40,6 +40,7 @@ export function makeExample(): Pattern {
   const { rows, secs } = expand(mergeSections([], EXAMPLE_SECTIONS));
   const p = newPattern({ id: "example", name: "예시 · 넥워머", rows, secs, example: true, updatedAt: 0 });
   p.notes = "예시 도안이에요. 내 도안을 올리면 여기에 정리돼요. '배색 띠'는 직접 그린 배색 격자 예시예요.";
+  p.info = "사이즈: 한 사이즈 (둘레 56cm, 높이 22cm)\n실: A 아이보리 · B 버건디 (DK 굵기)\n바늘: 4mm 줄바늘 40cm\n게이지: 메리야스 22코 30단 (10cm)";
   p.colors = [{ code: "A", name: "아이보리", hex: "#EFE8D8" }, { code: "B", name: "버건디", hex: "#8E2B3A" }];
   p.draw["배색 띠"] = EXAMPLE_DRAW;
   p.secs["배색 띠"] = { round: true, odd: "RS" };

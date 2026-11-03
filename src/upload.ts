@@ -8,7 +8,7 @@ import { manualHandler } from "./dialogs";
 import { openEditor } from "./drawui";
 import { newDrawing } from "./drawing";
 import { applyDrawing, colorsInText, expand, mergeSections, mergeYarns, newPattern, str, toSections } from "./model";
-import { localGoodEnough, localParseLines, parseRange, resolveSizes, sizeOrder, toRanges } from "./parse";
+import { extractInfo, localGoodEnough, localParseLines, parseRange, resolveSizes, sizeOrder, toRanges } from "./parse";
 import { b64, blobB64, canvasBlob, extractPages, openPdf, renderWidth, sha256, textItems, type Pdf } from "./pdf";
 import { autoPick, findCharts, normSize, pageInfo, toLines, type PageInfo } from "./pdfgeom";
 import { STRUCTURE_SCHEMA, structurePrompt } from "./prompts";
@@ -194,6 +194,7 @@ export function openUpload(o: Opts) {
     let readNow: number[] = [];
     let pdfHash: string | undefined;
     let localNote = false;
+    let localText = "";
     const take = (res: AiResult) => {
       sections = mergeSections(sections, res.sections);
       if (!title && res.title) title = res.title;
@@ -209,6 +210,7 @@ export function openUpload(o: Opts) {
         const order = sizeOrder(text);
         const lines = text.split(/\r?\n/).map((t) => ({ t: size ? resolveSizes(t, size, order) : t, pg: null }));
         const local = localParseLines(lines, size);
+        localText = lines.map((x) => x.t).join("\n");
         const good = localGoodEnough(local, text);
         if (useClaude.checked || !good.ok) {
           if (!good.ok) say(`기기에서 다 읽지 못했어요: ${good.why}. Claude가 정리할게요.`);
@@ -230,6 +232,7 @@ export function openUpload(o: Opts) {
           say("기기에서 도안을 읽는 중…");
           const r = await readLocally(up.pdf, pg, size, up.info);
           local = r.sections;
+          localText = r.infoText;
           good = localGoodEnough(local, r.text);
         }
         const nLocal = local.reduce((a, x) => a + x.rows.length, 0);
@@ -277,7 +280,9 @@ export function openUpload(o: Opts) {
       readBtn.disabled = false; stopBtn.hidden = true;
     }
 
-    if (localNote) notes.unshift("기기에서 읽었어요 (Claude 안 씀). 틀린 단은 '이 단 서술 수정'으로 고치거나, 다음에 'Claude로 읽기'를 켜고 다시 올려 보세요.");
+    const appNote = localNote ? "기기에서 읽었어요 (Claude 안 씀). 틀린 단은 '이 단 서술 수정'으로 고치거나, 다음에 'Claude로 읽기'를 켜고 다시 올려 보세요." : "";
+    // 도안 정보: Claude가 정리한 notes + 기기에서 찾은 치수·실·바늘·게이지 줄
+    if (localText && (localNote || !notes.length)) { const li = extractInfo(localText, size); if (li) notes.push(li); }
 
     // PDF만 연결
     if (o.relink && target && up.pdfBlob && !sections.length) {
@@ -295,7 +300,8 @@ export function openUpload(o: Opts) {
       const old = new Map(target.rows.map((r) => [r.s + "#" + r.n, r]));
       for (const r of rows) { const o2 = old.get(r.s + "#" + r.n); if (o2?.x) r.x = o2.x; }
       Object.assign(target, { rows, secs, colors: mergeYarns(target.colors, colors), rev: target.rev + 1 });
-      if (notes.length) target.notes = [...new Set([target.notes, ...notes])].filter(Boolean).join("\n").slice(0, 900);
+      if (notes.length) target.info = mergeInfo(target.info, notes);
+      if (appNote) target.notes = appNote;
       if (size) target.size = size;
       target.readPages = [...new Set([...target.readPages, ...readNow])].sort((a, b) => a - b);
       if (up.pdfBlob && target.src !== "images") { await putFile(target.id, { type: "pdf", blob: up.pdfBlob }); target.src = "pdf"; target.srcPages = srcPages; target.pdfHash = pdfHash; forgetPdf(target.id); }
@@ -308,7 +314,7 @@ export function openUpload(o: Opts) {
     }
     const id = "p" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const { rows, secs } = expand(sections);
-    const p = newPattern({ id, name: name || str(title) || "새 도안", size, notes: notes.join("\n").slice(0, 900), rows, secs, colors, src, srcPages, readPages: readNow, pdfHash });
+    const p = newPattern({ id, name: name || str(title) || "새 도안", size, notes: appNote, info: mergeInfo("", notes), rows, secs, colors, src, srcPages, readPages: readNow, pdfHash });
     if (!p.rows.length) return say("단 정보를 찾지 못했어요.");
     p.gauges = await gaugesFrom(up.mode === "text" ? textIn.value : null, up.pdf, up.info);
     p.tab = p.rows[0].s;
@@ -363,6 +369,13 @@ export function openUpload(o: Opts) {
   }
 }
 
+/** 도안 정보 합치기: 줄 단위로 겹치지 않게 */
+function mergeInfo(base: string, add: string[]): string {
+  const out: string[] = [];
+  for (const l of [base, ...add].join("\n").split("\n").map((x) => x.trim()).filter(Boolean)) if (!out.includes(l)) out.push(l);
+  return out.join("\n").slice(0, 1500);
+}
+
 /** 기기에서 읽기: 쪽마다 텍스트 줄 → 사이즈 숫자 고르기 → 단 나누기. 게이지 쪽에 차트가 있으면 스와치 파트 */
 async function readLocally(pdf: Pdf, pages: number[], size: string, info: PageInfo[]) {
   const perPage: { n: number; lines: string[]; items: any[]; w: number }[] = [];
@@ -374,6 +387,13 @@ async function readLocally(pdf: Pdf, pages: number[], size: string, info: PageIn
   const order = sizeOrder(text);
   const lines = perPage.flatMap((x) => x.lines.map((t) => ({ t: size ? resolveSizes(t, size, order) : t, pg: x.n })));
   let sections = localParseLines(lines, size);
+  // 도안 정보: 고른 쪽 + 사이즈·게이지가 적힌 쪽 (치수·실·바늘은 보통 앞쪽에 따로 있다)
+  const infoPages = [...new Set([...info.filter((i) => i.gauge || i.sizes.size).map((i) => i.n).slice(0, 6), ...pages])].sort((a, b) => a - b);
+  const infoLines: string[] = [];
+  for (const n of infoPages) {
+    const pp = perPage.find((x) => x.n === n) || await (async () => { const t = await textItems(pdf, n); return { lines: toLines(t.items, t.w) }; })();
+    infoLines.push(...pp.lines); // 사이즈 숫자는 extractInfo에서 고른다
+  }
   const g = perPage.find((x) => info.find((i) => i.n === x.n)?.gauge);
   if (g && !sections.some((s) => /스와치|swatch/i.test(s.name))) {
     const ch = findCharts(g.items, g.w).sort((a, b) => b.nMax - a.nMax)[0];
@@ -388,7 +408,7 @@ async function readLocally(pdf: Pdf, pages: number[], size: string, info: PageIn
       ] }, ...sections];
     }
   }
-  return { sections, text };
+  return { sections, text, infoText: infoLines.join("\n") };
 }
 
 /** 도안 게이지 미리 채우기: 텍스트 도안이면 그 글, PDF면 게이지 문구가 있는 쪽 */

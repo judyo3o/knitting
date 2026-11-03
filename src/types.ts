@@ -30,7 +30,8 @@ export type Pattern = {
   id: string;
   name: string;
   size: string;
-  notes: string;
+  notes: string; // 앱이 남기는 안내 (어떻게 읽었는지 등)
+  info: string; // 도안 정보: 사이즈별 치수·여유분, 실·바늘, 게이지, 주의 사항 (단 목록과 따로)
   rows: Row[];
   secs: Record<string, SecInfo>;
   tab: string;

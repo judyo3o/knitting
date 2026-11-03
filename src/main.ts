@@ -79,7 +79,7 @@ export function render() {
   const s = currentTab(p);
   if (p.tab !== s) p.tab = s;
   const r = currentRow(p, s)!;
-  root.append(tabs(p, s), nowCard(p, r), tools(p, s), rowList(p, s), history(p), dangerZone(p));
+  root.append(tabs(p, s), nowCard(p, r), tools(p, s), infoCard(p), rowList(p, s), history(p), dangerZone(p));
   const prog = partProgress(p, s);
   const list = partRows(p, s);
   const isLast = list[list.length - 1] === r;
@@ -566,6 +566,26 @@ function tools(p: Pattern, s: string) {
   const gauge = h("button", { class: "btn ghost", type: "button", text: "게이지", on: { click: () => openGauge(p, render) } });
   const wake = h("button", { class: "btn ghost", type: "button", "aria-pressed": String(wantWake), text: wantWake ? "화면 켜두는 중" : "화면 켜두기", on: { click: () => setWake(!wantWake) } });
   return h("div", { class: "tools" }, form, p.example ? null : gauge, wake);
+}
+
+/** 도안 정보 (사이즈별 치수·실·바늘·게이지…) — 단 목록과 따로, 직접 고칠 수 있게 */
+function infoCard(p: Pattern) {
+  const lines = (p.info || "").split("\n").filter((l) => l.trim());
+  const edit = () => {
+    const ta = h("textarea", { rows: 10, value: p.info || "", placeholder: "예) L 사이즈: 가슴둘레 110cm\n실: 메리노 DK 6볼\n바늘: 4mm, 3.5mm", "aria-label": "도안 정보" });
+    const dl = dialog("도안 정보", [
+      h("p", { class: "hint", text: "사이즈별 치수·여유분, 실·바늘, 게이지, 주의 사항처럼 단이 아닌 정보를 적어 두는 곳이에요." }),
+      ta,
+      h("div", { class: "actions" },
+        h("button", { class: "btn primary", type: "button", text: "저장", on: { click: () => { p.info = ta.value.trim(); commit(p); dl.close(); render(); toast("도안 정보를 저장했어요."); } } }),
+        h("button", { class: "btn ghost", type: "button", text: "취소", on: { click: () => dl.close() } })),
+    ]);
+  };
+  const first = lines[0] ? " · " + (lines[0].length > 18 ? lines[0].slice(0, 18) + "…" : lines[0]) : "";
+  return h("details", { class: "sheet info" },
+    h("summary", { text: `도안 정보${first || " (없음)"}` }),
+    lines.length ? h("ul", { class: "info-list" }, ...lines.map((l) => h("li", { text: l }))) : h("p", { class: "notes", style: "padding:0 16px 8px", text: "사이즈 치수·실·바늘 같은 정보가 아직 없어요." }),
+    h("div", { class: "actions", style: "padding:0 16px 8px" }, h("button", { class: "btn ghost", type: "button", text: lines.length ? "정보 수정" : "정보 적기", on: { click: edit } })));
 }
 
 function rowList(p: Pattern, s: string) {

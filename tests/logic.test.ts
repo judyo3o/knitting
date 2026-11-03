@@ -434,3 +434,23 @@ describe("cast-on row and start side", () => {
     expect(sideOf(p, rows[2])).toBe("RS");
   });
 });
+
+describe("도안 정보", () => {
+  it("치수·실·바늘·게이지 줄만 모으고 단은 빼요", async () => {
+    const { extractInfo } = await import("../src/parse");
+    const t = ["L 사이즈: 가슴둘레 110cm(실제 가슴둘레보다 +20cm 여유 권장)", "사용 실: 메리노 DK 6볼", "바늘: 4mm 줄바늘", "게이지", "1단: 겉뜨기 (110코)", "뒷판", "게이지: 메리야스 22코 30단", "Using 3.00mm hook and CC, work 6dc into mr.", "바늘에 100코가 있습니다. 실을 자르고 코를 쉼코로 둡니다."].join("\n");
+    const info = extractInfo(t).split("\n");
+    expect(info).toEqual(["L 사이즈: 가슴둘레 110cm(실제 가슴둘레보다 +20cm 여유 권장)", "사용 실: 메리노 DK 6볼", "바늘: 4mm 줄바늘", "게이지: 메리야스 22코 30단"]);
+  });
+  it("사이즈를 고르면 내 사이즈 숫자만, 다른 사이즈 줄은 빼요", async () => {
+    const { extractInfo } = await import("../src/parse");
+    const t = ["사이즈 : S (M) L (XL) 2XL (3XL)", "가슴둘레 : 96 (104) 110 (1 0) 126 (136) cm", "S사이즈 [차트 p13]", "M사이즈: 소매 길이 44cm"].join("\n");
+    expect(extractInfo(t, "L")).toBe("사이즈 : L\n가슴둘레 : 118 cm");
+  });
+  it("옛 데이터의 notes는 도안 정보로 옮기고 앱 안내만 남겨요", async () => {
+    const { normalize } = await import("../src/model");
+    const p = normalize({ id: "x", name: "a", notes: "기기에서 읽었어요 (Claude 안 씀).\nL 사이즈: 가슴둘레 110cm" } as any);
+    expect(p.info).toBe("L 사이즈: 가슴둘레 110cm");
+    expect(p.notes).toBe("기기에서 읽었어요 (Claude 안 씀).");
+  });
+});

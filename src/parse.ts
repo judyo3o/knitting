@@ -173,6 +173,42 @@ export function localParseLines(lines: Line[], size = ""): AiSection[] {
   return secs.filter((s) => s.rows.length);
 }
 
+/** 도안 정보 줄 (사이즈별 치수·여유분, 실·바늘, 게이지, 재료) — 단 목록이 아니라 '도안 정보'로 따로 */
+const INFO_RE = /사이즈|가슴\s*둘레|품|총\s*장|기장|어깨\s*(?:너비|폭)|소매\s*(?:길이|기장)|진동|암홀|완성\s*(?:치수|크기)|실제\s*치수|여유|권장|실\s*[:：]|사용\s*실|바늘|게이지|부자재|단추|\b(?:finished|measurements?|chest|bust|ease|yarns?|needles?|hooks?|gauge|tension|notions)\b/i;
+export function extractInfo(text: string, size = "", max = 900): string {
+  const out: string[] = [];
+  let len = 0;
+  const order = sizeOrder(text);
+  const me = normS(size || "");
+  for (const raw of text.split(/\r?\n/)) {
+    let l = raw.replace(/\s+/g, " ").trim();
+    if (l.length < 4 || l.length > 180 || rowStart(l) || !INFO_RE.test(l)) continue;
+    if (/차트\s*[:：]?\s*p\.?\s*\d/i.test(l)) continue; // 차트 쪽 안내는 정보가 아님
+    // 정보 낱말로 시작하지 않는데 뜨는 지시가 섞인 줄은 단 서술이다
+    const lead = /^[\W\d]*(?:[A-C]\s+)?(?:사이즈|가슴|총\s*장|기장|어깨|소매|완성|실제|사용|실\s*[:：]|바늘|게이지|부자재|단추|finished|measurements?|sizes?|chest|bust|yarns?|needles?|hooks?|gauge|tension|notions)/i.test(l);
+    if (/코가\s*(?:있|남|됩)|(?:둡니다|줍니다|합니다|떠요|뜹니다)\.?\s*$/.test(l)) continue; // 단 서술 문장
+    if (!lead && !/\d\s*(?:cm|mm|코|단|g|m|볼|타래|ply|inch|in\b|")/i.test(l)) continue; // 머리말이 없으면 치수가 있는 줄만
+    if (!lead && /\b(?:work|fasten|sew|rep(?:eat)?|join|knit|purl|\d*(?:dc|sc|tr|hdc|ch|sl st)\b)|뜹니다|뜨세요|떠\s*주세요/i.test(l)) continue;
+    if (size && order.includes(me)) {
+      // 다른 사이즈 하나만 가리키는 줄("S사이즈 …")은 빼고, 사이즈 나열은 내 사이즈로
+      const one = l.match(/^(\d?XL|XXXL|XXL|XS|S|M|L)\s*사이즈/i);
+      if (one && normS(one[1]) !== me) continue;
+      l = l.replace(/(?<![\w’'])(?:(?:\d?XL|XXXL|XXL|XS|S|M|L)\b[\s()/,·]*){3,}/g, (m) => {
+        const list = m.split(/[\s()/,·]+/).filter((x) => SIZE_TOKEN.test(x)).map(normS);
+        return list.includes(me) ? me + (/\s$/.test(m) ? " " : "") : m;
+      });
+      // 글자가 깨져 "(1 8)"처럼 숫자가 갈라진 칸도 한 칸으로 세어 내 사이즈 숫자를 고른다
+      l = resolveSizes(l.replace(/\(\s*(\d+)\s+(\d+)\s*\)/g, "($1$2)"), size, order);
+    }
+    if (!/\d|[:：]/.test(l)) continue; // 제목만 있는 줄("게이지")은 빼고 값이 있는 줄만
+    if (out.includes(l)) continue;
+    if (len + l.length > max) break;
+    out.push(l);
+    len += l.length + 1;
+  }
+  return out.join("\n");
+}
+
 /** 내장 결과로 충분한가: 단이 충분하고 다른 단 참조가 없을 때 */
 export function localGoodEnough(secs: AiSection[], text: string): { ok: boolean; why: string } {
   const n = secs.reduce((s, x) => s + x.rows.length, 0);

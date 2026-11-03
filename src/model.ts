@@ -245,6 +245,7 @@ export function newPattern(init: Partial<Pattern> & { id: string; name: string }
   return {
     size: "",
     notes: "",
+    info: "",
     rows: [],
     secs: {},
     tab: "",
@@ -275,6 +276,13 @@ export function normalize(p: Partial<Pattern> & { id: string }): Pattern {
   if (!Array.isArray(out.readPages)) out.readPages = [];
   if (!Array.isArray(out.colors)) out.colors = [];
   if (!Array.isArray(out.gauges)) out.gauges = [];
+  if (typeof p.info !== "string") {
+    // 옛 데이터: notes에 도안 정보와 앱 안내가 섞여 있었다 → 앱 안내만 notes에 남김
+    const lines = String(out.notes || "").split("\n");
+    const app = (l: string) => /^기기에서 읽었어요|^예시 도안이에요/.test(l);
+    out.info = lines.filter((l) => l.trim() && !app(l)).join("\n");
+    out.notes = lines.filter(app).join("\n");
+  }
   for (const s of partNames(out)) {
     markStart(partRows(out, s));
     out.secs[s] = out.secs[s] || {};

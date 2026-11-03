@@ -25,7 +25,7 @@ function context(p: Pattern, r: Row): string {
     near(list[k + 1], "다음"),
     gaugeSummary(p) || "",
     colors,
-    p.notes ? `도안 메모: ${p.notes.slice(0, 600)}` : "",
+    p.info ? `도안 정보: ${p.info.slice(0, 800)}` : "",
   ].filter(Boolean).join("\n");
 }
 
