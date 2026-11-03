@@ -257,8 +257,10 @@ describe("gauge", () => {
     expect(myGauge({ label: "", pattern: null, before: { st: 1, rows: 1 }, after: null })).toEqual({ st: 1, rows: 1 });
   });
   it("finds gauges in pattern text", () => {
-    expect(findGauges("게이지: 20코 26단 메리야스뜨기 / 42코 30단 무늬뜨기 (10cm)")).toEqual([
-      { label: "메리야스뜨기", st: 18, rows: 23 }, { label: "무늬뜨기", st: 38, rows: 27 }]);
+    expect(findGauges("게이지 : 20코 26단 (5.5mm 바늘, 10 x 10cm 메리야스뜨기) 42코 30단 (5.5mm 바늘, 19 x 13cm 무늬게이지)")).toEqual([
+      { label: "메리야스", st: 18, rows: 23, needle: "5.5mm" },
+      { label: "무늬 (원문 42코 30단 / 19×13cm)", st: 22.1, rows: 23.1, needle: "5.5mm" }]);
+    expect(findGauges("Knitting tension: 22 sts and 30 rows = 10 cm in stockinette").map((g) => [g.st, g.rows])).toEqual([[22, 30]]);
   });
 });
 
@@ -296,5 +298,39 @@ describe("text lines", () => {
   it("joins same-height items left to right, drops axis numbers", () => {
     expect(toLines([t("겉11, DS", 110, 100, 40), t("1단(RS)", 40, 100.5, 30), t("2", 5, 100), t("2단(WS)", 40, 124, 30), t("안뜨기", 110, 124, 30)]))
       .toEqual(["1단(RS) 겉11, DS", "2단(WS) 안뜨기"]);
+  });
+});
+
+describe("real-world formats", () => {
+  it("English & crochet rows, counts, sizes", () => {
+    const secs = localParseLines([
+      { t: "★얼굴, 몸", pg: 1 }, { t: "1단: 사슬3개, 기둥코포함 한길긴뜨기12개", pg: 1 }, { t: "2단: 사슬1개, 짧은뜨기 1개씩(12개)", pg: 1 },
+      { t: "EARS (make 2 – worked in continuous spirals)", pg: 3 }, { t: "1st round: [1dc in next dc, inc in next dc] 3 times … 9dc.", pg: 3 },
+      { t: "Rnd 2: *K1, p1*; rep * to * around.", pg: 3 },
+    ]);
+    expect(secs.map((s) => s.name)).toEqual(["얼굴, 몸", "EARS"]);
+    expect(secs[0].rows[1].stitches).toBe("12코");
+    expect(secs[1].rows[0].stitches).toBe("9코");
+    expect(secs[1].rows[1].from).toBe(2);
+    const order = sizeOrder("SIZES - WOMEN’S XS (S, M, L, XL, 2XL, 3XL, 4XL)");
+    expect(order).toEqual(["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"]);
+    expect(resolveSizes("CO 46 (46, 46, 48, 48, 48, 48, 48) sts", "L", order)).toBe("CO 48 sts");
+    expect(resolveSizes("cast on 96-104-112-120-128-136 sts", "L", ["S", "M", "L", "XL", "2XL", "3XL"])).toBe("cast on 112 sts");
+    expect(localGoodEnough(secs, "Rep 2nd round once.").ok).toBe(false);
+  });
+  it("splits two-column pages", () => {
+    const L = (s: string, x: number, y: number) => t(s, x, y, s.length * 4);
+    const items = [0, 1, 2, 3, 4].flatMap((k) => [L(`${k + 1}단: 왼쪽 ${k}`, 40, 100 + k * 20), L(`오른쪽 ${k}`, 330, 100 + k * 20)]);
+    const lines = toLines(items, 595);
+    expect(lines.slice(0, 5).every((l) => l.includes("왼쪽"))).toBe(true);
+    expect(lines[5]).toBe("오른쪽 0");
+  });
+});
+
+describe("real-world fixes", () => {
+  it("keeps number lists in one chunk; skips non-part headings", () => {
+    expect(chunksOf("한길긴뜨기 1,1,1,2 순서 (45개)")).toEqual(["한길긴뜨기 1,1,1,2 순서 (45개)"]);
+    const secs = localParseLines([{ t: "SPECIAL ABBREVIATION", pg: 1 }, { t: "1st round: Inc once in each dc … 10dc.", pg: 1 }, { t: "HEAD", pg: 1 }, { t: "1st round: Inc once … 12dc.", pg: 1 }]);
+    expect(secs.map((s) => s.name)).toEqual(["HEAD"]);
   });
 });

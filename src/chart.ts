@@ -36,7 +36,12 @@ export const clearBitmaps = () => bmpCache.clear();
 export type ViewOpts = { n: number; side: Side; round: boolean; rowPx: number; below?: number; above?: number };
 
 /** 화살표가 단 번호를 가리지 않게: 바깥 경계에서 축 숫자 너머까지 (pt) */
-const axisInset = (c: Chart) => (c.axes.length > 1 ? Math.min(c.axes[0] - c.x0, c.x1 - c.axes[c.axes.length - 1]) * 2 + 3 : 4);
+/** 왼쪽·오른쪽 축 숫자 너머 (축이 그쪽에 없으면 작게) */
+const axisInset = (c: Chart): [number, number] => {
+  const mid = (c.x0 + c.x1) / 2;
+  const left = c.axes.filter((x) => x < mid), right = c.axes.filter((x) => x >= mid);
+  return [left.length ? (left[0] - c.x0) * 2 + 3 : 4, right.length ? (c.x1 - right[right.length - 1]) * 2 + 3 : 4];
+};
 
 /** 현재 단 주변(아래 3단 ~ 위 6단)을 잘라 크게, 띠·음영·화살표 */
 export function drawPdfRows(out: HTMLCanvasElement, bmp: Bitmap, o: ViewOpts): { chart: Chart | null; startX: "left" | "right" } {
@@ -60,7 +65,7 @@ export function drawPdfRows(out: HTMLCanvasElement, bmp: Bitmap, o: ViewOpts): {
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(bmp.canvas, sx, sy, sw, sh, 0, 0, out.width, out.height);
   const toY = (y: number) => (y - yTop) * k * dpr;
-  overlay(ctx, out.width, (n) => [toY(rowY(c, n) - h / 2), toY(rowY(c, n) + h / 2)], o, Math.max(o.n - below, c.nMin - 1), dpr, axisInset(c) * k * dpr);
+  overlay(ctx, out.width, (n) => [toY(rowY(c, n) - h / 2), toY(rowY(c, n) + h / 2)], o, Math.max(o.n - below, c.nMin - 1), dpr, axisInset(c).map((v) => v * k * dpr) as [number, number]);
   return { chart: c, startX: o.side === "RS" || o.round ? "right" : "left" };
 }
 
@@ -83,11 +88,11 @@ export function drawPdfFull(out: HTMLCanvasElement, bmp: Bitmap, o: ViewOpts, wi
   ctx.rect(c.x0 * f, 0, (c.x1 - c.x0) * f, out.height);
   ctx.clip();
   ctx.translate(c.x0 * f, 0);
-  overlay(ctx, (c.x1 - c.x0) * f, (n) => [(rowY(c, n) - h / 2) * f, (rowY(c, n) + h / 2) * f], o, c.nMin - 1, dpr, axisInset(c) * f);
+  overlay(ctx, (c.x1 - c.x0) * f, (n) => [(rowY(c, n) - h / 2) * f, (rowY(c, n) + h / 2) * f], o, c.nMin - 1, dpr, axisInset(c).map((v) => v * f) as [number, number]);
   ctx.restore();
 }
 
-function overlay(ctx: CanvasRenderingContext2D, w: number, band: (n: number) => [number, number], o: ViewOpts, fromN: number, dpr: number, inset = 4 * dpr) {
+function overlay(ctx: CanvasRenderingContext2D, w: number, band: (n: number) => [number, number], o: ViewOpts, fromN: number, dpr: number, inset: [number, number] = [4 * dpr, 4 * dpr]) {
   for (let n = Math.max(1, fromN); n < o.n; n++) {
     const [y0, y1] = band(n);
     ctx.fillStyle = DONE;
@@ -103,7 +108,7 @@ function overlay(ctx: CanvasRenderingContext2D, w: number, band: (n: number) => 
   const rs = o.side === "RS" || o.round;
   const mid = (y0 + y1) / 2;
   const s = Math.max(6 * dpr, Math.min((y1 - y0) * 0.45, 14 * dpr));
-  const x = rs ? w - inset - s * 1.2 : inset + s * 1.2;
+  const x = rs ? w - inset[1] - s * 1.2 : inset[0] + s * 1.2;
   ctx.fillStyle = MARK_LINE;
   ctx.beginPath();
   if (rs) {

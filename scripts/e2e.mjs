@@ -173,7 +173,7 @@ assert.match(await page.textContent(".chip.dir"), /왼쪽에서 오른쪽/);
 await shot("6-back-row60");
 
 step("게이지: PDF에서 미리 채움 + 세탁 후 입력 → 비교");
-assert.match(await page.textContent(".gauge-line"), /도안 20코 26단|도안 게이지\(메리야스뜨기\) 20코 26단/);
+assert.match(await page.textContent(".gauge-line"), /도안 게이지\(메리야스\) 20코 26단/);
 await page.click(".gauge-line");
 await page.fill(".gauge-set >> nth=0 >> input[aria-label='세탁 후 콧수']", "20");
 await page.fill(".gauge-set >> nth=0 >> input[aria-label='세탁 후 단수']", "23");

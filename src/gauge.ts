@@ -44,17 +44,37 @@ export const rowsToCm = (n: number, g: Gauge) => r1((n / g.rows) * 10);
 export const cmToSt = (cm: number, g: Gauge) => Math.round((cm * g.st) / 10);
 export const cmToRows = (cm: number, g: Gauge) => Math.round((cm * g.rows) / 10);
 
-/** 도안 텍스트에서 게이지 찾기: "20코 26단 메리야스", "무늬뜨기 38코 x 27단" */
-export function findGauges(text: string): { label: string; st: number; rows: number }[] {
-  const out: { label: string; st: number; rows: number }[] = [];
-  const re = /(?:([가-힣A-Za-z]{2,10}(?:뜨기)?)\s*[:：]?\s*)?(\d{1,3})\s*코\s*[x×X*]?\s*(\d{1,3})\s*단(?:\s*\(?\s*([가-힣]{2,10}(?:뜨기)?)\s*\)?)?/g;
-  for (const m of text.matchAll(re)) {
-    const st = +m[2], rows = +m[3];
-    if (st < 5 || rows < 5 || st > 80 || rows > 80) continue;
-    let label = (m[4] || m[1] || "").replace(/^(게이지|gauge)$/i, "");
-    if (/게이지|사이즈|기초코/.test(label)) label = "";
+/**
+ * 도안 텍스트에서 게이지 찾기. "20코 26단 (5.5mm 바늘, 10 x 10cm 메리야스뜨기)",
+ * "42코 30단 (5.5mm, 19 x 13cm 무늬게이지)", "22 sts and 30 rows = 10 cm" 등.
+ * 잰 크기가 10cm가 아니면 10cm 기준으로 바꾼다.
+ */
+export function findGauges(text: string): { label: string; st: number; rows: number; needle?: string }[] {
+  const out: { label: string; st: number; rows: number; needle?: string }[] = [];
+  const t = text.replace(/\s+/g, " ");
+  const re = /(\d(?: ?\d){0,2}(?:[.,]\d)?)\s*(?:코|sts?|stitches)\s*(?:[x×X*,/]|and)?\s*(\d(?: ?\d){0,2}(?:[.,]\d)?)\s*(?:단|rows?|rounds?|rnds?)/gi;
+  for (const m of t.matchAll(re)) {
+    m[1] = m[1].replace(/ /g, ""); m[2] = m[2].replace(/ /g, "");
+    let st = parseFloat(m[1].replace(",", ".")), rows = parseFloat(m[2].replace(",", "."));
+    const after = t.slice(m.index! + m[0].length, m.index! + m[0].length + 90);
+    const before = t.slice(Math.max(0, m.index! - 30), m.index!);
+    const ctx = (after.match(/^\s*[(\[]([^)\]]{0,80})[)\]]/) || [, after.slice(0, 90)])[1] as string;
+    const size = ctx.match(/(\d+(?:[.,]\d+)?)\s*[x×X*]\s*(\d+(?:[.,]\d+)?)\s*cm/i) || (before + ctx).match(/=\s*(\d+(?:[.,]\d+)?)\s*(?:x\s*(\d+(?:[.,]\d+)?)\s*)?cm/i);
+    if (size) {
+      const w = parseFloat(size[1].replace(",", ".")), h = parseFloat((size[2] || size[1]).replace(",", "."));
+      if (w > 0 && h > 0) { st = (st * 10) / w; rows = (rows * 10) / h; }
+    } else if (/(\d+)\s*in(?:ch)?/i.test(ctx)) {
+      const inch = parseFloat(ctx.match(/(\d+)\s*in/i)![1]);
+      st = (st * 10) / (inch * 2.54); rows = (rows * 10) / (inch * 2.54);
+    }
+    st = Math.round(st * 10) / 10; rows = Math.round(rows * 10) / 10;
+    if (st < 5 || rows < 5 || st > 60 || rows > 80) continue;
     if (out.some((g) => g.st === st && g.rows === rows)) continue;
-    out.push({ label: label || (out.length ? `게이지 ${out.length + 1}` : "메리야스"), st, rows });
+    const needle = (ctx.match(/(\d(?:[.,]\d{1,2})?)\s*mm/i) || before.match(/(\d(?:[.,]\d{1,2})?)\s*mm/i) || [])[1];
+    const word = (ctx + " " + before).match(/(메리야스|무늬|가터|고무|멍석|배색|stockinette|stocking|texture pattern|pattern|garter|ribbing|rib|colou?rwork|moss|seed)/i);
+    let label = word ? word[1].replace(/stocking$/i, "stockinette") : out.length ? `게이지 ${out.length + 1}` : "메리야스";
+    if (size && !/^10\s*[x×]\s*10/.test(size[0].replace(/\s/g, ""))) label += ` (원문 ${m[1]}코 ${m[2]}단 / ${size[1]}×${size[2] || size[1]}cm)`;
+    out.push({ label, st, rows, ...(needle ? { needle: needle.replace(",", ".") + "mm" } : {}) });
   }
   return out;
 }

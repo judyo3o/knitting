@@ -21,7 +21,9 @@ export function splitTop(text: string): string[] {
     const c = text[i];
     if (OPEN.includes(c)) depth++;
     else if (CLOSE.includes(c)) depth = Math.max(0, depth - 1);
-    if (depth === 0 && (c === "," || c === "，" || c === "\n" || c === "、")) {
+    // "1,1,1,2"처럼 숫자 사이 쉼표(띄어쓰기 없음)는 나누지 않는다
+    const numList = c === "," && /\d/.test(text[i - 1] || "") && /\d/.test(text[i + 1] || "");
+    if (depth === 0 && !numList && (c === "," || c === "，" || c === "\n" || c === "、")) {
       push();
       continue;
     }
