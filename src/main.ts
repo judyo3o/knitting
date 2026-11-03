@@ -1,7 +1,8 @@
 import "./style.css";
 import { chunksOf, stitchesThrough } from "./chunks";
 import { MAX_TOKENS } from "./config";
-import { callAi, errCopy, hasKey } from "./ai";
+import { callAi, canCallDirect, errCopy } from "./ai";
+import { inArtifact } from "./artifact";
 import { chartBitmap, drawGrid, drawPdfFull, drawPdfRows, explainStrip, hitCell, legendCanvas, sampleRowColors, yarnHex } from "./chart";
 import { getFile, putFile } from "./db";
 import { getCell, longestFloat, rowColors } from "./drawing";
@@ -11,7 +12,7 @@ import {
 import { blobB64, canvasBlob } from "./pdf";
 import { findLegend, LEGEND_RE } from "./pdfgeom";
 import { explainCheck, explainDraft, explainHead } from "./prompts";
-import { active, commit, exportJson, importJson, load, pdfOf, removePattern, saveNow, setActive, startAutosave, state } from "./store";
+import { active, commit, exportJson, importJson, load, pdfOf, removePattern, saveNow, setActive, startAutosave, state, syncRemote } from "./store";
 import { openSettings, manualHandler, openViewer } from "./dialogs";
 import { openUpload } from "./upload";
 import { openEditor } from "./drawui";
@@ -132,8 +133,8 @@ function nowCard(p: Pattern, r: Row) {
     h("div", { class: "now-head" },
       h("div", { class: "chips" },
         h("span", { class: "chip", text: s }),
-        h("span", { class: "chip side", text: round ? "원통 RS" : side === "RS" ? "겉면 RS" : "안면 WS" }),
-        h("span", { class: "chip dir", text: directionText(p, r) }),
+        r.castOn ? h("span", { class: "chip side", text: "코잡기 단" }) : h("span", { class: "chip side", text: round ? "원통 RS" : side === "RS" ? "겉면 RS" : "안면 WS" }),
+        r.castOn ? null : h("span", { class: "chip dir", text: directionText(p, r) }),
         fin && h("span", { class: "chip fin", text: "이 파트 완료 ✓" }),
       ),
       h("span", { class: "prog", text: `파트 ${k + 1}/${list.length}` }),
@@ -148,6 +149,10 @@ function nowCard(p: Pattern, r: Row) {
   fillYarns(p, r, yarnBox);
   card.append(chartArea(p, r, side, round, yarnBox));
   card.append(narrative(p, r));
+  if (r.castOn) {
+    const nx = list[k + 1];
+    card.append(h("p", { class: "span-note", text: `코잡기 자체가 1단이에요. 코를 잡았으면 '다음 단'을 누르고 ${nx ? `${nx.n}단(${sideOf(p, nx) === "WS" ? "안면" : "겉면"})` : "다음 단"}부터 떠요.` }));
+  }
   if (r.span) card.append(h("p", { class: "span-note", text: `${r.span[0]}~${r.span[1]}단 공통 지시예요.` }));
   if (r.x) card.append(h("div", { class: "explain" }, h("small", { text: "차트를 읽어 풀어쓴 내용 · 차트와 꼭 대조해 보세요" }), r.x));
   card.append(rowActions(p, r, side, round));
@@ -492,6 +497,7 @@ function rowActions(p: Pattern, r: Row, side: "RS" | "WS", round: boolean) {
   }
   if (r.pg && p.src && p.src !== "text") box.append(h("button", { class: "btn ghost", type: "button", text: p.src === "pdf" ? `원본 p${r.pg} 보기` : `원본 사진 ${r.pg} 보기`, on: { click: () => openViewer(p, r.pg!) } }));
   if (page && p.src === "pdf") box.append(h("button", { class: "btn ghost", type: "button", text: `차트 p${page} 원본`, on: { click: () => openViewer(p, page) } }));
+  if (inArtifact && state.ai.provider === "artifact") box.append(h("button", { class: "btn", type: "button", text: "이 단 물어보기", on: { click: async () => (await import("./chat")).openChat(p, r) } }));
   box.append(h("button", { class: "btn ghost", type: "button", text: "이 단 서술 수정", on: { click: () => { view.editing = true; render(); } } }));
   return box;
 }
@@ -515,7 +521,7 @@ async function explainRow(p: Pattern, r: Row, side: "RS" | "WS", round: boolean,
     const head = explainHead(r.n, side, round, hasLegend, p.colors);
     const draftQ = explainDraft(p.colors.length > 0);
     let out: string;
-    if (!hasKey(state.ai)) {
+    if (!canCallDirect(state.ai)) {
       out = await callAi(state.ai, { parts: [...parts, { kind: "text", text: head + "\n" + draftQ + "\n그다음 " + explainCheck("(방금 쓴 초안)") }], maxTokens: MAX_TOKENS.explain },
         { manual: manualHandler, label: `${r.s} ${r.n}단 차트 풀기` });
     } else {
@@ -689,6 +695,8 @@ document.addEventListener("visibilitychange", () => { if (wantWake && document.v
 (async () => {
   await load();
   render();
+  // 아티팩트: 다른 기기에서 뜬 기록까지 불러온다
+  syncRemote().then((changed) => changed && render());
   startAutosave(() => renderMeta(active()));
   // 저장 공간을 브라우저가 함부로 비우지 않게
   (navigator.storage as any)?.persist?.().catch(() => {});

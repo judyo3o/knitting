@@ -1,5 +1,5 @@
 /** 이미지로 시작: 자르기 상자 · 콧수/단수 · 보기(원본/원본+격자/격자) · 팔레트 → 배색 격자 */
-import { gridFromImage, quantize, rowsForWidth, getCell } from "./drawing";
+import { detectGrid, gridFromImage, quantize, quantizeAuto, rowsForWidth, getCell } from "./drawing";
 import { yarnHex } from "./chart";
 import { h, toast } from "./ui";
 import type { Drawing, Yarn } from "./types";
@@ -25,7 +25,7 @@ export function openImageImport(o: { w?: number; h?: number; start?: number; gau
     const wIn = h("input", { type: "number", min: 1, max: 400, value: String(W), "aria-label": "가로 콧수" });
     const hIn = h("input", { type: "number", min: 1, max: 400, value: String(H), "aria-label": "세로 단수" });
     const ratio = h("input", { type: "checkbox", checked: keepRatio, "aria-label": "비율 유지" });
-    const kSel = h("select", { "aria-label": "색 수" }, ...[2, 3, 4, 5, 6, 8].map((k) => new Option(`${k}색`, String(k), false, k === Math.max(2, colors.length || 2))));
+    const kSel = h("select", { "aria-label": "색 수" }, new Option("색 수 자동", "auto", false, true), ...[2, 3, 4, 5, 6, 8].map((k) => new Option(`${k}색`, String(k))));
     const zoomSel = h("select", { "aria-label": "확대" }, ...[["0.5", "50%"], ["0.75", "75%"], ["1", "맞춤"], ["1.5", "150%"], ["2", "200%"], ["3", "300%"]].map(([v, t]) => new Option(t, v, false, v === "1")));
     const pal = h("div", { class: "pal" });
     const viewBtns: Record<View, HTMLButtonElement> = {
@@ -42,6 +42,8 @@ export function openImageImport(o: { w?: number; h?: number; start?: number; gau
         h("span", { class: "sep" }),
         h("label", {}, "↔ 가로 ", wIn, "코"), h("label", {}, "↕ 세로 ", hIn, "단"),
         h("label", { title: "게이지(없으면 정사각형)를 지켜 세로 단수를 맞춰요" }, ratio, "비율 유지"),
+        h("span", { class: "sep" }),
+        h("button", { class: "btn", type: "button", text: "▦ 격자 자동 찾기", on: { click: () => findGrid() } }),
         h("span", { class: "sep" }),
         viewBtns.image, viewBtns.overlay, viewBtns.grid,
         h("span", { class: "sep" }),
@@ -83,7 +85,8 @@ export function openImageImport(o: { w?: number; h?: number; start?: number; gau
         data = ctx.getImageData(0, 0, img.width, img.height).data;
         crop = { x: 0, y: 0, w: img.width, h: img.height };
         if (keepRatio) { H = rowsForWidth(W, crop.w, crop.h, o.gauge); hIn.value = String(H); }
-        autoPalette();
+        // 차트 사진이면 격자를 찾아 콧수·단수·범위를 자동으로
+        if (!findGrid(true)) autoPalette();
       } catch {
         toast("이미지를 열지 못했어요.");
       }
@@ -94,12 +97,36 @@ export function openImageImport(o: { w?: number; h?: number; start?: number; gau
       const i = (yi * img.width + xi) * 4;
       return [data[i], data[i + 1], data[i + 2]];
     };
+    /** 사진 속 차트 격자 찾기 → 자르기 상자·가로 콧수·세로 단수 */
+    function findGrid(quiet = false): boolean {
+      if (!img || !data) return false;
+      const lumAt = (x: number, y: number) => {
+        const [r, g, b] = px(x, y);
+        return 0.3 * r + 0.59 * g + 0.11 * b;
+      };
+      // 지금 자르기 상자 안에서 찾는다 (처음엔 사진 전체)
+      const g = detectGrid((x, y) => lumAt(crop.x + x, crop.y + y), Math.round(crop.w), Math.round(crop.h));
+      if (!g || g.cols > 400 || g.rows > 400) {
+        if (!quiet) toast("격자를 찾지 못했어요. 차트 부분만 자르기 상자로 감싼 뒤 다시 눌러 보거나 콧수·단수를 직접 넣어 주세요.", 4200);
+        return false;
+      }
+      crop = { x: crop.x + g.x, y: crop.y + g.y, w: g.w, h: g.h };
+      W = g.cols; H = g.rows;
+      wIn.value = String(W); hIn.value = String(H);
+      keepRatio = false; ratio.checked = false;
+      view = "overlay";
+      autoPalette();
+      toast(`격자를 찾았어요: 가로 ${W}코 × 세로 ${H}단. 칸이 어긋나면 자르기 상자를 맞추세요.`, 3800);
+      return true;
+    }
+
     function autoPalette() {
       if (!img) return;
       const samples: [number, number, number][] = [];
       const step = Math.max(1, Math.floor(Math.sqrt((crop.w * crop.h) / 6000)));
       for (let y = crop.y; y < crop.y + crop.h; y += step) for (let x = crop.x; x < crop.x + crop.w; x += step) samples.push(px(x, y));
-      colors = quantize(samples, +kSel.value).map((hex, i) => ({ code: CODES[i], name: null, hex }));
+      const pal = kSel.value === "auto" ? quantizeAuto(samples) : quantize(samples, +kSel.value);
+      colors = pal.map((hex, i) => ({ code: CODES[i], name: null, hex }));
       update();
     }
     function addColor() {

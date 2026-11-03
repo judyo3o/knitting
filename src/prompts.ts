@@ -8,6 +8,7 @@ export type StructureArgs = {
   known?: string[]; // 이미 읽은 파트 이름
   imageOffset?: number; // 사진이 전체 중 몇 번째부터인지 (0-based)
   text?: string;
+  pageImages?: boolean; // PDF 쪽을 이미지(쪽마다 위·아래 반)로 보낼 때
 };
 
 export function structurePrompt(a: StructureArgs): string {
@@ -15,7 +16,9 @@ export function structurePrompt(a: StructureArgs): string {
   if (a.kind === "pdf") {
     const pg = a.pages || [];
     const map = pg.map((n, i) => `${i + 1}쪽=원본 ${n}쪽`).join(", ");
-    src = `첨부 문서는 뜨개 도안 PDF의 ${pg.join(", ")} 페이지야.\n(이 페이지들만 잘라낸 PDF라서 첨부 문서의 ${map}이야. page·chart 번호는 모두 원본 기준으로 써.)`;
+    src = a.pageImages
+      ? `첨부 이미지는 뜨개 도안 PDF의 ${pg.join(", ")} 페이지야. 쪽마다 위쪽 절반, 아래쪽 절반 두 장으로 잘라 순서대로 붙였어 (겹치는 줄은 한 번만 읽어). page·chart 번호는 원본 PDF 기준으로 써.`
+      : `첨부 문서는 뜨개 도안 PDF의 ${pg.join(", ")} 페이지야.\n(이 페이지들만 잘라낸 PDF라서 첨부 문서의 ${map}이야. page·chart 번호는 모두 원본 기준으로 써.)`;
   } else if (a.kind === "images") {
     src = "첨부 이미지는 뜨개 도안 사진이야 (순서대로).";
     if (a.imageOffset) src += `\n(이 사진들은 전체 중 ${a.imageOffset + 1}번째부터야. page 번호는 ${a.imageOffset + 1}부터 세.)`;

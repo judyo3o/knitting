@@ -1,5 +1,6 @@
 /** §1-1 도안 올리기 · §1-2 Claude로 구조화 (배치·병합·캐시) */
-import { AiError, callAi, errCopy, hasKey, parseJson } from "./ai";
+import { AiError, callAi, canCallDirect, errCopy, hasKey, parseJson } from "./ai";
+import { inArtifact, sampleLimits } from "./artifact";
 import type { Part } from "./anthropicCall";
 import { MAX_BODY_BYTES, MAX_TOKENS, PAGES_PER_BATCH, PROMPT_VERSION } from "./config";
 import { cacheGet, cacheSet, putFile } from "./db";
@@ -46,6 +47,7 @@ export function openUpload(o: Opts) {
   const dH = h("input", { type: "number", min: 1, max: 400, value: "20", "aria-label": "단수" });
   const progress = h("div", { class: "progress", hidden: true });
   const readBtn = h("button", { class: "btn primary", type: "button", text: o.relink ? "PDF 연결" : "도안 읽기" });
+  // 사진 고르면 "도안으로 읽기"로 (배색 차트로 읽기와 구분)
   const stopBtn = h("button", { class: "btn", type: "button", text: "중지", hidden: true, on: { click: () => ctl?.abort() } });
   const retryBtn = h("button", { class: "btn", type: "button", text: "다시 시도", hidden: true });
   const say = (t: string) => { progress.hidden = false; progress.textContent = t; };
@@ -72,8 +74,8 @@ export function openUpload(o: Opts) {
   };
   const useClaude = h("input", { type: "checkbox" });
   const aiNote = h("div", { class: "hint", style: "display:flex;flex-direction:column;gap:4px" },
-    h("span", { text: "글자가 있는 PDF와 텍스트 도안은 이 기기에서 바로 읽어요. 사진·스캔 PDF나 '1단과 동일' 같은 지시가 있으면 Claude가 읽어요" + (hasKey(state.ai) ? " (내 API 키)." : " (키가 없으면 claude.ai 채팅에 복사·붙여넣기 — ⚙ 설정에서 키를 넣을 수 있어요).") }),
-    h("label", { style: "display:flex;gap:6px;align-items:center" }, useClaude, "Claude로 정확하게 읽기 (사이즈별 숫자·반복 지시까지 풀어 써요)"));
+    h("span", { text: "글자가 있는 PDF와 텍스트 도안은 이 기기에서 바로 읽어요. 사진·스캔 PDF나 '1단과 동일' 같은 지시가 있으면 Claude가 읽어요" + (state.ai.provider === "artifact" && inArtifact ? " (이 아티팩트를 연 사람의 Claude, 처음에 허용을 물어봐요)." : hasKey(state.ai) ? " (내 API 키)." : " (키가 없으면 claude.ai 채팅에 복사·붙여넣기 — ⚙ 설정에서 키를 넣을 수 있어요).") }),
+    h("label", { style: "display:flex;gap:6px;align-items:center" }, useClaude, "Claude로 읽기 (사이즈별 숫자·반복 지시까지 풀어 써요)"));
 
   const panel = h("main", { id: "uploadView" },
     h("section", { class: "panel" },
@@ -122,6 +124,11 @@ export function openUpload(o: Opts) {
       up.pdf = null; up.pdfBlob = null; pdfPick.hidden = true;
       up.images = files.filter((f) => f.type.startsWith("image/"));
       up.images.forEach((f, k) => fileList.append(h("li", { text: `🖼 ${k + 1}. ${f.name}` })));
+      // 사진은 서술 도안일 수도, 배색 차트일 수도 있어서 둘 다 고를 수 있게
+      if (up.images.length && !target)
+        fileList.append(h("li", { class: "actions", style: "margin-top:6px" },
+          h("span", { class: "hint", text: "배색 차트 사진이면:" }),
+          h("button", { class: "btn", type: "button", text: "배색 차트로 읽기 (사진 → 격자)", on: { click: () => startDrawing(str(nameIn.value) || up.images[0].name.replace(/\.[^.]+$/, ""), up.images[0]) } })));
       if (!up.images.length) fileList.append(h("li", { text: "사진(JPG·PNG)이나 PDF만 올릴 수 있어요." }));
     }
   }
@@ -236,11 +243,12 @@ export function openUpload(o: Opts) {
           const batches: number[][] = [];
           for (let k = 0; k < pg.length; k += PAGES_PER_BATCH) batches.push(pg.slice(k, k + PAGES_PER_BATCH));
           for (let bi = 0; bi < batches.length; bi++) {
-            for (const part of await sizedParts(up.pdfBlob, up.pdf, batches[bi])) {
+            const asImages = state.ai.provider === "artifact" && inArtifact;
+            for (const part of asImages ? await imageParts(up.pdf, batches[bi]) : await sizedParts(up.pdfBlob, up.pdf, batches[bi])) {
               say(`${why}Claude가 ${part.pages.join(", ")}쪽을 읽는 중… (${bi + 1}/${batches.length}묶음)\n묶음마다 1~2분 걸릴 수 있어요. 같은 페이지는 다시 읽지 않아요.`);
               const known = [...new Set([...(target ? target.rows.map((r) => r.s) : []), ...sections.map((s) => s.name)])];
-              const prompt = structurePrompt({ kind: "pdf", pages: part.pages, size, known });
-              take(await structure([...part.parts, { kind: "text", text: prompt }], `pdf:${pdfHash}:${part.pages.join(",")}:${normSize(size)}`, `${part.pages.join(", ")}쪽 읽기`));
+              const prompt = structurePrompt({ kind: "pdf", pages: part.pages, size, known, pageImages: asImages });
+              take(await structure([...part.parts, { kind: "text", text: prompt }], `pdf${asImages ? "img" : ""}:${pdfHash}:${part.pages.join(",")}:${normSize(size)}`, `${part.pages.join(", ")}쪽 읽기`));
             }
           }
         }
@@ -269,7 +277,7 @@ export function openUpload(o: Opts) {
       readBtn.disabled = false; stopBtn.hidden = true;
     }
 
-    if (localNote) notes.unshift("기기에서 읽었어요 (Claude 안 씀). 틀린 단은 '이 단 서술 수정'으로 고치거나, 다음에 'Claude로 정확하게 읽기'를 켜고 다시 올려 보세요.");
+    if (localNote) notes.unshift("기기에서 읽었어요 (Claude 안 씀). 틀린 단은 '이 단 서술 수정'으로 고치거나, 다음에 'Claude로 읽기'를 켜고 다시 올려 보세요.");
 
     // PDF만 연결
     if (o.relink && target && up.pdfBlob && !sections.length) {
@@ -321,7 +329,7 @@ export function openUpload(o: Opts) {
         h("p", { text: `${why}. 기기에서 ${n}줄을 읽었어요.` }),
         h("p", { class: "hint", text: "그대로 시작하면 틀린 단은 '이 단 서술 수정'으로 고칠 수 있어요. Claude로 읽으면 사이즈별 숫자와 반복 지시까지 풀어 써요." }),
         h("div", { class: "actions" },
-          h("button", { class: "btn primary", type: "button", text: hasKey(state.ai) ? "Claude로 정확하게 (내 키)" : "Claude로 정확하게 (claude.ai 복사·붙여넣기)", on: { click: () => { v = false; dl.close(); } } }),
+          h("button", { class: "btn primary", type: "button", text: canCallDirect(state.ai) ? "Claude로 읽기" : "Claude로 읽기 (claude.ai 복사·붙여넣기)", on: { click: () => { v = false; dl.close(); } } }),
           h("button", { class: "btn", type: "button", text: "기기에서 읽은 대로 시작", on: { click: () => { v = true; dl.close(); } } })),
       ], { onClose: () => res(v) });
     });
@@ -388,6 +396,31 @@ async function gaugesFrom(text: string | null, pdf: Pdf | null, info: PageInfo[]
   let src = text || "";
   if (!src && pdf) for (const pi of info.filter((x) => x.gauge).slice(0, 2)) src += " " + (await textItems(pdf, pi.n)).items.map((i) => i.str).join(" ");
   return findGauges(src).map((g) => ({ label: g.label, needle: g.needle, pattern: { st: g.st, rows: g.rows }, before: null, after: null }));
+}
+
+/** 아티팩트의 Claude는 PDF를 못 받아서: 쪽마다 위·아래 반씩 이미지로 (한 번에 보낼 수 있는 장수에 맞춰 나눔) */
+async function imageParts(pdf: Pdf, pages: number[]): Promise<{ pages: number[]; parts: Part[] }[]> {
+  const lim = await sampleLimits();
+  if (!lim || !lim.maxImages) throw new AiError("not_granted");
+  const per = Math.max(1, Math.min(4, Math.floor(lim.maxImages / 2)));
+  const out: { pages: number[]; parts: Part[] }[] = [];
+  for (let k = 0; k < pages.length; k += per) {
+    const grp = pages.slice(k, k + per);
+    const parts: Part[] = [];
+    for (const n of grp) {
+      const c = await renderWidth(pdf, n, 1500);
+      const ov = Math.round(c.height * 0.04);
+      for (const [y0, y1] of [[0, c.height / 2 + ov], [c.height / 2 - ov, c.height]]) {
+        const t = document.createElement("canvas");
+        t.width = c.width;
+        t.height = Math.round(y1 - y0);
+        t.getContext("2d")!.drawImage(c, 0, y0, c.width, t.height, 0, 0, c.width, t.height);
+        parts.push({ kind: "image", media: "image/jpeg", b64: await blobB64(await canvasBlob(t, "image/jpeg", 0.88)) });
+      }
+    }
+    out.push({ pages: grp, parts });
+  }
+  return out;
 }
 
 /** 배치를 본문 한도 안으로: 너무 크면 쪽을 나누고, 한 쪽도 크면 그 쪽은 이미지로 */

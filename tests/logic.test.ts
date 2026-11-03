@@ -392,3 +392,45 @@ describe("written swatch", () => {
     expect(merged[0].rows[1]).toMatchObject({ from: 2, to: 30, stitches: "30코" });
   });
 });
+
+import { detectGrid } from "../src/drawing";
+describe("photo grid detection", () => {
+  it("finds cell count and area of a chart with margins", () => {
+    // 여백 30px, 칸 11.3px, 24코 × 18단, 칸 색은 두 가지 무늬, 1px 회색 격자선
+    const cw = 11.3, cols = 24, rows = 18, ox = 30, oy = 22;
+    const W = Math.round(ox * 2 + cols * cw), H = Math.round(oy * 2 + rows * cw);
+    const lum = (x: number, y: number) => {
+      const gx = (x - ox) / cw, gy = (y - oy) / cw;
+      if (gx < 0 || gy < 0 || gx >= cols || gy >= rows) return 250; // 여백
+      if (gx % 1 < 1 / cw || gy % 1 < 1 / cw) return 120; // 격자선
+      return (Math.floor(gx) * 7 + Math.floor(gy) * 3) % 5 < 2 ? 40 : 235;
+    };
+    const g = detectGrid(lum, W, H)!;
+    expect(g.cols).toBe(cols);
+    expect(g.rows).toBe(rows);
+    expect(Math.abs(g.x - ox)).toBeLessThan(3);
+    expect(Math.abs(g.w - cols * cw)).toBeLessThan(cw);
+  });
+});
+
+import { quantizeAuto } from "../src/drawing";
+describe("auto color count", () => {
+  it("finds 3 colors (red, blue, white) and 2 for two-tone", () => {
+    const n = (c: [number, number, number], k: number) => Array.from({ length: k }, (_, i) => [c[0] + (i % 7) - 3, c[1] + (i % 5) - 2, c[2] + (i % 3) - 1] as [number, number, number]);
+    expect(quantizeAuto([...n([245, 245, 245], 300), ...n([178, 58, 72], 120), ...n([47, 93, 138], 90)])).toHaveLength(3);
+    expect(quantizeAuto([...n([245, 245, 245], 300), ...n([20, 22, 35], 200)])).toHaveLength(2);
+  });
+});
+
+describe("cast-on row and start side", () => {
+  it("코잡기가 1단 + 2단 안면부터 → row1 cast-on, row2 WS, odd rows RS", () => {
+    const { rows, secs } = expand([{ name: "스와치", rows: [
+      { from: 1, to: 1, text: "◈ 코잡기가 1단이에요. 2단은 안면에서 시작해요." }, { from: 2, to: 31, text: "차트대로" }] }]);
+    expect(rows[0].castOn).toBe(true);
+    expect(rows[1].side).toBe("WS");
+    expect(secs["스와치"].odd).toBe("RS");
+    const p = newPattern({ id: "x", name: "x", rows, secs });
+    expect(sideOf(p, rows[1])).toBe("WS");
+    expect(sideOf(p, rows[2])).toBe("RS");
+  });
+});

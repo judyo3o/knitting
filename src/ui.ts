@@ -49,7 +49,19 @@ export const fmtShort = (t: number) => {
 /** 오늘이면 시각만 */
 export const fmtSmart = (t: number) => (new Date(t).toDateString() === new Date().toDateString() ? fmtTime(t) : fmtShort(t));
 
-export function download(name: string, data: Blob) {
+export async function download(name: string, data: Blob) {
+  // 아티팩트에선 일반 다운로드 링크가 막혀 있어 downloads 기능으로 (보는 사람이 확인)
+  const { getDownloads, inArtifact } = await import("./artifact");
+  if (inArtifact) {
+    const d = await getDownloads();
+    if (!d) return toast("이 화면에서는 파일을 받을 수 없어요.");
+    try {
+      await d.save({ filename: name, data });
+    } catch {
+      /* 보는 사람이 취소 */
+    }
+    return;
+  }
   const url = URL.createObjectURL(data);
   const a = h("a", { href: url, download: name });
   document.body.append(a);
@@ -77,4 +89,17 @@ export function dialog(title: string, body: Node[], opts: { onClose?: () => void
   document.body.append(wrap);
   (box.querySelector("button, input, textarea, select") as HTMLElement | null)?.focus();
   return { close, box };
+}
+
+/** confirm() 대신 (아티팩트에서는 confirm이 항상 false) */
+export function ask(title: string, body: string, yes: string, no = "취소"): Promise<boolean> {
+  return new Promise((res) => {
+    let v = false;
+    const dl = dialog(title, [
+      h("p", { text: body }),
+      h("div", { class: "actions" },
+        h("button", { class: "btn primary", type: "button", text: yes, on: { click: () => { v = true; dl.close(); } } }),
+        h("button", { class: "btn ghost", type: "button", text: no, on: { click: () => dl.close() } })),
+    ], { onClose: () => res(v) });
+  });
 }

@@ -10,7 +10,7 @@ import { applyDrawing, partRows, sideOf } from "./model";
 import { chartFor, rowY } from "./pdfgeom";
 import { canvasBlob } from "./pdf";
 import { commit, pdfOf } from "./store";
-import { dialog, download, h, toast } from "./ui";
+import { ask, dialog, download, h, toast } from "./ui";
 import type { Drawing, DrawOpt, Pattern, Yarn } from "./types";
 
 type Tool = "select" | "pen" | "fill" | "erase" | "paste";
@@ -357,9 +357,9 @@ export function openEditor(p: Pattern, part: string, o: { onSave: () => void; st
     toast("배색을 저장했어요. 단마다 색 서술이 만들어졌어요.");
     close();
   }
-  function closeAsk() {
-    if (dirty && !confirm("저장하지 않은 변경이 있어요. 닫을까요?")) return;
-    close();
+  function closeAsk(): void {
+    if (!dirty) return close();
+    ask("저장하지 않았어요", "고친 내용을 저장하지 않고 닫을까요?", "닫기", "계속 편집").then((ok) => ok && close());
   }
   function close() {
     ed.remove();

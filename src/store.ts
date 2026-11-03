@@ -4,6 +4,8 @@ import * as db from "./db";
 import { applyDrawing, expand, mergeSections, newPattern, normalize } from "./model";
 import { openPdf, type Pdf } from "./pdf";
 import { migrateSettings, type AiSettings } from "./ai";
+import { inArtifact, myCollection } from "./artifact";
+import { toast } from "./ui";
 import type { AiSection, Drawing, Pattern } from "./types";
 
 export const state = {
@@ -60,6 +62,58 @@ export function active(): Pattern {
   return (example ||= makeExample());
 }
 
+/* ---------- 아티팩트: 진행 기록을 사람마다 서버(db)에 (다른 기기에서도) ---------- */
+const MAX_DOC = 240_000; // 문서 하나 256KiB 한도보다 조금 작게
+const remoteTimers = new Map<string, number>();
+let remoteFail = false;
+function queueRemote(p: Pattern) {
+  if (!inArtifact) return;
+  clearTimeout(remoteTimers.get(p.id));
+  remoteTimers.set(p.id, window.setTimeout(async () => {
+    remoteTimers.delete(p.id);
+    const col = await myCollection();
+    if (!col) return;
+    const body = JSON.parse(JSON.stringify(state.patterns[p.id] || p));
+    if (JSON.stringify(body).length > MAX_DOC) {
+      if (!remoteFail) toast("도안이 커서 이 브라우저에만 저장했어요.", 3600);
+      remoteFail = true;
+      return;
+    }
+    try {
+      await col.doc(p.id).set(body);
+    } catch (e: any) {
+      if (!remoteFail) toast(e?.code === "quota_exceeded" ? "저장 공간이 가득 찼어요. 안 쓰는 도안을 지워주세요." : "이 브라우저에만 저장했어요. 다음에 다시 올릴게요.", 3600);
+      remoteFail = true;
+    }
+  }, 1200));
+}
+/** 서버 기록을 불러와 더 최신인 것으로 맞춘다. 바뀐 게 있으면 true */
+export async function syncRemote(): Promise<boolean> {
+  if (!inArtifact) return false;
+  const col = await myCollection();
+  if (!col) return false;
+  let changed = false;
+  try {
+    const snap = await col.get();
+    const remoteIds = new Set<string>();
+    for (const d of snap.docs) {
+      const v = d.data();
+      if (!v || !Array.isArray(v.rows)) continue;
+      remoteIds.add(d.id);
+      const rp = normalize({ ...v, id: d.id });
+      const lp = state.patterns[d.id];
+      if (!lp || (rp.updatedAt || 0) > (lp.updatedAt || 0)) {
+        state.patterns[d.id] = rp;
+        db.savePattern(rp).catch(() => {});
+        changed = true;
+      }
+    }
+    // 이 브라우저에만 있던 도안은 올린다
+    for (const p of Object.values(state.patterns)) if (!remoteIds.has(p.id)) queueRemote(p);
+  } catch {}
+  return changed;
+}
+
 export async function load() {
   try {
     for (const p of await db.loadPatterns()) state.patterns[p.id] = normalize(p);
@@ -78,6 +132,7 @@ export function commit(p: Pattern, touch = true) {
   state.patterns[p.id] = p;
   state.dirty = true;
   db.savePattern(p).catch(() => {});
+  queueRemote(p);
 }
 export function setActive(id: string) {
   state.activeId = id;
@@ -92,6 +147,7 @@ export async function removePattern(id: string) {
   if (state.activeId === id) state.activeId = null;
   pdfCache.delete(id);
   await db.deletePattern(id);
+  if (inArtifact) (await myCollection())?.doc(id).delete().catch(() => {});
 }
 
 /** 백업 스냅샷 (+ 클라우드 동기화를 붙인다면 여기서 업로드) */

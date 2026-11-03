@@ -84,8 +84,32 @@ export function expand(sections: AiSection[]): { rows: Row[]; secs: Record<strin
   // 파트별로 모아 정렬 (도안 순서 유지)
   const order = [...new Set(rows.map((r) => r.s))];
   const sorted = order.flatMap((s) => rows.filter((r) => r.s === s).sort((a, b) => a.n - b.n));
-  for (const s of order) secs[s].odd = inferOdd(sorted.filter((r) => r.s === s));
+  for (const s of order) {
+    const list = sorted.filter((r) => r.s === s);
+    markStart(list);
+    secs[s].odd = inferOdd(list);
+  }
   return { rows: sorted, secs };
+}
+
+/** "코잡기가 1단", "cast-on counts as row 1" */
+export const CAST_ON_ROW1 = /코\s*잡기(?:가|는)?\s*1\s*단|기초코(?:가|는)?\s*1\s*단|cast[- ]?on\s+(?:counts?\s+as|is)\s+(?:row|rnd|round)\s*1/i;
+/** "2단 안면부터", "2단(WS)부터", "row 2 (WS)" → 그 단의 면 */
+const START_SIDE = /(\d{1,3})\s*단\s*(?:은|는|이|가)?\s*\(?\s*(안면|겉면|WS|RS)\s*\)?\s*(?:부터|에서|으로)?|(?:row|rnd)\s*(\d{1,3})\s*\(?\s*(WS|RS)\b/i;
+
+/** 파트 서술에서 코잡기 단·시작 면을 읽어 표시한다 (차트의 ← → 방향과 같게) */
+export function markStart(list: Row[]) {
+  const first = list[0];
+  if (!first) return;
+  const text = list.slice(0, 3).map((r) => r.t).join(" ");
+  if (first.n === 1 && CAST_ON_ROW1.test(text)) first.castOn = true;
+  const m = text.match(START_SIDE);
+  if (m) {
+    const n = +(m[1] || m[3]);
+    const side = /안면|WS/i.test(m[2] || m[4]) ? "WS" : "RS";
+    const r = list.find((x) => x.n === n);
+    if (r && !r.side) r.side = side;
+  }
 }
 
 /** 파트 안에서 side가 적힌 첫 단으로 "홀수단 = RS/WS"를 정한다. 없으면 RS. */
@@ -252,6 +276,7 @@ export function normalize(p: Partial<Pattern> & { id: string }): Pattern {
   if (!Array.isArray(out.colors)) out.colors = [];
   if (!Array.isArray(out.gauges)) out.gauges = [];
   for (const s of partNames(out)) {
+    markStart(partRows(out, s));
     out.secs[s] = out.secs[s] || {};
     if (!out.secs[s].odd) out.secs[s].odd = inferOdd(partRows(out, s));
   }

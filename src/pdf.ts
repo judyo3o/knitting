@@ -7,16 +7,58 @@ import { buildRescue, type Rescue } from "./fontfix";
 import { unreadable } from "./symbols";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
-const BASE = import.meta.env.BASE_URL + "pdfjs/";
+// 절대 주소로 (아티팩트에선 워커가 blob URL이라 상대 주소를 못 푼다)
+const BASE = new URL(import.meta.env.BASE_URL + "pdfjs/", document.baseURI).href;
 
 export type Pdf = PDFDocumentProxy;
 
 const blobOf = new WeakMap<Pdf, Blob>();
 const rescueOf = new WeakMap<Pdf, Promise<Rescue | null>>();
 
+/**
+ * 아티팩트는 정해진 웹 파일 종류만 올릴 수 있어서, pdf.js 워커와 글자 표(cMap)는 base64 텍스트(.b64.txt)로 올리고
+ * 여기서 풀어 쓴다 (워커는 blob URL, 글자 표는 pdf.js의 BinaryDataFactory로).
+ */
+const inArtifactView = () => !!(globalThis as any).claude?.use;
+const b64Bytes = async (url: string) => {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error("fetch " + url);
+  const bin = atob((await r.text()).trim());
+  const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u;
+};
+class ArtifactDataFactory {
+  [k: string]: any;
+  constructor(o: { cMapUrl?: string; standardFontDataUrl?: string; wasmUrl?: string }) {
+    Object.assign(this, o);
+  }
+  async fetch({ kind, filename }: { kind: string; filename: string }): Promise<Uint8Array> {
+    const url = `${this[kind]}${filename}`;
+    if (kind === "cMapUrl") return b64Bytes(url + ".b64.txt");
+    const r = await fetch(url); // ttf·wasm은 그대로 올라가 있다 (pfb는 없음 → pdf.js가 대체 글꼴 사용)
+    if (!r.ok) throw new Error("fetch " + url);
+    return new Uint8Array(await r.arrayBuffer());
+  }
+}
+let workerReady: Promise<void> | null = null;
+function ensureWorker() {
+  if (!inArtifactView()) return Promise.resolve();
+  if (!workerReady)
+    workerReady = (async () => {
+      try {
+        const js = new Blob([await b64Bytes(workerUrl.replace(/\.mjs($|\?)/, ".b64.txt$1"))], { type: "text/javascript" });
+        pdfjs.GlobalWorkerOptions.workerSrc = URL.createObjectURL(js);
+      } catch {}
+    })();
+  return workerReady;
+}
+
 export async function openPdf(blob: Blob): Promise<Pdf> {
+  await ensureWorker();
   const data = new Uint8Array(await blob.arrayBuffer());
-  const pdf = await pdfjs.getDocument({ data, cMapUrl: BASE + "cmaps/", cMapPacked: true, standardFontDataUrl: BASE + "standard_fonts/", wasmUrl: BASE + "wasm/" } as any).promise;
+  const extra = inArtifactView() ? { useWorkerFetch: false, BinaryDataFactory: ArtifactDataFactory } : {};
+  const pdf = await pdfjs.getDocument({ data, cMapUrl: BASE + "cmaps/", cMapPacked: true, standardFontDataUrl: BASE + "standard_fonts/", wasmUrl: BASE + "wasm/", ...extra } as any).promise;
   blobOf.set(pdf, blob);
   return pdf;
 }

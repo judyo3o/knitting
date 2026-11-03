@@ -10,6 +10,7 @@ export type Row = {
   ch: number | null; // 이 단에 쓰는 차트 PDF 쪽
   span: [number, number] | null; // 범위 지시였으면 원래 범위
   x?: string; // 차트→서술 풀이(점검 결과 포함)
+  castOn?: boolean; // 코잡기 자체가 이 단 ("코잡기가 1단") — 뜨는 단이 아님
   auto?: boolean; // 그린 배색에서 자동으로 만든 서술 (격자를 고치면 다시 만든다)
   co?: string[]; // 배색: 이 단에 쓰는 색 기호 (예: ["A","B"])
 };

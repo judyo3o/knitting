@@ -37,7 +37,7 @@ for (const arg of process.argv.slice(2)) {
     console.log("  기기 읽기 일부:", (await page.textContent(".dlg p")).slice(0, 80));
     await shot("2-partial");
     // 복사·붙여넣기 요청이 제대로 만들어지는지 먼저 확인
-    await page.click(".dlg >> text=Claude로 정확하게");
+    await page.click(".dlg >> text=Claude로 읽기");
     await page.waitForSelector(".dlg textarea[readonly]", { timeout: 120000 });
   }
   if (what !== "local") {

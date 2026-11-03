@@ -1,5 +1,6 @@
 /** 설정 · 복사/붙여넣기 모드 · 원본 보기 */
-import { AiError, providerLabel } from "./ai";
+import { AiError, providerLabel, type Provider } from "./ai";
+import { inArtifact } from "./artifact";
 import type { CallReq } from "./anthropicCall";
 import { getFile } from "./db";
 import { openPdf, renderWidth } from "./pdf";
@@ -9,26 +10,31 @@ import type { Pattern } from "./types";
 
 export function openSettings(onSaved: () => void) {
   const key = h("input", { type: "password", autocomplete: "off", placeholder: "sk-ant-api…", value: state.ai.claudeKey || "", "aria-label": "Claude API 키" });
-  const useKey = h("input", { type: "radio", name: "prov", value: "claude", checked: state.ai.provider === "claude" });
-  const noKey = h("input", { type: "radio", name: "prov", value: "manual", checked: state.ai.provider !== "claude" });
+  const opts: Provider[] = inArtifact ? ["artifact", "claude", "manual"] : ["claude", "manual"];
+  const radios = opts.map((p) => h("input", { type: "radio", name: "prov", value: p, checked: state.ai.provider === p }));
+  const help: Record<Provider, string> = {
+    artifact: "지금 이 앱을 Claude 안에서 열었어요. 버튼 한 번에 보는 사람 본인의 Claude로 읽어요. 처음 한 번 허용을 물어봐요.",
+    claude: "버튼 한 번에 바로 읽어요.",
+    manual: "키 없이 claude.ai 채팅을 써요. 앱이 만든 프롬프트와 파일을 넣고 답을 붙여넣어요.",
+  };
   const keyBox = h("label", { class: "field" }, "Claude API 키", key,
     h("small", {}, "console.anthropic.com → API Keys에서 만들어요. 이 기기 안에만 저장되고 Anthropic으로만 보내요. 쓴 만큼 요금이 나가요. ",
       "Claude 구독(Pro/Max) 로그인 토큰은 다른 앱에서 쓸 수 없어서, API 키가 필요해요."));
-  const sync = () => (keyBox.hidden = !useKey.checked);
-  useKey.onchange = noKey.onchange = sync;
+  const chosen = () => (radios.find((r) => r.checked)?.value || opts[0]) as Provider;
+  const sync = () => (keyBox.hidden = chosen() !== "claude");
+  radios.forEach((r) => (r.onchange = sync));
   sync();
   const dl = dialog("Claude 연결", [
-    h("p", { class: "hint", text: "단 세기·차트 표시·기호표·서술 묶음·배색 그리기·게이지, 그리고 글자가 있는 PDF와 텍스트 도안 읽기는 이 기기에서 해요. Claude는 기기에서 못 끝내는 도안(사진·스캔 PDF·'1단과 동일' 같은 지시)과 '차트를 글로 풀기'에만 써요." }),
-    h("div", { class: "radio", role: "radiogroup" },
-      h("label", {}, useKey, h("span", {}, providerLabel("claude"), h("small", { text: "버튼 한 번에 바로 읽어요." }))),
-      h("label", {}, noKey, h("span", {}, providerLabel("manual"), h("small", { text: "키 없이 claude.ai 채팅을 써요. 앱이 만든 프롬프트와 파일을 넣고 답을 붙여넣어요." })))),
+    h("p", { class: "hint", text: "단 세기·차트 표시·기호 이름·서술 묶음·배색 그리기·게이지, 그리고 글자가 있는 PDF와 텍스트 도안 읽기는 이 기기에서 해요. Claude는 기기에서 못 끝내는 도안(사진·스캔 PDF·'1단과 동일' 같은 지시), '차트를 글로 풀기', '이 단 물어보기'에만 써요." }),
+    h("div", { class: "radio", role: "radiogroup" }, ...opts.map((p, i) => h("label", {}, radios[i], h("span", {}, providerLabel(p), h("small", { text: help[p] }))))),
     keyBox,
     h("div", { class: "actions" },
       h("button", { class: "btn primary", type: "button", text: "저장", on: { click: async () => {
         const k = key.value.trim();
-        if (useKey.checked && !k) return toast("API 키를 넣어 주세요.");
-        if (useKey.checked && /^sk-ant-oat/.test(k)) return toast("구독 로그인 토큰은 쓸 수 없어요. console.anthropic.com의 API 키를 넣어 주세요.", 4200);
-        await saveAi({ provider: useKey.checked ? "claude" : "manual", claudeKey: k });
+        const prov = chosen();
+        if (prov === "claude" && !k) return toast("API 키를 넣어 주세요.");
+        if (prov === "claude" && /^sk-ant-oat/.test(k)) return toast("구독 로그인 토큰은 쓸 수 없어요. console.anthropic.com의 API 키를 넣어 주세요.", 4200);
+        await saveAi({ provider: prov, claudeKey: k });
         dl.close();
         toast("설정을 저장했어요.");
         onSaved();

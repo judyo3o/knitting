@@ -10,6 +10,13 @@ try { ({ chromium } = await import("playwright")); } catch { ({ chromium } = cre
 mkdirSync("check-out", { recursive: true });
 const pdfPath = "check-out/synthetic-pattern.pdf";
 if (!existsSync(pdfPath)) execFileSync("python3", ["scripts/make-fixture.py", pdfPath], { stdio: "inherit" });
+// 사진처럼 만든 배색 차트 (합성 PDF 2쪽 스와치: 42코 × 34단)
+if (!existsSync("check-out/photo-chart.jpg")) execFileSync("python3", ["-c", `
+import pypdfium2 as pdfium, random
+from PIL import ImageFilter, ImageEnhance
+im = pdfium.PdfDocument("${pdfPath}")[1].render(scale=1.6).to_pil().convert("RGB")
+im = ImageEnhance.Brightness(im.filter(ImageFilter.GaussianBlur(0.8))).enhance(0.93)
+im.save("check-out/photo-chart.jpg", quality=82)`]);
 // 2색 테스트 이미지 (어두운 바탕에 밝은 사슴 비슷한 모양, 가장자리는 흰 여백)
 const imgPath = "check-out/test-image.png";
 execFileSync("python3", ["-c", `
@@ -114,6 +121,24 @@ const chunks2 = await page.locator(".chunk").allTextContents();
 console.log("   이미지 차트 1단:", chunks2.slice(0, 4).join(" | "));
 assert.ok(chunks2.length >= 1);
 
+step("사진 → 배색 차트로 읽기 (격자 자동 찾기)");
+await page.click("#addBtn");
+await page.setInputFiles("#fileIn", "check-out/photo-chart.jpg");
+await page.click("text=배색 차트로 읽기");
+await page.waitForSelector(".editor[aria-label='이미지로 시작'] canvas");
+await page.waitForFunction(() => document.querySelector(".editor[aria-label='이미지로 시작'] input[aria-label='가로 콧수']")?.value === "38", null, { timeout: 30000 });
+const gw = await page.inputValue(".editor[aria-label='이미지로 시작'] input[aria-label='가로 콧수']");
+const gh = await page.inputValue(".editor[aria-label='이미지로 시작'] input[aria-label='세로 단수']");
+console.log(`   찾은 격자: ${gw}코 × ${gh}단`);
+assert.equal(gh, "31");
+await page.click("text=▩ 격자");
+await shot("13-photo-grid");
+await page.click(".editor[aria-label='이미지로 시작'] >> text=💾 저장");
+await page.waitForSelector(".editor[aria-label='이미지로 시작']", { state: "detached" });
+await page.click(".editor >> text=💾 저장");
+await page.waitForSelector(".editor", { state: "detached" });
+console.log("   1단:", (await page.locator(".chunk").allTextContents()).join(" | ").slice(0, 80));
+
 step("설정: 복사·붙여넣기 기본");
 await page.click("#setBtn");
 assert.ok(await page.isChecked("input[value=manual]"));
@@ -142,12 +167,12 @@ assert.match(rowTxt, /110코가 되도록/); // L 사이즈 숫자만 남김
 assert.doesNotMatch(rowTxt, /\(104\)/);
 await shot("4b-local-read");
 
-step("Claude로 정확하게 읽기 (키 없음 → 복사·붙여넣기) → 답 붙여넣기");
+step("Claude로 읽기 (키 없음 → 복사·붙여넣기) → 답 붙여넣기");
 await page.click("#addBtn");
 await page.fill("input[placeholder='예: L']", "L");
 await page.setInputFiles("#fileIn", pdfPath);
 await page.waitForFunction(() => /쪽을 골랐어요/.test(document.querySelector(".pg-tools .hint")?.textContent || ""), null, { timeout: 30000 });
-await page.check("#uploadView label:has-text('Claude로 정확하게') input");
+await page.check("#uploadView label:has-text('Claude로 읽기') input");
 const answer = (pages) => JSON.stringify({
   title: "리본 케이블 가디건", notes: "L 사이즈 기준", colors: pages.includes(2) ? [{ code: "A", name: "버건디", hex: "#B23A48" }, { code: "B", name: "네이비", hex: "#2F5D8A" }] : null,
   sections: pages.includes(2)
