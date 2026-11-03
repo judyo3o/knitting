@@ -7,7 +7,7 @@ import { chartBitmap, clearBitmaps, drawGrid, drawPdfFull, drawPdfRows, explainS
 import { getFile, putFile } from "./db";
 import { getCell, longestFloat, rowColors } from "./drawing";
 import {
-  applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, sideOf, stepNext, stepPrev,
+  applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, spanParts, sideOf, stepNext, stepPrev,
 } from "./model";
 import { blobB64, canvasBlob, textItems } from "./pdf";
 import { chartFor, findCharts, findLegend, LEGEND_RE, stitchAxis } from "./pdfgeom";
@@ -153,7 +153,11 @@ function nowCard(p: Pattern, r: Row) {
     const nx = list[k + 1];
     card.append(h("p", { class: "span-note", text: `코잡기 자체가 1단이에요. 코를 잡았으면 '다음 단'을 누르고 ${nx ? `${nx.n}단(${sideOf(p, nx) === "WS" ? "안면" : "겉면"})` : "다음 단"}부터 떠요.` }));
   }
-  if (r.span) card.append(h("p", { class: "span-note", text: `${r.span[0]}~${r.span[1]}단 공통 지시예요.` }));
+  if (r.span) {
+    const sp = spanParts(r.t, r.span);
+    const last = r.n === r.span[1];
+    card.append(h("p", { class: "span-note", text: `${r.span[0]}~${r.span[1]}단 공통: ${sp.each}` + (sp.end ? (last ? ` · 이 단을 다 뜨면 → ${sp.end}` : ` · (${r.span[1]}단까지 다 뜬 뒤에 → ${sp.end})`) : "") }));
+  }
   if (r.x) card.append(h("div", { class: "explain" }, h("small", { text: "차트를 읽어 풀어쓴 내용 · 차트와 꼭 대조해 보세요" }), r.x));
   card.append(rowActions(p, r, side, round));
   const pr = partProgress(p, s);
@@ -390,7 +394,8 @@ function legendPane(p: Pattern) {
   const pane = h("div", { class: "legend" + (view.legendOpen ? "" : " closed") });
   const toggle = h("button", { class: "link", type: "button", text: view.legendOpen ? "접기" : "기호표", on: { click: () => { view.legendOpen = !view.legendOpen; saveView(); render(); } } });
   const body = h("div", { class: "lg-body" });
-  pane.append(h("div", { class: "lg-head" }, view.legendOpen ? h("span", { text: "기호표" }) : null, toggle), body);
+  const big = view.legendOpen ? h("button", { class: "link", type: "button", text: "크게 보기", on: { click: () => openLegendBig(p) } }) : null;
+  pane.append(h("div", { class: "lg-head" }, view.legendOpen ? h("span", { text: "기호표" }) : null, h("span", { style: "display:flex;gap:10px" }, big, toggle)), body);
   if (!view.legendOpen) return pane;
   (async () => {
     const pdf = await pdfOf(p);
@@ -401,11 +406,41 @@ function legendPane(p: Pattern) {
       return;
     }
     const c = await legendCanvas(pdf, p.legend, 2);
-    c.setAttribute("aria-label", "기호표");
+    c.setAttribute("aria-label", "기호표 (누르면 크게 보기)");
+    c.style.cursor = "zoom-in";
+    c.addEventListener("click", () => openLegendBig(p));
     body.append(c);
     legendView = { canvas: c, base: c.getContext("2d")!.getImageData(0, 0, c.width, c.height), lg: p.legend, scale: 2 };
   })().catch(() => {});
   return pane;
+}
+
+/** 기호표 크게 보기: 화면 가득, 맞추기 ↔ 확대 */
+async function openLegendBig(p: Pattern) {
+  const pdf = await pdfOf(p);
+  if (!pdf || !p.legend || "none" in p.legend) return;
+  const lg = p.legend;
+  const body = h("div", { class: "viewer-body" }, h("p", { class: "gen", text: "기호표를 크게 그리는 중…" }));
+  let zoom = false;
+  const zoomB = h("button", { class: "btn", type: "button", text: "확대", "aria-pressed": "false" });
+  const closeB = h("button", { class: "btn primary", type: "button", text: "닫기" });
+  const v = h("div", { class: "viewer", role: "dialog", "aria-modal": "true", "aria-label": "기호표 크게 보기" },
+    h("div", { class: "viewer-bar" }, h("b", { text: "기호표", style: "align-self:center" }), h("div", { class: "actions" }, zoomB, closeB)), body);
+  const close = () => { v.remove(); document.body.style.overflow = ""; document.removeEventListener("keydown", onKey); };
+  const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
+  closeB.onclick = close;
+  zoomB.onclick = () => { zoom = !zoom; body.classList.toggle("zoom", zoom); zoomB.textContent = zoom ? "맞추기" : "확대"; zoomB.setAttribute("aria-pressed", String(zoom)); };
+  document.addEventListener("keydown", onKey);
+  document.body.append(v);
+  document.body.style.overflow = "hidden";
+  closeB.focus();
+  // 화면 폭의 두 배 해상도로 (확대해도 선명하게), 휴대폰 그림 크기 제한은 legendCanvas가 지킨다
+  const scale = Math.max(3, Math.min(8, (Math.max(window.innerWidth, 600) * 2) / Math.max(40, lg.x1 - lg.x0)));
+  const c = await legendCanvas(pdf, lg, scale).catch(() => null);
+  body.innerHTML = "";
+  if (!c) return void body.append(h("p", { class: "empty", text: "기호표를 그리지 못했어요." }));
+  c.setAttribute("aria-label", "기호표");
+  body.append(c);
 }
 
 async function detectLegend(p: Pattern) {
@@ -478,17 +513,13 @@ function narrative(p: Pattern, r: Row) {
   }
   // 서술 없이 '차트를 따라 진행'뿐인 단: 기기에서 차트를 읽어 그 단의 서술을 만들어 보여 준다
   if (wantsChartText(p, r)) {
-    if (r.t) wrap.append(h("p", { class: "gen", text: "도안 원문: " + r.t.split("\n")[0].slice(0, 80) }));
+    if (r.t) wrap.append(h("p", { class: "gen", text: "도안 원문: " + (r.span ? spanParts(r.t, r.span).each : r.t.split("\n")[0]).slice(0, 80) }));
     const slot = h("div", { class: "gen", text: "차트에서 이 단을 읽는 중…" });
     wrap.append(slot);
     chartRowText(p, r).then((txt) => {
       if (!slot.isConnected) return;
       if (!txt) { slot.textContent = "차트에서 이 단을 읽지 못했어요. '이 단 차트를 글로 풀기'를 써 보세요."; if (chunks.length) slot.after(chunkBox(p, r, chunks)); return; }
-      const ws = sideOf(p, r) === "WS" && !p.secs[r.s]?.round;
       slot.replaceWith(
-        h("p", { class: "gen", style: "margin:0", text: ws
-          ? "▼ 차트를 읽어 만든 이 단 서술 (안면 단): 왼쪽부터 떠요. 차트는 겉면에서 본 그림이라, 안면에서는 차트의 겉뜨기를 안뜨기로·안뜨기를 겉뜨기로 떠야 해요. 아래는 그렇게 바꿔 둔 거예요."
-          : "▼ 차트를 읽어 만든 이 단 서술 (겉면 단): 오른쪽부터 차트 그대로 떠요." }),
         chunkBox(p, r, chunksOf(txt)),
         h("span", { class: "gen", text: "기기가 차트 그림을 읽은 거라 교차뜨기 방향(LC/RC)은 차트와 한 번 대조해 주세요." }),
         h("div", { class: "actions" }, h("button", { class: "btn ghost", type: "button", text: "이 서술을 이 단에 저장", on: { click: () => {
@@ -685,6 +716,13 @@ function infoCard(p: Pattern) {
     h("div", { class: "actions", style: "padding:0 16px 8px" }, h("button", { class: "btn ghost", type: "button", text: lines.length ? "정보 수정" : "정보 적기", on: { click: edit } })));
 }
 
+/** 단 목록 한 줄: 여러 단 공통 지시는 매 단 할 일만, 다 뜬 뒤 할 일은 마지막 단에만 */
+function rowText1(x: Row) {
+  if (!x.span) return x.t || "";
+  const sp = spanParts(x.t, x.span);
+  return x.n === x.span[1] && sp.end ? `${sp.each} → 다 뜨면: ${sp.end}` : sp.each;
+}
+
 function rowList(p: Pattern, s: string) {
   const cur = currentRow(p, s);
   const ol = h("ol", { class: "rows2" });
@@ -692,7 +730,7 @@ function rowList(p: Pattern, s: string) {
     const t = p.done[key(s, x.n)];
     const b = h("button", { type: "button", class: (x === cur ? "on" : "") + (t ? " done" : "") },
       h("span", { class: "n", text: x.n + "단" + (x.side ? " " + x.side : "") }),
-      h("span", { class: "t", text: (x.t || "") + (x.st ? `  (${x.st})` : "") }),
+      h("span", { class: "t", text: rowText1(x) + (x.st ? `  (${x.st})` : "") }),
       h("span", { class: "when", text: t ? fmtShort(t) : "" }));
     b.onclick = () => { jumpTo(p, s, x.n); commit(p, false); render(); window.scrollTo({ top: 0, behavior: "smooth" }); };
     ol.append(h("li", {}, b));

@@ -369,3 +369,23 @@ export function partStitches(rows: Row[]): number | null {
   const best = [...cnt.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0];
   return best ? best[0] : null;
 }
+
+/**
+ * 여러 단 공통 지시("16단~58단까지 차트를 따라 진행합니다. 이제 바늘에 96코예요. 실을 자르고 코를 쉼코로 둡니다.")를
+ * 매 단 할 일(each)과 다 뜬 뒤에 할 일(end)로 나눈다. 다른 범위("16단~66단", 다른 사이즈)를 가리키는 줄은 뺀다.
+ */
+export function spanParts(t: string, span: [number, number] | null): { each: string; end: string } {
+  const RANGE = /(\d{1,3})\s*단\s*[~\-–]\s*(\d{1,3})\s*단/;
+  let lines = (t || "").split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  if (span) {
+    const mine = lines.filter((l) => { const m = l.match(RANGE); return !m || (+m[1] === span[0] && +m[2] === span[1]); });
+    if (mine.length) lines = mine;
+  }
+  const sents = lines.flatMap((l) => l.split(/(?<=[.。])\s+/)).map((x) => x.trim()).filter(Boolean);
+  const END = /코가\s*(?:있|남|됩)|코\s*남|실을\s*끊|쉬어\s*둡|쉬어둡|홀더|코막음|코\s*막음|마무리/;
+  // "차트를 따라 진행합니다."와 "차트를 따라 진행"은 같은 말로
+  const uniq = (a: string[]) => { const seen = new Set<string>(); return a.filter((x) => { const k = x.replace(/\s+/g, "").replace(/(?:합니다|한다|해요|하기)?[.。]?$/, ""); if (seen.has(k)) return false; seen.add(k); return true; }); };
+  const each = uniq(sents.filter((x) => !END.test(x)).map((x) => x.replace(RANGE, "").replace(/^\s*까지\s*/, "").trim()).filter(Boolean));
+  const end = uniq(sents.filter((x) => END.test(x)));
+  return { each: each.join(" ") || "차트대로 뜨기", end: end.join(" ") };
+}

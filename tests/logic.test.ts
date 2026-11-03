@@ -504,3 +504,14 @@ describe("원본 쪽에서 이 단 자리", () => {
     expect(findRowSpot(items as any, 2, null, "M")).toBe(null);
   });
 });
+
+describe("여러 단 공통 지시", () => {
+  it("매 단 할 일과 다 뜬 뒤 할 일을 나누고, 다른 범위 줄은 뺀다", async () => {
+    const { spanParts } = await import("../src/model");
+    const t = "16단~58단까지 차트를 따라 진행합니다. 이제 바늘에 96코예요. 실을 자르고 코를 쉼코로 둡니다.\n16단~66단까지 차트를 따라 진행합니다. 실을 자르고 코를 쉼코로 둡니다.\n차트를 따라 진행";
+    const r = spanParts(t, [16, 58]);
+    expect(r.each).toBe("차트를 따라 진행합니다.");
+    expect(r.end).toBe("이제 바늘에 96코예요. 실을 자르고 코를 쉼코로 둡니다.");
+    expect(spanParts("차트를 따라 진행", [59, 116]).each).toBe("차트를 따라 진행");
+  });
+});

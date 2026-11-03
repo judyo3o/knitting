@@ -185,6 +185,17 @@ await step("PDF: 기호표 접기/펴기", async () => {
   await T(".legend >> text=기호표").click();
   ok(!(await T(".legend.closed").count()), "펴기 안 됨");
 });
+await step("PDF: 기호표 크게 보기", async () => {
+  if (!(await T(".legend").count())) return "기호표 없음(건너뜀)";
+  await T(".legend >> text=크게 보기").click();
+  await T(".viewer[aria-label='기호표 크게 보기'] canvas").waitFor({ timeout: 30000 });
+  const w = await T(".viewer canvas").evaluate((c) => c.width);
+  await T(".viewer >> text=확대").click();
+  ok(await T(".viewer-body.zoom").count(), "확대 안 됨");
+  await T(".viewer >> text=닫기").click();
+  ok((await T(".viewer").count()) === 0, "닫기 안 됨");
+  return `그림 폭 ${w}px`;
+});
 await step("PDF: 차트 글로 풀기(키 없음 → 복사·붙여넣기 창) → 답 붙여넣기", async () => {
   await T("text=이 단 차트를 글로 풀기").click();
   await T(".dlg textarea[readonly]").waitFor({ timeout: 60000 });

@@ -1,6 +1,6 @@
 /** 차트 표시 (§1-4 ③, §3-1) — PDF 차트 비트맵 / 직접 그린 배색 격자 */
 import { chartFor, findCharts, rowH, rowY, type Chart } from "./pdfgeom";
-import { MAX_PIXELS, renderPage, textItems, pageSize, type Pdf } from "./pdf";
+import { MAX_PIXELS, renderPage, renderRegion, textItems, pageSize, type Pdf } from "./pdf";
 import { cellAspect, dominantColors, getCell, hasRow, rowIndex } from "./drawing";
 import type { Drawing, Side, Yarn } from "./types";
 
@@ -163,15 +163,15 @@ export async function explainStrip(pdf: Pdf, page: number, n: number): Promise<H
 
 /** 기호표 영역 잘라내기 */
 export async function legendCanvas(pdf: Pdf, lg: { page: number; x0: number; y0: number; x1: number; y1: number }, scale = 2) {
-  const full0 = await renderPage(pdf, lg.page, scale);
   const { w, h } = await pageSize(pdf, lg.page);
-  scale = full0.width / w; // 휴대폰에서 줄여서 그렸으면 실제 배율로
-  const full = full0;
   const x0 = Math.max(0, lg.x0), y0 = Math.max(0, lg.y0), x1 = Math.min(w, lg.x1), y1 = Math.min(h, lg.y1);
+  // 기호표 높이만큼의 띠만 그린다 (쪽 전체보다 작아서 크게 보기에서도 선명하게, 휴대폰 그림 크기 제한 안에서)
+  const strip = await renderRegion(pdf, lg.page, scale, y0, y1);
+  const sc = strip.width / w; // 줄여서 그렸으면 실제 배율로
   const out = document.createElement("canvas");
-  out.width = Math.max(1, Math.round((x1 - x0) * scale));
-  out.height = Math.max(1, Math.round((y1 - y0) * scale));
-  out.getContext("2d")!.drawImage(full, x0 * scale, y0 * scale, out.width, out.height, 0, 0, out.width, out.height);
+  out.width = Math.max(1, Math.round((x1 - x0) * sc));
+  out.height = Math.max(1, Math.min(strip.height, Math.round((y1 - y0) * sc)));
+  out.getContext("2d")!.drawImage(strip, x0 * sc, 0, out.width, out.height, 0, 0, out.width, out.height);
   return out;
 }
 
