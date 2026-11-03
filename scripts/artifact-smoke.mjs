@@ -61,6 +61,7 @@ await page.waitForTimeout(1600);
 const sets = await page.evaluate(() => window.__calls.set.length);
 console.log("   db에 저장된 문서 수:", sets);
 assert.ok(sets >= 1);
+await page.click(".sub-link:has-text('진행 기록')");
 await page.click("text=진행 내보내기");
 await page.waitForFunction(() => window.__calls.dl);
 console.log("   받은 파일:", await page.evaluate(() => window.__calls.dl));

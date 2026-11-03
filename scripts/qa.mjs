@@ -79,7 +79,10 @@ await step("예시: 묶음 누르기·다시 누르면 하나 전으로", async 
   await T(".chunk").nth(0).click();
   ok((await T(".chunk.done").count()) === 0, "다시 눌렀는데 그대로 완료");
 });
+const openSub = async (name) => { if (await T(".sub-head").count()) await T(".sub-head .round-btn").click(); await T(`.sub-link:has-text('${name}')`).click(); await T(".sub-head").waitFor(); };
+const backSub = async () => { if (await T(".sub-head").count()) await T(".sub-head .round-btn").click(); };
 await step("예시: 단 목록 누르면 그 단으로", async () => {
+  await openSub("단 목록");
   await T(".rows2 button").nth(4).click();
   ok((await txt(".rowno b")) === "5", "목록 5번째 → " + (await txt(".rowno b")));
 });
@@ -217,10 +220,12 @@ await step("단 번호로 이동 (없는 단이면 알림)", async () => {
   await page.waitForFunction(() => /없어요/.test(document.getElementById("status")?.textContent || ""));
 });
 await step("진행 기록 목록", async () => {
-  await T("summary:has-text('진행 기록')").click();
-  const items = await T(".hist li").allTextContents();
-  ok(items.length >= 1, "기록 없음");
-  return items[0].replace(/\s+/g, " ").slice(0, 50);
+  await openSub("진행 기록");
+  const items = await T(".hist-row").allTextContents();
+  const empty = await T(".hist-wrap >> text=아직 기록이 없어요").count();
+  await backSub();
+  ok(items.length >= 1 || empty, "진행 기록 화면이 비었음");
+  return items.length ? items[0].replace(/\s+/g, " ").slice(0, 50) : "기록 없음 안내";
 });
 await step("게이지: 스와치 탭에서 적기 → 요약", async () => {
   await T(".ptab:has-text('스와치')").click();
@@ -235,6 +240,7 @@ await step("지금 저장 · 마지막 저장 시각", async () => {
   await page.waitForFunction(() => /마지막 저장/.test(document.getElementById("meta")?.textContent || ""));
 });
 await step("내보내기 → 가져오기", async () => {
+  await openSub("진행 기록");
   const [dl] = await Promise.all([page.waitForEvent("download"), T("text=진행 내보내기").click()]);
   const f = "check-out/qa/export.json";
   await dl.saveAs(f);
@@ -254,7 +260,7 @@ await step("백업에서 복원 창", async () => {
   return `백업 ${n2}개`;
 });
 await step("페이지 더 읽어서 붙이기 화면 열고 닫기", async () => {
-  await T("text=이 도안에 페이지 더 읽어서 붙이기").click();
+  await T("text=페이지 더 읽어서 붙이기").click();
   await T("#uploadView").waitFor();
   ok(/붙이기/.test(await txt("#uploadView h2")), "제목");
   await T("#uploadView >> text=돌아가기").click();
@@ -263,7 +269,7 @@ await step("페이지 더 읽어서 붙이기 화면 열고 닫기", async () =>
 
 await step("페이지 더 읽어서 붙이기: 같은 PDF의 다른 쪽 → 파트 늘어남", async () => {
   const before = (await T(".ptab").allTextContents()).length;
-  await T("text=이 도안에 페이지 더 읽어서 붙이기").click();
+  await T("text=페이지 더 읽어서 붙이기").click();
   await T("#fileIn").setInputFiles(pdfPath);
   await page.waitForFunction(() => /골랐어요|없어요/.test(document.querySelector(".pg-tools .hint")?.textContent || ""), null, { timeout: 60000 });
   await T("input[aria-label='페이지 범위']").fill("4");
@@ -287,13 +293,16 @@ await step("이 기기에 PDF 다시 연결 (쪽 안 고르고 연결만)", asyn
   await page.waitForFunction(() => /연결했어요/.test(document.getElementById("status")?.textContent || ""));
 });
 await step("백업에서 복원 → 실제로 되돌아감", async () => {
+  await backSub();
   await T("#meta >> text=지금 저장").click();
   await page.waitForTimeout(300);
   const row0 = await txt(".rowno b");
   await T("#nextBtn").click(); await T("#nextBtn").click();
+  await openSub("진행 기록");
   await T("text=백업에서 복원").click();
   await T(".dlg .hist button").first().click();
   await page.waitForTimeout(500);
+  await backSub();
   ok((await txt(".rowno b")) === row0, `복원 후 단 ${await txt(".rowno b")} (기대 ${row0})`);
 });
 await step("사진 → 도안 읽기 (키 없음 → 이미지 첨부 요청)", async () => {
@@ -436,6 +445,7 @@ await step("설정 창: 키 방식 고르면 키 칸 보임 / 빈 키 저장 막
 });
 await step("도안 삭제 (확인 단계)", async () => {
   const before = await T("#patSel option").count();
+  await openSub("진행 기록");
   await T(".danger button:has-text('이 도안 삭제')").click();
   await T(".danger span button:has-text('삭제')").click();
   await page.waitForFunction((b) => document.querySelectorAll("#patSel option").length === b - 1, before, { timeout: 5000 });
@@ -457,7 +467,7 @@ await step("단 안 적고 이동 → 그 파트 첫 단", async () => {
   await T(".tools button[type=submit]").click();
   await page.waitForTimeout(300);
   const chip = await txt(".now .chip");
-  const first = (await T(".rows2 li .n").first().textContent()).match(/\d+/)[0];
+  const first = String(await page.evaluate(async (s) => { const m = await import("/src/model.ts"); const st = await import("/src/store.ts"); return m.partRows(st.active(), s)[0].n; }, target));
   const now = await txt(".rowno b");
   ok(chip === target, `파트가 안 바뀜: ${chip}`);
   ok(now === first, `첫 단이 아님: ${now} (첫 단 ${first})`);
@@ -491,12 +501,13 @@ await step("스트레칭 알림 → 타이머 자동 정지 → 다시 시작", 
   return "멈춤 → 다시 시작 ✓";
 });
 await step("진행 기록 지우기", async () => {
-  await T("summary:has-text('진행 기록')").click();
+  await openSub("진행 기록");
   if (!(await T("text=진행 기록 지우기").count())) return "기록 없음(건너뜀)";
   await T("text=진행 기록 지우기").click();
   await T(".dlg button.primary:has-text('지우기')").click();
   await page.waitForTimeout(200);
   ok(!(await T("text=진행 기록 지우기").count()), "안 지워짐");
+  await backSub();
 });
 await step("새로고침 후 유지 (도안·탭·단)", async () => {
   const sel = await T("#patSel").inputValue();

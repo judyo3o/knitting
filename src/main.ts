@@ -17,7 +17,7 @@ import { openSettings, manualHandler, openViewer } from "./dialogs";
 import { openUpload } from "./upload";
 import { openEditor, type DrawSize } from "./drawui";
 import { gaugeSummary, openGauge } from "./gaugeui";
-import { $, ask, dialog, download, fmtFull, fmtShort, fmtSmart, fmtTime, h, toast } from "./ui";
+import { $, ask, dialog, download, fmtDay, fmtFull, fmtShort, fmtSmart, fmtTime, h, toast } from "./ui";
 import type { Pattern, Row } from "./types";
 import { rowText, stitchEdgeX, type RowStitch } from "./symbols";
 
@@ -29,6 +29,7 @@ const view = {
   useDrawing: {} as Record<string, boolean>, // 파트별: 그린 배색 보기 (기본: 그린 게 있으면 그것)
   editing: false,
   home: false, // 도안 목록 화면
+  sub: null as null | "rows" | "log", // 진행 화면에서 연 단 목록 · 진행 기록 화면
 };
 try {
   Object.assign(view, JSON.parse(localStorage.getItem("view") || "{}"));
@@ -148,7 +149,12 @@ export function render() {
   const s = currentTab(p);
   if (p.tab !== s) p.tab = s;
   const r = currentRow(p, s)!;
-  root.append(tabs(p, s), nowCard(p, r), tools(p, s), infoCard(p), rowList(p, s), history(p), dangerZone(p));
+  if (view.sub) return renderSub(p, s, r);
+  // 진행 화면: 지금 단 카드 + 단 목록 · 진행 기록 화면으로 가는 버튼
+  const links = h("div", { class: "sub-links" },
+    h("button", { class: "sub-link", type: "button", on: { click: () => { view.sub = "rows"; render(); window.scrollTo({ top: 0 }); } } }, "단 목록", h("span", { text: "›" })),
+    h("button", { class: "sub-link", type: "button", on: { click: () => { view.sub = "log"; render(); window.scrollTo({ top: 0 }); } } }, "진행 기록", h("span", { text: "›" })));
+  root.append(tabs(p, s), nowCard(p, r), links, tools(p, s));
   const prog = partProgress(p, s);
   const list = partRows(p, s);
   const isLast = list[list.length - 1] === r;
@@ -301,7 +307,7 @@ function chartPage(p: Pattern, r: Row) {
 }
 
 function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBox: HTMLElement) {
-  const wrap = h("div", { style: "display:flex;flex-direction:column;gap:6px" });
+  const wrap = h("div", { class: "chart-col", style: "display:flex;flex-direction:column;gap:6px" });
   const d = p.draw[r.s];
   const page = chartPage(p, r);
   const useDraw = !!d && (view.useDrawing[r.s] ?? true);
@@ -979,6 +985,54 @@ function rowText1(x: Row) {
   return x.n === x.span[1] && sp.end ? `${sp.each} → 다 뜨면: ${sp.end}` : sp.each;
 }
 
+/** 단 목록 · 진행 기록 화면 (진행 화면에서 '›'로 연다) */
+function renderSub(p: Pattern, s: string, r: Row) {
+  const root = $("#trackView");
+  $("#thumb").hidden = true;
+  $("#meta").hidden = true;
+  document.querySelector(".top")?.setAttribute("hidden", "");
+  const back = () => { view.sub = null; render(); window.scrollTo({ top: 0 }); };
+  const pr = partProgress(p, s);
+  const head = (title: string, sub: string) => h("header", { class: "sub-head" },
+    h("button", { class: "round-btn", type: "button", "aria-label": "진행 화면", text: "‹", on: { click: back } }),
+    h("div", { class: "sub-title" }, h("b", { text: title }), h("span", { text: sub })));
+  if (view.sub === "rows") {
+    const num = h("input", { type: "number", min: 1, inputmode: "numeric", placeholder: "단 번호로 이동", "aria-label": "단 번호" });
+    const form = h("form", { class: "jump" }, num, h("button", { class: "btn lav", type: "submit", text: "이동" }));
+    form.onsubmit = (e) => {
+      e.preventDefault();
+      const n = num.value.trim() ? parseInt(num.value, 10) : partRows(p, s)[0]?.n;
+      if (n == null || !jumpTo(p, s, n)) return toast(`${s}에 ${num.value}단이 없어요.`);
+      commit(p, false); back();
+    };
+    root.append(head("단 목록", `${p.name} · ${s} ${r.n}/${pr.total}단`), tabs(p, s), form, infoCard(p), rowList(p, s));
+  } else {
+    root.append(head("진행 기록", `${p.name} · 10분 안에 이어 뜬 단은 한 번으로`), history(p), backupCard(p));
+  }
+}
+
+/** 저장 · 백업 카드 + 이 도안 삭제 */
+function backupCard(p: Pattern) {
+  if (p.example) return h("div", { class: "danger" }, h("button", { class: "link", type: "button", text: "진행 가져오기 (JSON)", on: { click: importFile } }));
+  const confirm = h("span", { hidden: true }, "정말 지울까요? 진행 기록도 함께 지워져요. ",
+    h("button", { class: "btn", type: "button", text: "삭제", on: { click: async () => { await removePattern(p.id); view.sub = null; render(); toast("도안을 지웠어요."); } } }), " ",
+    h("button", { class: "btn ghost", type: "button", text: "취소", on: { click: () => (confirm.hidden = true) } }));
+  return h("div", { class: "backup-wrap" },
+    h("div", { class: "home-sec", text: "저장 · 백업" }),
+    h("section", { class: "backup" },
+      h("div", { class: "bk-top" },
+        h("div", { class: "bk-txt" }, h("b", { text: state.lastSaved ? `마지막 저장 ${fmtSmart(state.lastSaved)}` : "이 기기에 바로 저장돼요" }), h("span", { text: "이 기기에 바로 저장 · 10분마다 백업" })),
+        h("button", { class: "btn lav", type: "button", text: "지금 저장", on: { click: async () => { await saveNow(); render(); toast("저장했어요."); } } })),
+      h("div", { class: "bk-grid" },
+        h("button", { class: "btn ghost", type: "button", text: "진행 내보내기", on: { click: () => download(`knitting-progress-${new Date().toISOString().slice(0, 10)}.json`, exportJson()) } }),
+        h("button", { class: "btn ghost", type: "button", text: "가져오기", on: { click: importFile } }),
+        h("button", { class: "btn ghost", type: "button", text: "백업에서 복원", on: { click: restoreDialog } }))),
+    h("div", { class: "danger" },
+      h("button", { class: "link", type: "button", text: "페이지 더 읽어서 붙이기", on: { click: () => openUpload({ appendTo: p.id, onDone: render }) } }),
+      p.src === "pdf" ? h("button", { class: "link", type: "button", text: "이 기기에 PDF 다시 연결", on: { click: () => openUpload({ appendTo: p.id, relink: true, onDone: render }) } }) : null,
+      h("button", { class: "link warn", type: "button", text: "이 도안 삭제", on: { click: () => (confirm.hidden = false) } }), confirm));
+}
+
 function rowList(p: Pattern, s: string) {
   const cur = currentRow(p, s);
   const ol = h("ol", { class: "rows2" });
@@ -988,7 +1042,7 @@ function rowList(p: Pattern, s: string) {
       h("span", { class: "n", text: x.n + "단" + (x.side ? " " + x.side : "") }),
       h("span", { class: "t", text: rowText1(x) + (x.st ? `  (${x.st})` : "") }),
       h("span", { class: "when", text: t ? fmtShort(t) : "" }));
-    b.onclick = () => { jumpTo(p, s, x.n); commit(p, false); render(); window.scrollTo({ top: 0, behavior: "smooth" }); };
+    b.onclick = () => { jumpTo(p, s, x.n); commit(p, false); view.sub = null; render(); window.scrollTo({ top: 0, behavior: "smooth" }); };
     ol.append(h("li", {}, b));
   }
   requestAnimationFrame(() => {
@@ -1003,18 +1057,28 @@ function rowList(p: Pattern, s: string) {
 }
 
 function history(p: Pattern) {
-  const ul = h("ul", { class: "hist" });
-  const recent = [...p.log].reverse().slice(0, 40);
-  for (const l of recent) {
-    const d = l.to - l.from;
-    ul.append(h("li", {}, h("span", { text: `${l.s} ${l.from}→${l.to}단` }), h("span", { class: "d", text: `${fmtShort(l.a)}–${fmtTime(l.b)} · ${d >= 0 ? "+" : ""}${d}단` })));
+  const wrap = h("div", { class: "hist-wrap" });
+  const recent = [...p.log].reverse().slice(0, 60);
+  if (!recent.length) wrap.append(h("p", { class: "gen", text: "아직 기록이 없어요. '다음 단'을 누르면 시각이 남아요." }));
+  // 날짜별로 묶어 카드 하나에
+  const days = new Map<string, typeof recent>();
+  for (const l of recent) { const d = fmtDay(l.a); days.set(d, [...(days.get(d) || []), l]); }
+  for (const [day, ls] of days) {
+    const card = h("div", { class: "hist-card" });
+    for (const l of ls) {
+      const d = l.to - l.from, total = partRows(p, l.s).length || 1;
+      const fin = p.fin[l.s] && p.fin[l.s] >= l.a - 60000 && p.fin[l.s] <= l.b + 60000;
+      card.append(h("div", { class: "hist-row" },
+        h("div", { class: "hr-top" }, h("b", {}, `${l.s} ${l.from} → ${l.to}단`, fin ? h("span", { class: "badge fin", text: "완료 ✓" }) : null), h("span", { class: "hr-d", text: `${d >= 0 ? "+" : ""}${d}단` })),
+        h("div", { class: "hr-bar" }, yarnBar(Math.abs(d) / total, !!fin), h("span", { text: `${fmtTime(l.a)} – ${fmtTime(l.b)}` }))));
+    }
+    wrap.append(h("div", { class: "home-sec", text: day }), card);
   }
-  if (!recent.length) ul.append(h("li", { class: "d", text: "아직 기록이 없어요. '다음 단'을 누르면 시각이 남아요." }));
-  const clear = p.log.length ? h("div", { class: "actions", style: "padding:8px 16px 0" }, h("button", { class: "btn ghost", type: "button", text: "진행 기록 지우기", on: { click: async () => {
+  if (p.log.length) wrap.append(h("div", { class: "actions" }, h("button", { class: "btn ghost", type: "button", text: "진행 기록 지우기", on: { click: async () => {
     if (!(await ask("진행 기록 지우기", `진행 기록 ${p.log.length}개를 지워요. 지금 단 위치와 뜬 단 표시는 그대로예요.`, "지우기"))) return;
     p.log = []; commit(p); render(); toast("진행 기록을 지웠어요.");
-  } } })) : null;
-  return h("details", { class: "sheet" }, h("summary", { text: "진행 기록" }), ul, clear);
+  } } })));
+  return wrap;
 }
 
 function dangerZone(p: Pattern) {
