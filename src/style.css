@@ -1,22 +1,37 @@
+@import url("https://fonts.googleapis.com/css2?family=Jua&family=Gowun+Dodum&family=IBM+Plex+Sans+KR:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap");
 /* Layout: one narrow pattern-sheet column; the current row sits on graph paper like a chart,
    the full pattern below is a printed sheet with highlighter tape on the row you're on,
    and prev/next live in a thumb bar fixed to the bottom of the screen. */
 :root{
-  --paper:#F3F5F2; --sheet:#FFFFFF; --ink:#1D2330; --ink-2:#5A6372; --rule:#DFE3DC;
-  --grid:#E7EBE4; --accent:#2D49A6; --accent-ink:#FFFFFF; --hi:#FFE55C; --hi-ink:#1D2330;
-  --warn:#9A4A10; --warn-bg:#FFF2E2; --ok:#24704A;
-  --display:"Gowun Batang","Noto Serif KR",serif;
+  /* 뜨개느낌 v2: 우유색 바탕 · 차콜 글자 · 핑크 실 · 하늘 현재 단 · 보라 완료/선택 */
+  --paper:#F7F4F1; --sheet:#FFFFFF; --ink:#3A3440; --ink-2:#6B6372; --rule:#ECE6E2; --dash:#E2DAD6;
+  --grid:#EFEAE8; --accent:#EFA9B7; --accent-ink:#3A3440; --rose:#A8475D;
+  --pink:#EFA9B7; --pink-l:#F7CDD5; --pink-d:#DE8D9F; --pink-bg:#FDF3F5;
+  --sky:#BFDDF2; --lav:#C3B3EA; --lav-2:#D3C6EE; --lav-l:#E6DEF7; --lav-ink:#5B4A8F; --lav-bg:#EEE8FA;
+  --hi:#BFDDF2; --hi-ink:#3A3440;
+  --warn:#9A4A10; --warn-bg:#FFF2E2; --ok:#5B4A8F;
+  --display:"Jua","Gowun Dodum",sans-serif;
+  --num:"Gowun Dodum","IBM Plex Sans KR",sans-serif;
   --body:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
   --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+  --yarn:repeating-linear-gradient(-60deg,var(--pink) 0 3px,var(--pink-l) 3px 5px,var(--pink-d) 5px 7px);
+  --yarn-done:repeating-linear-gradient(-60deg,var(--lav) 0 3px,var(--lav-l) 3px 5px,#A893D9 5px 7px);
+  --stitch:1.5px dashed rgba(222,141,159,.38);
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
-  --paper:#14171C; --sheet:#1B1F26; --ink:#E8EBF0; --ink-2:#9AA3B1; --rule:#2B313B;
-  --grid:#20252D; --accent:#93A8FF; --accent-ink:#121624; --hi:#6B5A12; --hi-ink:#FFF4BF;
-  --warn:#F2B27A; --warn-bg:#2C2117; --ok:#7FD3A6; color-scheme:dark}}
+  --paper:#1F1D24; --sheet:#2A2730; --ink:#EEE9F0; --ink-2:#A9A2B0; --rule:#3A3641; --dash:#4A4552;
+  --grid:#24222A; --accent:#E9A3B2; --accent-ink:#2A2026; --rose:#E9A3B2;
+  --pink:#E9A3B2; --pink-l:#F5C6D0; --pink-d:#C9808F; --pink-bg:#3A2B31;
+  --sky:#3F5568; --lav:#C3B3EA; --lav-2:#C3B3EA; --lav-l:#3E3752; --lav-ink:#C3B3EA; --lav-bg:#332D44;
+  --hi:#3F5568; --hi-ink:#EEE9F0; --warn:#F2B27A; --warn-bg:#2C2117; --ok:#C3B3EA;
+  --stitch:1.5px dashed rgba(233,163,178,.35); color-scheme:dark}}
 :root[data-theme="dark"]{
-  --paper:#14171C; --sheet:#1B1F26; --ink:#E8EBF0; --ink-2:#9AA3B1; --rule:#2B313B;
-  --grid:#20252D; --accent:#93A8FF; --accent-ink:#121624; --hi:#6B5A12; --hi-ink:#FFF4BF;
-  --warn:#F2B27A; --warn-bg:#2C2117; --ok:#7FD3A6; color-scheme:dark}
+  --paper:#1F1D24; --sheet:#2A2730; --ink:#EEE9F0; --ink-2:#A9A2B0; --rule:#3A3641; --dash:#4A4552;
+  --grid:#24222A; --accent:#E9A3B2; --accent-ink:#2A2026; --rose:#E9A3B2;
+  --pink:#E9A3B2; --pink-l:#F5C6D0; --pink-d:#C9808F; --pink-bg:#3A2B31;
+  --sky:#3F5568; --lav:#C3B3EA; --lav-2:#C3B3EA; --lav-l:#3E3752; --lav-ink:#C3B3EA; --lav-bg:#332D44;
+  --hi:#3F5568; --hi-ink:#EEE9F0; --warn:#F2B27A; --warn-bg:#2C2117; --ok:#C3B3EA;
+  --stitch:1.5px dashed rgba(233,163,178,.35); color-scheme:dark}
 
 *{box-sizing:border-box}
 /* 내용 폭: 화면 폭을 따라가되 너무 넓으면 읽기 힘들어 상한 */
@@ -269,3 +284,70 @@ details.sheet>summary::after{content:" ▾";color:var(--ink-2)}
 .btn.work-on{background:#E83E8C;color:#fff;border-color:#E83E8C}
 .prog-col{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
 .prog-col .work{justify-content:flex-end}
+
+/* ================= 뜨개느낌 v2 (디자인 목업 Ddeugae Mockups v2) ================= */
+body{background:var(--paper);background-image:none}
+h1{font-family:var(--display);font-weight:400;font-size:1.75rem;line-height:1.2}
+h2,.dlg h2{font-family:var(--display);font-weight:400;font-size:1.3rem}
+.btn{border-radius:16px;border-color:var(--rule);background:var(--sheet);color:var(--ink)}
+.btn.primary{background:var(--pink);border-color:var(--pink);color:var(--accent-ink);font-weight:600}
+.btn.ghost{background:var(--paper)}
+.btn:hover{filter:brightness(.98)}
+.link{color:var(--rose)}
+select,input[type=text],input[type=number],input[type=password],textarea{border-radius:14px;border-color:var(--rule)}
+.meta{font-family:var(--num);font-size:.78rem;color:var(--ink-2)}
+/* 파트 탭: 실 꼬리표 모양 */
+.ptab{border-radius:8px 999px 999px 8px;padding:6px 12px 6px 8px;display:inline-flex;align-items:center;gap:6px;background:var(--sheet);border-color:var(--rule)}
+.ptab::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--paper);border:1px solid #D6CDD0;flex:none}
+.ptab small{font-family:var(--num);font-size:.72rem;color:var(--ink-2)}
+.ptab.fin{border-color:var(--lav)}
+.ptab.fin::before{border-color:var(--lav)}
+.ptab.fin small{color:var(--lav-ink)}
+.ptab[aria-selected=true]{background:var(--lav-2);border-color:var(--lav);color:var(--ink);font-weight:600}
+.ptab[aria-selected=true]::before{border:0}
+.ptab[aria-selected=true] small{color:var(--ink);opacity:.75}
+/* 카드: 바느질 테두리 */
+.now,.sheet,.gauge-set,.dlg-in{border-radius:28px;border-color:var(--rule);outline:var(--stitch);outline-offset:-7px}
+.now{background-image:none;padding:18px 16px 16px}
+.sheet{border-radius:26px;outline:none}
+.chip{font-family:var(--num);font-weight:400;font-size:.76rem;background:var(--paper);border-color:var(--rule)}
+.chip.fin{background:var(--lav-l);color:var(--lav-ink);border-color:var(--lav)}
+/* 지금 단 번호: 주아 큰 숫자 + 그 아래 실 */
+.rowno b{font-family:var(--display);font-weight:400;font-size:4.75rem;line-height:.9;letter-spacing:-.02em;background:none;padding:0;position:relative}
+.rowno b::after{content:"";position:absolute;left:0;right:0;bottom:-8px;height:6px;border-radius:999px;background:var(--yarn)}
+.rowno .unit{font-family:var(--display);font-weight:400;font-size:1.4rem}
+.rowno .st{font-family:var(--num)}
+.prog{font-family:var(--num);color:var(--ink-2)}
+/* 진행 막대: 뜬 만큼 꼬인 실 · 남은 건 점선 · 끝에 실뭉치 */
+.bar{height:8px;background:none;border-radius:999px;overflow:visible;display:flex;align-items:center;position:relative}
+.bar i{display:block;height:8px;border-radius:999px;background:var(--yarn)}
+.bar::after{content:"";flex:1;border-top:2px dashed var(--dash);margin:0 22px 0 4px}
+.bar::before{content:"";position:absolute;right:0;top:50%;width:18px;height:18px;margin-top:-9px;border-radius:50%;background:repeating-linear-gradient(38deg,var(--pink) 0 2px,var(--pink-l) 2px 4px);box-shadow:inset -3px -3px 5px rgba(0,0,0,.25)}
+/* 서술 묶음: 둥근 알약, 뜬 묶음은 줄 긋기 */
+.chunks{background:none;padding:0;gap:6px}
+.chunk{border-radius:999px;padding:8px 12px;font-size:1rem;background:var(--sheet);border-color:var(--rule)}
+.chunk.done{background:#F1ECEA;color:var(--ink-2);text-decoration:line-through}
+.chunk.last{outline:2px solid var(--pink);outline-offset:1px}
+.chunk-meta,.gen,.span-note{font-family:var(--num)}
+.instr{border-radius:16px}
+.chartbox{border-radius:16px;border-color:var(--rule)}
+.charttools .btn{border-radius:8px}
+.yarns .yarn{border-radius:999px}
+/* 아래 이전/다음 단 */
+.thumb{border-top:1px dashed var(--dash);background:var(--sheet)}
+.thumb .btn{border-radius:22px;padding:15px 8px}
+.thumb .btn.primary{display:flex;flex-direction:column;align-items:center;gap:1px;padding:9px 8px}
+.thumb .btn.primary small{font-family:var(--num);font-weight:400;font-size:.72rem;opacity:.85;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 단 목록: 지금 단은 하늘색 형광펜 */
+.rows2 button.on{background:linear-gradient(transparent 8%,rgba(191,221,242,.55) 8%,rgba(191,221,242,.55) 92%,transparent 92%)}
+.rows2 .n,.hist .d{font-family:var(--num)}
+.rows2 li{border-bottom:1px dashed var(--rule)}
+/* 아래에서 올라오는 시트 (게이지·설정) */
+.dlg-in{border-radius:28px 28px 0 0}
+@media (min-width:640px){.dlg-in{border-radius:28px}}
+.dlg-in::before{content:"";display:block;width:40px;height:5px;border-radius:999px;background:var(--dash);margin:0 auto 6px}
+.radio label{border-radius:22px}
+.radio label:has(input:checked){border:1.5px solid var(--pink-d);background:var(--pink-bg)}
+.gauge-out{background:var(--lav-bg);border-radius:16px;padding:10px 12px}
+.work-clock{font-family:var(--num)}
+.btn.work-on{background:var(--lav-2);border-color:var(--lav);color:var(--ink)}

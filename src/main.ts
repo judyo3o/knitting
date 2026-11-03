@@ -84,7 +84,12 @@ export function render() {
   const list = partRows(p, s);
   const isLast = list[list.length - 1] === r;
   $<HTMLButtonElement>("#prevBtn").disabled = list[0] === r && !prog.finished;
-  $("#nextBtn").textContent = prog.finished ? "다음 파트로 →" : isLast ? "이 파트 완료 ✓" : "다음 단 →";
+  // 다음 단 버튼 아래에 다음 단 미리보기 (예: "5단 · A 2코, B 3코…")
+  const nb = $("#nextBtn");
+  nb.innerHTML = "";
+  const nx = list[list.indexOf(r) + 1];
+  const pv = nx && !prog.finished ? `${nx.n}단 · ${(splitNarrative(nx.t || "").chunks.slice(0, 3).join(", ") || spanParts(nx.t, nx.span).each).slice(0, 28)}…` : "";
+  nb.append(h("span", { text: prog.finished ? "다음 파트로 →" : isLast ? "이 파트 완료 ✓" : "다음 단 →" }), pv ? h("small", { text: pv }) : "");
 }
 
 function renderSelect(p: Pattern) {

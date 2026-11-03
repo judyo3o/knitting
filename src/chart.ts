@@ -4,9 +4,9 @@ import { MAX_PIXELS, renderPage, renderRegion, textItems, pageSize, type Pdf } f
 import { cellAspect, dominantColors, getCell, hasRow, rowIndex } from "./drawing";
 import type { Drawing, Side, Yarn } from "./types";
 
-export const MARK = "rgba(232, 62, 140, 0.28)";
-export const MARK_LINE = "#E83E8C";
-const DONE = "rgba(60, 60, 60, 0.16)";
+export const MARK = "rgba(191, 221, 242, 0.45)"; // 하늘 · 지금 단
+export const MARK_LINE = "#DE8D9F"; // 핑크 실 테두리·화살표
+const DONE = "rgba(255, 255, 255, 0.6)"; // 뜬 단은 흐리게
 
 export type Bitmap = { canvas: HTMLCanvasElement; scale: number; charts: Chart[]; w: number; h: number };
 const bmpCache = new Map<string, Promise<Bitmap>>();
