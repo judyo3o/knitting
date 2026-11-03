@@ -1,0 +1,901 @@
+<title>도안 단수 카운터</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
+<style>
+/* Layout: one narrow pattern-sheet column; the current row sits on graph paper like a chart,
+   the full pattern below is a printed sheet with highlighter tape on the row you're on,
+   and prev/next live in a thumb bar fixed to the bottom of the screen. */
+:root{
+  --paper:#F3F5F2; --sheet:#FFFFFF; --ink:#1D2330; --ink-2:#5A6372; --rule:#DFE3DC;
+  --grid:#E7EBE4; --accent:#2D49A6; --accent-ink:#FFFFFF; --hi:#FFE55C; --hi-ink:#1D2330;
+  --warn:#9A4A10; --warn-bg:#FFF2E2; --ok:#24704A;
+  --display:"Gowun Batang","Noto Serif KR",serif;
+  --body:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --paper:#14171C; --sheet:#1B1F26; --ink:#E8EBF0; --ink-2:#9AA3B1; --rule:#2B313B;
+  --grid:#20252D; --accent:#93A8FF; --accent-ink:#121624; --hi:#6B5A12; --hi-ink:#FFF4BF;
+  --warn:#F2B27A; --warn-bg:#2C2117; --ok:#7FD3A6; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --paper:#14171C; --sheet:#1B1F26; --ink:#E8EBF0; --ink-2:#9AA3B1; --rule:#2B313B;
+  --grid:#20252D; --accent:#93A8FF; --accent-ink:#121624; --hi:#6B5A12; --hi-ink:#FFF4BF;
+  --warn:#F2B27A; --warn-bg:#2C2117; --ok:#7FD3A6; color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.6}
+.wrap{max-width:760px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 140px;display:flex;flex-direction:column;gap:18px}
+h1{font-family:var(--display);font-size:1.45rem;margin:0;letter-spacing:-.01em;text-wrap:balance}
+h2{font-size:1rem;margin:0;font-weight:600;text-wrap:balance}
+button,select,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+.top{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+.top-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+select,input[type=text],input[type=number],textarea{background:var(--sheet);border:1px solid var(--rule);border-radius:8px;padding:8px 10px;min-width:0}
+textarea{width:100%;resize:vertical}
+.btn{border:1px solid var(--rule);background:var(--sheet);border-radius:8px;padding:8px 14px;font-weight:500}
+.btn:hover{border-color:var(--ink-2)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.ghost{background:transparent}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.link{background:none;border:0;padding:0;color:var(--accent);text-decoration:underline;text-underline-offset:3px;font-weight:500}
+
+.banner{background:var(--warn-bg);color:var(--warn);border-radius:8px;padding:10px 14px;font-size:.92rem}
+
+/* current row on graph paper */
+.now{background-color:var(--sheet);border:1px solid var(--rule);border-radius:12px;padding:18px 18px 16px;
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:14px 14px;background-position:-1px -1px;display:flex;flex-direction:column;gap:10px}
+.now-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:4px;font-size:.8rem;font-weight:600;letter-spacing:.02em;padding:3px 9px;border-radius:999px;background:var(--paper);border:1px solid var(--rule)}
+.chip.side{font-family:var(--mono)}
+.prog{font-family:var(--mono);font-size:.82rem;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.rowno{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+.rowno b{font-family:var(--mono);font-weight:600;font-size:3.6rem;line-height:1;font-variant-numeric:tabular-nums;background:linear-gradient(transparent 52%,var(--hi) 52%,var(--hi) 92%,transparent 92%);padding:0 4px;color:var(--ink)}
+.rowno .unit{font-size:1.3rem;font-weight:600}
+.rowno .st{margin-left:auto;font-family:var(--mono);font-size:.95rem;color:var(--ink-2)}
+.instr{font-size:1.12rem;line-height:1.75;margin:0;background:var(--sheet);border-radius:6px;padding:10px 12px;word-break:keep-all;overflow-wrap:anywhere;white-space:pre-wrap}
+.span-note{font-size:.85rem;color:var(--ink-2);margin:0}
+.explain{border-left:3px solid var(--accent);background:var(--sheet);padding:8px 12px;border-radius:0 6px 6px 0;font-size:.98rem;white-space:pre-wrap;overflow-wrap:anywhere}
+.explain small{display:block;color:var(--ink-2);font-size:.8rem;margin-bottom:2px}
+.row-actions{display:flex;flex-wrap:wrap;gap:8px}
+.bar{height:6px;background:var(--grid);border-radius:999px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent);width:0;transition:width .25s}
+
+.tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tools form{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.tools input[type=number]{width:5.5em}
+
+/* the printed sheet */
+.sheet{background:var(--sheet);border:1px solid var(--rule);border-radius:12px;padding:16px 0 8px}
+.sheet-head{padding:0 16px 8px;display:flex;flex-direction:column;gap:6px}
+.notes{font-size:.88rem;color:var(--ink-2);margin:0;white-space:pre-wrap}
+.list{list-style:none;margin:0;padding:0;max-height:52vh;overflow-y:auto;border-top:1px solid var(--rule)}
+.list .sec{position:sticky;top:0;background:var(--sheet);font-weight:600;font-size:.82rem;letter-spacing:.06em;color:var(--ink-2);padding:10px 16px 6px;border-bottom:1px solid var(--rule);z-index:1}
+.list button.r{display:grid;grid-template-columns:4.2em 1fr;gap:10px;width:100%;text-align:left;background:none;border:0;border-bottom:1px dashed var(--rule);padding:8px 16px;font-size:.92rem;line-height:1.5}
+.list button.r .n{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--ink-2);font-size:.85rem;padding-top:1px}
+.list button.r .t{min-width:0;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.list button.r.done .t,.list button.r.done .n{opacity:.5}
+.list button.r.on{background:linear-gradient(transparent 6%,var(--hi) 6%,var(--hi) 94%,transparent 94%);color:var(--hi-ink)}
+.list button.r.on .n{color:var(--hi-ink);font-weight:600}
+.list button.r.on .t{-webkit-line-clamp:unset;opacity:1}
+
+.danger{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:.9rem;color:var(--ink-2)}
+
+/* bottom thumb bar */
+.thumb{position:fixed;left:0;right:0;bottom:0;z-index:5;background:var(--sheet);border-top:1px solid var(--rule);
+  padding-top:10px;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px));
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.thumb-in{max-width:760px;margin:0 auto;display:grid;grid-template-columns:1fr 1.6fr;gap:10px}
+.thumb .btn{padding:14px 10px;font-size:1.05rem;font-weight:600;border-radius:10px}
+
+/* upload view */
+.panel{background:var(--sheet);border:1px solid var(--rule);border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:14px}
+.tabs{display:flex;gap:0;border:1px solid var(--rule);border-radius:8px;overflow:hidden;align-self:flex-start}
+.tabs button{border:0;background:transparent;padding:7px 14px;font-weight:500}
+.tabs button[aria-selected=true]{background:var(--ink);color:var(--sheet)}
+.drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:1.5px dashed var(--ink-2);border-radius:10px;padding:22px 12px;text-align:center;cursor:pointer;background:var(--paper)}
+.drop.over{border-color:var(--accent);background:var(--grid)}
+.drop strong{font-weight:600}
+.drop span{font-size:.85rem;color:var(--ink-2)}
+.field{display:flex;flex-direction:column;gap:4px;font-size:.9rem;font-weight:500}
+.field small{font-weight:400;color:var(--ink-2)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:520px){.grid2{grid-template-columns:1fr}}
+.hint{font-size:.86rem;color:var(--ink-2);margin:0}
+.pages{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px;max-height:360px;overflow-y:auto;padding:2px}
+.pg{position:relative;border:2px solid var(--rule);border-radius:6px;background:var(--paper);padding:0;overflow:hidden;aspect-ratio:1.414/1;display:flex;align-items:center;justify-content:center}
+.pg canvas{max-width:100%;max-height:100%;display:block}
+.pg .num{position:absolute;left:4px;top:3px;font-family:var(--mono);font-size:.72rem;background:var(--sheet);border-radius:4px;padding:0 4px}
+.pg[aria-pressed=true]{border-color:var(--accent)}
+.pg[aria-pressed=true]::after{content:"✓";position:absolute;right:4px;top:2px;background:var(--accent);color:var(--accent-ink);border-radius:999px;width:18px;height:18px;font-size:.72rem;display:flex;align-items:center;justify-content:center}
+.pg-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.pg-tools input{width:12em}
+.files{list-style:none;padding:0;margin:0;font-size:.88rem;display:flex;flex-direction:column;gap:4px}
+.progress{font-size:.92rem;background:var(--paper);border-radius:8px;padding:10px 12px;white-space:pre-wrap}
+.actions{display:flex;flex-wrap:wrap;gap:8px}
+
+/* original viewer */
+.viewer{position:fixed;inset:0;z-index:20;background:var(--paper);display:flex;flex-direction:column;
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+.viewer-bar{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:10px max(16px,env(safe-area-inset-right,0px)) 10px max(16px,env(safe-area-inset-left,0px));border-bottom:1px solid var(--rule);background:var(--sheet)}
+.viewer-body{flex:1;overflow:auto;padding:12px}
+.viewer-body canvas,.viewer-body img{display:block;margin:0 auto;max-width:100%;background:#fff}
+.viewer-body.zoom canvas,.viewer-body.zoom img{max-width:none;width:220%}
+.status{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(92px + env(safe-area-inset-bottom,0px));z-index:30;background:var(--ink);color:var(--sheet);padding:8px 14px;border-radius:8px;font-size:.88rem;max-width:calc(100% - 32px);opacity:0;pointer-events:none;transition:opacity .2s}
+.status.show{opacity:1}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <h1>도안 단수 카운터</h1>
+    <div class="top-actions">
+      <label for="patSel" class="sr">도안 선택</label>
+      <select id="patSel"></select>
+      <button id="addBtn" class="btn primary" type="button">+ 도안 올리기</button>
+    </div>
+  </header>
+
+  <!-- ===== tracker ===== -->
+  <main id="trackView" style="display:flex;flex-direction:column;gap:18px">
+    <div id="exampleNote" class="banner" hidden>지금 보이는 건 예시 도안이에요. 위의 <b>+ 도안 올리기</b>로 내 도안(사진·PDF·텍스트)을 올리면 단별로 나눠서 보여줘요.</div>
+
+    <section class="now" aria-live="polite">
+      <div class="now-head">
+        <div class="chips"><span id="secChip" class="chip"></span><span id="sideChip" class="chip side" hidden></span></div>
+        <span id="progText" class="prog"></span>
+      </div>
+      <div class="rowno"><b id="rowNum">1</b><span class="unit">단</span><span id="stText" class="st"></span></div>
+      <p id="spanNote" class="span-note" hidden></p>
+      <p id="rowText" class="instr"></p>
+      <div id="explainBox" class="explain" hidden></div>
+      <div id="editBox" hidden style="display:flex;flex-direction:column;gap:8px">
+        <label for="editArea" class="sr">이 단 서술 수정</label>
+        <textarea id="editArea" rows="4"></textarea>
+        <div class="actions"><button id="editSave" class="btn primary" type="button">저장</button><button id="editCancel" class="btn" type="button">취소</button></div>
+      </div>
+      <div class="row-actions">
+        <button id="chartBtn" class="btn" type="button" hidden>차트 보기</button>
+        <button id="explainBtn" class="btn" type="button" hidden>이 단 차트를 글로 풀기</button>
+        <button id="srcBtn" class="btn ghost" type="button" hidden>원본 보기</button>
+        <button id="editBtn" class="btn ghost" type="button">이 단 수정</button>
+      </div>
+      <div class="bar" aria-hidden="true"><i id="barFill"></i></div>
+    </section>
+
+    <div class="tools">
+      <form id="jumpForm">
+        <label for="jumpSec" class="sr">파트</label>
+        <select id="jumpSec"></select>
+        <label for="jumpNum" class="sr">단 번호</label>
+        <input id="jumpNum" type="number" min="1" inputmode="numeric" placeholder="단">
+        <button class="btn" type="submit">이동</button>
+      </form>
+      <button id="wakeBtn" class="btn ghost" type="button" aria-pressed="false">화면 켜두기</button>
+    </div>
+
+    <section class="sheet">
+      <div class="sheet-head">
+        <h2 id="sheetTitle">전체 도안</h2>
+        <p id="notes" class="notes" hidden></p>
+      </div>
+      <ol id="rowList" class="list"></ol>
+    </section>
+
+    <div class="danger" id="dangerZone">
+      <button id="moreBtn" class="link" type="button">이 도안에 페이지 더 읽어서 붙이기</button>
+      <span aria-hidden="true">·</span>
+      <button id="delBtn" class="link" type="button">이 도안 삭제</button>
+      <span id="delConfirm" hidden>정말 지울까요? 진행 기록도 함께 지워져요. <button id="delYes" class="btn" type="button">삭제</button> <button id="delNo" class="btn ghost" type="button">취소</button></span>
+    </div>
+  </main>
+
+  <!-- ===== upload ===== -->
+  <main id="uploadView" hidden>
+    <section class="panel">
+      <h2 id="upTitle">도안 올리기</h2>
+      <div class="tabs" role="tablist">
+        <button id="tabFileBtn" role="tab" aria-selected="true" type="button">사진 · PDF</button>
+        <button id="tabTextBtn" role="tab" aria-selected="false" type="button">텍스트 붙여넣기</button>
+      </div>
+
+      <div id="tabFile" style="display:flex;flex-direction:column;gap:12px">
+        <label id="drop" class="drop" for="fileIn">
+          <strong>도안 PDF나 사진을 고르세요</strong>
+          <span>사진은 여러 장 한 번에 · 끌어다 놓아도 돼요</span>
+        </label>
+        <input id="fileIn" class="sr" type="file" multiple accept="application/pdf,image/*">
+        <ul id="fileList" class="files"></ul>
+        <div id="pdfPick" hidden style="display:flex;flex-direction:column;gap:8px">
+          <div class="pg-tools">
+            <span id="autoNote" class="hint">서술이 있는 페이지를 찾는 중…</span>
+          </div>
+          <div class="pg-tools">
+            <label for="pgRange" class="sr">페이지 범위</label>
+            <input id="pgRange" type="text" placeholder="예: 4-5, 7-11">
+            <button id="pgApply" class="btn" type="button">범위 선택</button>
+            <button id="pgClear" class="btn ghost" type="button">선택 해제</button>
+            <span id="pgCount" class="prog"></span>
+          </div>
+          <div id="pages" class="pages"></div>
+        </div>
+        <p id="aiNote" class="hint"></p>
+      </div>
+
+      <div id="tabText" hidden style="display:flex;flex-direction:column;gap:8px">
+        <label for="textIn" class="sr">도안 텍스트</label>
+        <textarea id="textIn" rows="10" placeholder="1단(RS): 겉뜨기 끝까지&#10;2단(WS): 안뜨기 끝까지&#10;3~6단: 1~2단 반복 (48코)"></textarea>
+        <p class="hint">'1단', '1~3단', 'Row 1', 'R1' 같은 표기를 단 단위로 나눠요. 반복 지시가 많으면 Claude가 풀어서 정리해요.</p>
+      </div>
+
+      <div class="grid2">
+        <label class="field" for="nameIn">도안 이름<input id="nameIn" type="text" placeholder="예: 하트 체인 가디건"></label>
+        <label class="field" for="sizeIn">뜨는 사이즈 <small>S (M) L… 처럼 사이즈가 나뉜 도안이면 꼭 적어주세요</small><input id="sizeIn" type="text" placeholder="예: L"></label>
+      </div>
+
+      <div class="actions">
+        <button id="readBtn" class="btn primary" type="button">도안 읽기</button>
+        <button id="stopBtn" class="btn" type="button" hidden>중지</button>
+        <button id="cancelUp" class="btn ghost" type="button">돌아가기</button>
+      </div>
+      <div id="upProgress" class="progress" hidden></div>
+    </section>
+  </main>
+</div>
+
+<nav class="thumb" id="thumb" aria-label="단 이동">
+  <div class="thumb-in">
+    <button id="prevBtn" class="btn" type="button">← 이전 단</button>
+    <button id="nextBtn" class="btn primary" type="button">다음 단 →</button>
+  </div>
+</nav>
+
+<div id="viewer" class="viewer" hidden role="dialog" aria-modal="true" aria-label="원본 도안">
+  <div class="viewer-bar">
+    <div class="actions">
+      <button id="vPrev" class="btn" type="button">‹</button>
+      <span id="vLabel" class="prog" style="align-self:center"></span>
+      <button id="vNext" class="btn" type="button">›</button>
+    </div>
+    <div class="actions">
+      <button id="vZoom" class="btn" type="button" aria-pressed="false">확대</button>
+      <button id="vClose" class="btn primary" type="button">닫기</button>
+    </div>
+  </div>
+  <div id="vBody" class="viewer-body"></div>
+</div>
+
+<div id="status" class="status" role="status"></div>
+
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const LS_KEY = "row-counter-v1";
+const PDF_JS = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+const PDF_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+/* ---------- example pattern (shown only until the viewer adds their own) ---------- */
+const EXAMPLE_SECTIONS = [
+  {name:"고무단", rows:[
+    {from:1,to:1,side:"RS",text:"4mm 바늘로 일반코잡기 60코. 시작마커 걸고 원통으로 연결, (겉1, 안1) 반복",stitches:"60코"},
+    {from:2,to:8,text:"(겉1, 안1) 반복 — 고무단 약 3cm",stitches:"60코"}]},
+  {name:"몸통", rows:[
+    {from:1,to:1,text:"5mm 바늘로 바꾸고 겉뜨기 끝까지"},
+    {from:2,to:2,text:"(겉5, 늘림1) 반복",stitches:"72코"},
+    {from:3,to:20,text:"겉뜨기 끝까지 (메리야스뜨기)",stitches:"72코"},
+    {from:21,to:21,text:"(겉4, 2코모아뜨기) 반복",stitches:"60코"},
+    {from:22,to:30,text:"겉뜨기 끝까지"}]},
+  {name:"마무리", rows:[
+    {from:1,to:4,text:"4mm 바늘로 (겉1, 안1) 반복"},
+    {from:5,to:5,text:"고무단 코막음 후 실 정리"}]}];
+const EXAMPLE = {id:"example", name:"예시 · 넥워머", example:true, size:"", notes:"예시 도안이에요. 내 도안을 올리면 여기에 정리돼요.", current:12, rows:null, updatedAt:0};
+EXAMPLE.rows = expand(EXAMPLE_SECTIONS);
+
+/* ---------- state ---------- */
+let state = {patterns:{}, activeId:null};
+try { const s = JSON.parse(localStorage.getItem(LS_KEY) || "null"); if (s && s.patterns) state = s; } catch (e) {}
+function saveLocal(){ try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) {} }
+
+let db = null, uid = null, sample = null, limits = null;
+const synced = new Set(), dirty = new Set(), timers = {}, chains = {};
+
+function active(){
+  const p = state.patterns[state.activeId];
+  if (p) return p;
+  const ids = Object.keys(state.patterns);
+  if (ids.length){ ids.sort((a,b)=>(state.patterns[b].updatedAt||0)-(state.patterns[a].updatedAt||0)); state.activeId = ids[0]; return state.patterns[ids[0]]; }
+  return EXAMPLE;
+}
+
+/* ---------- helpers ---------- */
+function int(v){ const n = parseInt(v,10); return Number.isFinite(n) ? n : 0; }
+function str(v){ return v == null ? "" : String(v).trim(); }
+function uidGen(){ return "p" + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+let statusTimer;
+function toast(msg, ms=2600){ const el=$("status"); el.textContent=msg; el.classList.add("show"); clearTimeout(statusTimer); statusTimer=setTimeout(()=>el.classList.remove("show"), ms); }
+
+function expand(sections){
+  const out = [];
+  for (const sec of sections || []){
+    const name = str(sec && sec.name) || "도안";
+    const byN = new Map();
+    for (const r of (sec.rows || [])){
+      const a = int(r.from); let b = int(r.to) || a;
+      if (a < 1) continue;
+      if (b < a) b = a;
+      if (b - a > 400) b = a + 400;
+      const text = str(r.text);
+      for (let n = a; n <= b; n++){
+        const row = { s:name, n, t:text, st: n === b ? (str(r.stitches) || null) : null,
+          side: a === b ? (str(r.side).toUpperCase() || null) : null,
+          pg: int(r.page) || null, ch: int(r.chart) || null, span: a !== b ? [a,b] : null };
+        if (byN.has(n)){ const prev = byN.get(n); prev.t = prev.t && text && prev.t !== text ? prev.t + "\n" + text : (prev.t || text); prev.st = prev.st || row.st; prev.ch = prev.ch || row.ch; }
+        else byN.set(n,row);
+      }
+    }
+    out.push(...[...byN.values()].sort((x,y)=>x.n-y.n));
+  }
+  return out;
+}
+
+function mergeSections(base, add){
+  const res = base.map(s => ({name:s.name, rows:[...s.rows]}));
+  for (const s of add || []){
+    if (!s || !Array.isArray(s.rows)) continue;
+    const last = res[res.length-1];
+    if (last && str(last.name) === str(s.name)) last.rows.push(...s.rows);
+    else res.push({name:str(s.name)||"도안", rows:[...s.rows]});
+  }
+  return res;
+}
+
+/* rows -> sections (to re-merge when appending pages) */
+function toSections(rows){
+  const secs = [];
+  for (const r of rows){
+    let s = secs[secs.length-1];
+    if (!s || s.name !== r.s){ s = {name:r.s, rows:[]}; secs.push(s); }
+    s.rows.push({from:r.n,to:r.n,text:r.t,stitches:r.st,side:r.side,page:r.pg,chart:r.ch});
+  }
+  return secs;
+}
+
+/* ---------- local text parser ---------- */
+function localParse(text){
+  const lines = text.split(/\r?\n/);
+  const reA = /^\s*[\[(]?\s*(\d{1,3})\s*(?:단|R)?\s*(?:[~\-–]\s*(\d{1,3}))?\s*(?:단|R)\s*(?:\(\s*(RS|WS)\s*\))?\s*[\])]?\s*[:：.)\-–]?\s*(.*)$/i;
+  const reB = /^\s*(?:round|rnd|row|r)\s*(\d{1,3})\s*(?:[~\-–]\s*(\d{1,3}))?\s*(?:\(\s*(RS|WS)\s*\))?\s*[:：.)\-–]?\s*(.*)$/i;
+  const stRe = /[\(\[（]\s*(?:총\s*)?(\d{1,4})\s*코\s*[\)\]）]\s*$/;
+  const secs = []; let cur = null, lastRow = null, pendingName = null, lastN = 0, autoK = 1;
+  const isHeader = l => l.length <= 24 && !/[.。]$/.test(l) && (/^[\[【<〈#*].*[\]】>〉]?$/.test(l) || /:$/.test(l) || /^\d+\.\s*\S/.test(l) || /(판|소매|카라|고무단|몸통|요크|버튼|밴드|마무리|front|back|sleeve|body|collar)/i.test(l));
+  for (let raw of lines){
+    const l = raw.trim(); if (!l) continue;
+    let m = l.match(reA), a, b, side, rest;
+    if (m && /단|R/i.test(l.slice(0, (m[0].length - (m[4]||"").length)))) { a=int(m[1]); b=int(m[2])||a; side=m[3]; rest=m[4]; }
+    else if ((m = l.match(reB))) { a=int(m[1]); b=int(m[2])||a; side=m[3]; rest=m[4]; }
+    else m = null;
+    if (m){
+      if (!cur || pendingName || a <= lastN && a === 1){
+        cur = {name: pendingName || (secs.length ? "파트 " + (++autoK) : "도안"), rows:[]}; secs.push(cur); pendingName = null;
+      }
+      let st = null; const sm = rest.match(stRe); if (sm) st = sm[1] + "코";
+      lastRow = {from:a, to:Math.max(a,b), side: side ? side.toUpperCase() : null, text: rest, stitches: st};
+      cur.rows.push(lastRow); lastN = Math.max(a,b);
+    } else if (isHeader(l)) {
+      pendingName = l.replace(/^[\[【<〈#*\s]+|[\]】>〉:*\s]+$/g,"").replace(/^\d+\.\s*/,"") || l; lastRow = null;
+    } else if (lastRow) {
+      lastRow.text = (lastRow.text ? lastRow.text + " " : "") + l;
+      const sm = l.match(stRe); if (sm) lastRow.stitches = sm[1] + "코";
+    }
+  }
+  return secs.filter(s => s.rows.length);
+}
+
+/* ---------- Claude prompt ---------- */
+function buildPrompt({size, pages, kind, text, prev}){
+  const sz = size ? `뜨는 사이즈: ${size}. 이 사이즈에 해당하는 내용만 남겨.` : "사이즈 구분이 있는 도안이면 첫 번째(가장 작은) 사이즈 기준으로 정리하고 notes에 그렇게 했다고 적어.";
+  const src = kind === "pdf"
+    ? `첨부 이미지는 뜨개 도안 PDF의 ${pages.join(", ")} 페이지야. 페이지마다 위쪽 절반, 아래쪽 절반 두 장으로 잘라서 순서대로 붙였어 (겹치는 줄은 한 번만 읽어).`
+    : kind === "images" ? "첨부 이미지는 뜨개 도안 사진이야 (순서대로)." : "아래는 뜨개 도안 원문 텍스트야.";
+  return `너는 뜨개(대바늘·코바늘) 서술 도안을 '단별 진행표'로 바꾸는 도우미야.
+${src}
+${sz}${prev ? `\n바로 앞까지 읽은 부분의 마지막 section 이름은 "${prev}"야. 첫 부분이 그 section에서 이어지는 단이면 section 이름을 똑같이 "${prev}"로 써.` : ""}
+
+JSON 하나만 답해:
+{"title": string|null,
+ "sections": [{"name": string, "rows": [{"from": int, "to": int, "side": "RS"|"WS"|null, "text": string, "stitches": string|null, "page": int|null, "chart": int|null}]}],
+ "notes": string|null}
+
+규칙:
+1. "100 (104) 110 (114) 124 (134)"처럼 괄호로 사이즈가 나열된 숫자는 사이즈 순서대로야. 해당 사이즈의 숫자 하나만 남겨. 사이즈별로 따로 적힌 표나 줄이 있으면 해당 사이즈 것만 써.
+2. 단 번호가 다시 1부터 시작하는 부분(뒷판, 오른쪽 앞판, 왼쪽 앞판, 소매, 고무단, 버튼밴드, 카라 등)마다 section을 나누고, 도안에 나온 순서대로 적어. section 이름은 도안 표현 그대로 짧게.
+3. 왼쪽에 단 번호, 오른쪽에 서술이 있는 표는 같은 높이의 줄끼리 짝지어. 서술은 원문 표현과 약어를 그대로 옮기고, 없는 단계를 지어내지 마.
+4. "1단과 동일", "[3단, 4단] 반복"처럼 다른 단을 가리키면 각 단에서 실제로 뭘 하는지 알 수 있게 그 내용을 풀어 써. 매 단 지시가 똑같은 구간은 from~to 하나로 묶어도 돼. 끝 단이 정해지지 않은 반복("원하는 길이만큼", "13코 남을 때까지")은 from=to=시작 단 하나로 쓰고 text에 조건을 그대로 적어.
+5. 서술 없이 차트만 따르는 구간(예: "16단~58단까지 차트를 따라 진행")은 그 범위를 from/to로 쓰고, text는 원문 문장, chart에는 해당 사이즈 차트의 PDF 페이지 번호(예: [차트 L:p23] → 23)를 넣어.
+6. 단 끝 콧수(예: "(48코)", "바늘에 206코가 있습니다")는 그 단의 stitches에 "206코"처럼. (RS)/(WS) 표기가 있으면 side에.
+7. page에는 그 서술이 실린 PDF 페이지 번호(이미지 사진이면 몇 번째 사진인지).
+8. 기초코·코줍기·바늘 교체 같은 준비 작업은 그 section 1단 text 맨 앞에 붙여.
+9. 재료·게이지·약어 설명은 rows에 넣지 말고 꼭 필요한 것만 notes에 300자 이내로.
+${text ? "\n도안 원문:\n" + text : ""}`;
+}
+
+/* ---------- render ---------- */
+const listEl = $("rowList");
+function render(){
+  const p = active();
+  const rows = p.rows || [];
+  // selector
+  const sel = $("patSel");
+  const ids = Object.keys(state.patterns).sort((a,b)=>(state.patterns[b].updatedAt||0)-(state.patterns[a].updatedAt||0));
+  sel.innerHTML = "";
+  if (!ids.length){ sel.append(new Option(EXAMPLE.name, "example")); }
+  for (const id of ids) sel.append(new Option(state.patterns[id].name || "이름 없는 도안", id));
+  sel.value = p.id;
+  $("exampleNote").hidden = !p.example;
+  $("dangerZone").hidden = !!p.example;
+
+  if (!rows.length){
+    $("secChip").textContent = "-"; $("rowNum").textContent = "–"; $("rowText").textContent = "단 정보를 찾지 못했어요. '이 도안에 페이지 더 읽어서 붙이기'로 다시 읽어보세요.";
+    listEl.innerHTML = ""; return;
+  }
+  const i = Math.min(Math.max(0, p.current|0), rows.length-1); p.current = i;
+  const r = rows[i];
+  const secRows = rows.filter(x => x.s === r.s);
+  $("secChip").textContent = r.s;
+  $("sideChip").hidden = !r.side; $("sideChip").textContent = r.side || "";
+  $("progText").textContent = `${r.s} ${secRows.indexOf(r)+1}/${secRows.length} · 전체 ${i+1}/${rows.length}`;
+  $("rowNum").textContent = r.n;
+  $("stText").textContent = r.st || "";
+  $("spanNote").hidden = !r.span; $("spanNote").textContent = r.span ? `${r.span[0]}~${r.span[1]}단 공통 지시예요.` : "";
+  $("rowText").textContent = r.t || "(서술 없음)";
+  $("explainBox").hidden = !r.x;
+  if (r.x){ $("explainBox").innerHTML = "<small>차트를 읽어 풀어쓴 내용 · 차트와 꼭 대조해 보세요</small>"; $("explainBox").append(document.createTextNode(r.x)); }
+  $("chartBtn").hidden = !r.ch; $("chartBtn").textContent = r.ch ? `차트 p${r.ch} 보기` : "";
+  $("explainBtn").hidden = !(r.ch && sample && limits && limits.images && p.src === "pdf");
+  $("srcBtn").hidden = !(r.pg && p.src); $("srcBtn").textContent = r.pg ? (p.src === "pdf" ? `원본 p${r.pg} 보기` : `원본 사진 ${r.pg} 보기`) : "";
+  $("editBox").hidden = true; $("editBtn").hidden = false;
+  $("barFill").style.width = ((i+1)/rows.length*100).toFixed(1) + "%";
+  $("prevBtn").disabled = i === 0; $("nextBtn").disabled = i === rows.length-1;
+  $("sheetTitle").textContent = (p.name || "전체 도안") + (p.size ? ` · ${p.size} 사이즈` : "");
+  $("notes").hidden = !p.notes; $("notes").textContent = p.notes || "";
+
+  // jump selector
+  const js = $("jumpSec"); const secNames = [...new Set(rows.map(x=>x.s))];
+  if (js.dataset.k !== p.id + secNames.join("|")){ js.innerHTML=""; secNames.forEach(n=>js.append(new Option(n,n))); js.dataset.k = p.id + secNames.join("|"); }
+  js.value = r.s;
+
+  // list
+  if (listEl.dataset.k !== p.id + ":" + rows.length + ":" + (p.rev||0)){
+    listEl.innerHTML = ""; let lastS = null;
+    rows.forEach((x, k) => {
+      if (x.s !== lastS){ const h=document.createElement("li"); h.className="sec"; h.textContent=x.s; listEl.append(h); lastS=x.s; }
+      const li = document.createElement("li"); const b = document.createElement("button");
+      b.type="button"; b.className="r"; b.dataset.i=k;
+      const n=document.createElement("span"); n.className="n"; n.textContent = x.n + "단" + (x.side ? " " + x.side : "");
+      const t=document.createElement("span"); t.className="t"; t.textContent = (x.t || "") + (x.st ? `  (${x.st})` : "");
+      b.append(n,t); li.append(b); listEl.append(li);
+    });
+    listEl.dataset.k = p.id + ":" + rows.length + ":" + (p.rev||0);
+  }
+  listEl.querySelectorAll("button.r").forEach(b => { const k=+b.dataset.i; b.classList.toggle("on", k===i); b.classList.toggle("done", k<i); b.setAttribute("aria-current", k===i ? "step" : "false"); });
+  const on = listEl.querySelector("button.r.on");
+  if (on){ const top = on.offsetTop - listEl.clientHeight/2 + on.offsetHeight/2; listEl.scrollTo({top: Math.max(0, top), behavior: "smooth"}); }
+}
+
+function setCurrent(i){
+  const p = active(); if (!p.rows || !p.rows.length) return;
+  p.current = Math.min(Math.max(0,i), p.rows.length-1);
+  if (!p.example){ p.updatedAt = Date.now(); saveLocal(); queueWrite(p.id); }
+  render();
+}
+
+/* ---------- persistence (db, private per viewer) ---------- */
+function base(){ return "data/users/" + uid; }
+function docBody(p){ return {name:p.name||"", size:p.size||"", notes:p.notes||"", rows:p.rows||[], current:p.current|0, src:p.src||null, srcPages:p.srcPages||null, readPages:p.readPages||[], rev:p.rev||0, updatedAt:p.updatedAt||Date.now()}; }
+function queueWrite(id){ dirty.add(id); clearTimeout(timers[id]); timers[id] = setTimeout(()=>flush(id), 700); }
+function flush(id){
+  delete timers[id];
+  chains[id] = (chains[id] || Promise.resolve()).then(async () => {
+    if (!db || !uid) return;
+    const ref = db.collection(base()).doc(id);
+    const p = state.patterns[id];
+    if (!p){ await ref.delete(); synced.delete(id); return; }
+    await ref.set(docBody(p)); synced.add(id);
+  }).catch(e => { toast(e && e.code === "quota_exceeded" ? "저장 공간이 가득 찼어요. 안 쓰는 도안을 지워주세요." : "이 기기에만 저장됐어요. 연결되면 다시 저장할게요."); })
+    .finally(() => { if (!timers[id]) dirty.delete(id); });
+}
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") Object.keys(timers).forEach(id => { clearTimeout(timers[id]); flush(id); }); });
+
+async function initDb(){
+  try {
+    const user = await claude.use("user");
+    const d = await claude.use("db");
+    if (!user || !d) return;
+    const id = await user.id(); if (!id) return;
+    db = d; uid = id;
+    let loadTimer = setTimeout(() => toast("저장된 도안을 아직 못 불러왔어요. 이 기기 기록으로 보여드릴게요."), 10000);
+    db.collection(base()).onSnapshot(snap => {
+      if (!snap.metadata.fromCache) clearTimeout(loadTimer);
+      const remote = {};
+      snap.docs.forEach(doc => { const v = doc.data(); if (v && Array.isArray(v.rows)) remote[doc.id] = {id:doc.id, ...v}; });
+      let changed = false;
+      for (const [id, rp] of Object.entries(remote)){
+        synced.add(id);
+        const lp = state.patterns[id];
+        if (dirty.has(id)) continue;
+        if (!lp || (rp.updatedAt||0) > (lp.updatedAt||0)){ state.patterns[id] = rp; changed = true; }
+      }
+      if (!snap.metadata.fromCache){
+        for (const id of Object.keys(state.patterns)){
+          if (remote[id] || dirty.has(id)) continue;
+          if (synced.has(id)){ delete state.patterns[id]; changed = true; synced.delete(id); }
+          else queueWrite(id); // made on this device before sync — upload it
+        }
+      }
+      if (changed){ saveLocal(); render(); }
+    }, () => { clearTimeout(loadTimer); });
+  } catch (e) {}
+}
+
+/* ---------- originals in this browser (IndexedDB) ---------- */
+function idb(){ return new Promise((res,rej)=>{ const r=indexedDB.open("row-counter-originals",1); r.onupgradeneeded=()=>r.result.createObjectStore("files"); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+async function idbOp(mode, fn){ const d = await idb(); return new Promise((res,rej)=>{ const t=d.transaction("files",mode); const st=t.objectStore("files"); const rq=fn(st); t.oncomplete=()=>res(rq && rq.result); t.onerror=()=>rej(t.error); }); }
+const idbPut=(k,v)=>idbOp("readwrite",s=>s.put(v,k)).catch(()=>{});
+const idbGet=k=>idbOp("readonly",s=>s.get(k)).catch(()=>null);
+const idbDel=k=>idbOp("readwrite",s=>s.delete(k)).catch(()=>{});
+
+/* ---------- pdf.js ---------- */
+let pdfLibP = null;
+function loadScript(src){ return new Promise((res,rej)=>{ const s=document.createElement("script"); s.src=src; s.onload=res; s.onerror=()=>rej(new Error("load")); document.head.append(s); }); }
+function pdfLib(){
+  if (!pdfLibP) pdfLibP = (async () => { await loadScript(PDF_JS); await loadScript(PDF_WORKER); window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDF_WORKER; return window.pdfjsLib; })();
+  return pdfLibP;
+}
+async function openPdf(blob){ const lib = await pdfLib(); const buf = await blob.arrayBuffer(); return lib.getDocument({data: buf}).promise; }
+async function renderPage(pdf, n, targetW){
+  const page = await pdf.getPage(n); const v1 = page.getViewport({scale:1});
+  const scale = targetW / v1.width; const vp = page.getViewport({scale});
+  const c = document.createElement("canvas"); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+  const ctx = c.getContext("2d"); ctx.fillStyle="#fff"; ctx.fillRect(0,0,c.width,c.height);
+  await page.render({canvasContext: ctx, viewport: vp}).promise; return c;
+}
+function canvasBlob(c, q=.88){ return new Promise(r => c.toBlob(r, "image/jpeg", q)); }
+async function tiles(canvas, parts){
+  const out = []; const h = canvas.height, w = canvas.width; const step = h/parts, ov = Math.round(h*0.04);
+  for (let k=0;k<parts;k++){
+    const y0 = Math.max(0, Math.round(k*step) - ov), y1 = Math.min(h, Math.round((k+1)*step) + ov);
+    const t = document.createElement("canvas"); t.width = w; t.height = y1-y0;
+    t.getContext("2d").drawImage(canvas, 0, y0, w, y1-y0, 0, 0, w, y1-y0); out.push(await canvasBlob(t));
+  }
+  return out;
+}
+async function imageBlobOk(file){
+  const types = (limits && limits.images && limits.images.mediaTypes) || ["image/jpeg","image/png","image/webp","image/gif"];
+  const max = (limits && limits.images && limits.images.maxInputBytes) || 5e6;
+  if (types.includes(file.type) && file.size <= max) return file;
+  const bmp = await createImageBitmap(file); const s = Math.min(1, 2000/Math.max(bmp.width,bmp.height));
+  const c = document.createElement("canvas"); c.width=Math.round(bmp.width*s); c.height=Math.round(bmp.height*s);
+  c.getContext("2d").drawImage(bmp,0,0,c.width,c.height); return canvasBlob(c);
+}
+
+/* ---------- upload view ---------- */
+let up = {mode:"file", files:[], pdf:null, pdfBlob:null, selected:new Set(), appendTo:null};
+function showUpload(appendTo){
+  up = {mode:"file", files:[], pdf:null, pdfBlob:null, selected:new Set(), appendTo: appendTo || null};
+  $("trackView").hidden = true; $("thumb").hidden = true; $("uploadView").hidden = false;
+  $("fileList").innerHTML = ""; $("pdfPick").hidden = true; $("pages").innerHTML = ""; $("upProgress").hidden = true;
+  $("textIn").value = ""; $("fileIn").value = "";
+  const p = appendTo ? state.patterns[appendTo] : null;
+  $("upTitle").textContent = p ? `'${p.name}'에 페이지 더 붙이기` : "도안 올리기";
+  $("nameIn").value = p ? p.name : ""; $("sizeIn").value = p ? (p.size||"") : "";
+  $("nameIn").disabled = !!p;
+  setTab("file"); updateAiNote(); window.scrollTo(0,0);
+}
+function hideUpload(){ $("uploadView").hidden = true; $("trackView").hidden = false; $("thumb").hidden = false; render(); }
+function setTab(t){ up.mode = t; $("tabFile").hidden = t !== "file"; $("tabText").hidden = t !== "text"; $("tabFileBtn").setAttribute("aria-selected", t==="file"); $("tabTextBtn").setAttribute("aria-selected", t==="text"); }
+function updateAiNote(){
+  const el = $("aiNote");
+  if (sample === undefined) el.textContent = "사진·PDF 읽기 기능을 준비하는 중이에요…";
+  else if (!sample || !(limits && limits.images)) el.textContent = "이 화면에서는 사진·PDF를 읽을 수 없어요. 텍스트 붙여넣기를 써주세요. (PDF는 고르면 원본 보기용으로는 저장돼요)";
+  else el.textContent = `Claude가 이미지를 읽어 단별로 정리해요. 한 번에 ${limits.images.maxCount}장까지 보내고, 많으면 나눠서 차례로 읽어요. 내 Claude 사용량이 쓰여요.`;
+}
+
+async function takeFiles(list){
+  const files = [...list];
+  const pdf = files.find(f => f.type === "application/pdf" || /\.pdf$/i.test(f.name));
+  $("fileList").innerHTML = "";
+  if (pdf){
+    up.files = []; up.pdfBlob = pdf; up.selected = new Set();
+    const li=document.createElement("li"); li.textContent = "📄 " + pdf.name + " · 불러오는 중…"; $("fileList").append(li);
+    if (!$("nameIn").value) $("nameIn").value = pdf.name.replace(/\.pdf$/i,"").replace(/[_]+/g," ").trim();
+    try {
+      up.pdf = await openPdf(pdf);
+      li.textContent = `📄 ${pdf.name} · ${up.pdf.numPages}쪽`;
+      buildThumbs();
+      await analyzePdf();
+    } catch (e) { li.textContent = "PDF를 열지 못했어요. 페이지를 사진으로 찍어 올려주세요."; up.pdf = null; }
+  } else {
+    up.pdf = null; up.pdfBlob = null; $("pdfPick").hidden = true;
+    up.files = files.filter(f => f.type.startsWith("image/"));
+    up.files.forEach((f,k) => { const li=document.createElement("li"); li.textContent = `🖼 ${k+1}. ${f.name}`; $("fileList").append(li); });
+    if (!up.files.length) $("fileList").innerHTML = "<li>사진(JPG·PNG)이나 PDF만 올릴 수 있어요.</li>";
+  }
+}
+async function buildThumbs(){
+  const box = $("pages"); box.innerHTML = ""; $("pdfPick").hidden = false; updatePgCount();
+  const btns = [];
+  for (let n=1;n<=up.pdf.numPages;n++){
+    const b=document.createElement("button"); b.type="button"; b.className="pg"; b.setAttribute("aria-pressed","false"); b.dataset.n=n; b.setAttribute("aria-label", n+"쪽");
+    const s=document.createElement("span"); s.className="num"; s.textContent=n; b.append(s); box.append(b); btns.push(b);
+    b.onclick = () => { up.selected.has(n) ? up.selected.delete(n) : up.selected.add(n); syncThumbs(); };
+  }
+  const io = new IntersectionObserver(async entries => {
+    for (const en of entries){ if (!en.isIntersecting) continue; io.unobserve(en.target); const n=+en.target.dataset.n;
+      try { const c = await renderPage(up.pdf, n, 180); en.target.prepend(c); } catch(e){} }
+  }, {root: box, rootMargin: "200px"});
+  btns.forEach(b => io.observe(b));
+}
+function syncThumbs(){ $("pages").querySelectorAll(".pg").forEach(b => b.setAttribute("aria-pressed", up.selected.has(+b.dataset.n))); updatePgCount(); }
+/* find pages that hold written row instructions for the chosen size */
+async function analyzePdf(){
+  up.info = [];
+  for (let n=1;n<=up.pdf.numPages;n++){
+    let items = [];
+    try { items = (await (await up.pdf.getPage(n)).getTextContent()).items || []; } catch(e){}
+    const all = items.map(i => i.str || "").join(" ");
+    const rowItems = items.filter(i => /^\s*\*?\d{1,3}\s*단(?:\s*\(\s*(?:RS|WS)\s*\)|\s*[~\-]|\s|$)/i.test(i.str || "")).length;
+    const ko = (all.match(/[가-힣]/g) || []).length;
+    const sizes = new Set();
+    for (const m of all.matchAll(/((?:\d?XL|S|M|L)(?:\s*,\s*(?:\d?XL|S|M|L))*)\s*사이즈/g)) m[1].split(/\s*,\s*/).forEach(x => sizes.add(x));
+    up.info.push({n, rowItems, ko, sizes});
+  }
+  autoSelect();
+}
+function normSize(v){ const m = str(v).toUpperCase().replace(/\s/g,"").match(/^(\d?XL|XXL|XXXL|S|M|L)/); if (!m) return ""; return {XXL:"2XL",XXXL:"3XL"}[m[1]] || m[1]; }
+function autoSelect(){
+  if (!up.pdf || !up.info) return;
+  const size = normSize($("sizeIn").value);
+  const done = new Set((up.appendTo && state.patterns[up.appendTo] && state.patterns[up.appendTo].readPages) || []);
+  const anyText = up.info.some(x => x.ko > 0);
+  const note = $("autoNote");
+  if (!anyText){
+    up.selected = new Set(up.info.map(x => x.n).filter(n => !done.has(n)));
+    note.textContent = "글자를 인식할 수 없는 PDF라 모든 페이지를 골랐어요. 차트만 있는 페이지는 눌러서 빼면 더 빨리 읽어요.";
+    syncThumbs(); return;
+  }
+  const pick = up.info.filter(x => x.rowItems >= 2 && x.ko >= 60 && (!size || !x.sizes.size || x.sizes.has(size)) && !done.has(x.n)).map(x => x.n);
+  up.selected = new Set(pick); syncThumbs();
+  const ranges = toRanges(pick);
+  if (!pick.length) note.textContent = done.size ? "새로 읽을 서술 페이지가 없어요. 필요한 페이지를 직접 눌러 골라주세요." : "서술 페이지를 찾지 못했어요. 읽을 페이지를 직접 눌러 골라주세요.";
+  else note.textContent = `${size ? size + " 사이즈 " : ""}서술이 있는 ${ranges}쪽을 골랐어요.` + (size ? "" : " 사이즈를 적으면 다른 사이즈 전용 페이지는 빼고 골라요.") + " 차트만 있는 페이지는 빼고, 나중에 '차트 보기'로 볼 수 있어요. 바꾸려면 페이지를 눌러주세요.";
+  $("pgRange").value = ranges;
+}
+function toRanges(a){ const out=[]; for (let i=0;i<a.length;){ let j=i; while (j+1<a.length && a[j+1]===a[j]+1) j++; out.push(i===j ? ""+a[i] : a[i]+"-"+a[j]); i=j+1; } return out.join(", "); }
+let sizeTimer; $("sizeIn").addEventListener("input", () => { clearTimeout(sizeTimer); sizeTimer = setTimeout(autoSelect, 400); });
+function updatePgCount(){ const a=[...up.selected].sort((x,y)=>x-y); $("pgCount").textContent = a.length ? `${a.length}쪽 선택` : "선택한 쪽 없음"; }
+function parseRange(s, max){
+  const set = new Set();
+  for (const part of s.split(/[,\s]+/)){ const m = part.match(/^(\d+)(?:\s*[-~]\s*(\d+))?$/); if (!m) continue;
+    let a=int(m[1]), b=int(m[2])||a; if (b<a) [a,b]=[b,a]; for (let n=a;n<=Math.min(b,max);n++) if (n>=1) set.add(n); }
+  return set;
+}
+
+let ctl = null;
+async function readPattern(){
+  const name = str($("nameIn").value), size = str($("sizeIn").value);
+  const prog = $("upProgress"); prog.hidden = false;
+  const say = t => { prog.textContent = t; };
+  const target = up.appendTo ? state.patterns[up.appendTo] : null;
+  let sections = [], title = null, notes = [], src = target ? target.src : null, srcPages = target ? target.srcPages : null;
+
+  try {
+    if (up.mode === "text"){
+      const text = $("textIn").value.trim();
+      if (!text){ say("도안 텍스트를 붙여넣어 주세요."); return; }
+      const local = localParse(text);
+      const nRows = local.reduce((a,s)=>a+s.rows.length,0);
+      const hasRepeat = /반복|동일|repeat|same as/i.test(text);
+      if (sample && (nRows < 2 || hasRepeat)){
+        say("Claude가 도안을 읽는 중이에요… 보통 30초~1분 걸려요.");
+        const res = await askJson(buildPrompt({size, kind:"text", text: text.slice(0, 60000)}), {});
+        sections = res.sections; title = res.title; if (res.notes) notes.push(res.notes);
+      } else {
+        if (!nRows){ say("'1단', 'Row 1' 같은 단 표시를 찾지 못했어요. 표기를 확인해 주세요."); return; }
+        sections = local;
+      }
+    } else if (up.pdf){
+      const pages = [...up.selected].sort((a,b)=>a-b);
+      if (!pages.length){ say("읽을 페이지를 골라주세요. 서술(단별 설명)이 있는 페이지만 고르면 돼요."); return; }
+      if (!sample || !(limits && limits.images)){ say("이 화면에서는 PDF 내용을 읽을 수 없어요. 텍스트를 복사해 붙여넣어 주세요."); return; }
+      const per = Math.max(1, Math.min(4, Math.floor(limits.images.maxCount/2)));
+      const batches = []; for (let k=0;k<pages.length;k+=per) batches.push(pages.slice(k,k+per));
+      for (let bi=0; bi<batches.length; bi++){
+        const b = batches[bi];
+        say(`페이지 준비 중… (${b.join(", ")}쪽)`);
+        const imgs = [];
+        for (const n of b){ const c = await renderPage(up.pdf, n, 1500); imgs.push(...await tiles(c, 2)); }
+        say(`Claude가 ${b.join(", ")}쪽을 읽는 중… (${bi+1}/${batches.length}묶음)\n페이지가 많으면 묶음마다 1~2분 걸려요.`);
+        const res = await askJson(buildPrompt({size, kind:"pdf", pages:b, prev: lastSecName(sections, target)}), {images: imgs});
+        sections = mergeSections(sections, res.sections); if (!title) title = res.title; if (res.notes) notes.push(res.notes);
+      }
+      src = "pdf"; srcPages = up.pdf.numPages; up.readNow = pages;
+    } else if (up.files.length){
+      if (!sample || !(limits && limits.images)){ say("이 화면에서는 사진을 읽을 수 없어요. 텍스트 붙여넣기를 써주세요."); return; }
+      const max = limits.images.maxCount; const all = [];
+      for (const f of up.files) all.push(await imageBlobOk(f));
+      for (let k=0;k<all.length;k+=max){
+        const b = all.slice(k,k+max);
+        say(`Claude가 사진 ${k+1}~${k+b.length}장을 읽는 중… 1~2분 걸릴 수 있어요.`);
+        const res = await askJson(buildPrompt({size, kind:"images", prev: lastSecName(sections, target)}) + (k ? `\n(이 사진들은 전체 중 ${k+1}번째부터야. page 번호는 ${k+1}부터 세.)` : ""), {images: b});
+        sections = mergeSections(sections, res.sections); if (!title) title = res.title; if (res.notes) notes.push(res.notes);
+      }
+      src = "images"; srcPages = all.length;
+      up.imgBlobs = all;
+    } else { say("도안 파일을 골라주세요."); return; }
+  } catch (e) {
+    if (e && e.code === "cancelled") { say("중지했어요."); return; }
+    say(errCopy(e)); return;
+  } finally { $("readBtn").disabled = false; $("stopBtn").hidden = true; }
+
+  if (!Array.isArray(sections) || !sections.length){ say("단 정보를 찾지 못했어요. 서술이 있는 페이지를 골랐는지 확인해 주세요."); return; }
+
+  if (target){
+    const merged = mergeSections(toSections(target.rows), sections);
+    target.rows = expand(merged); target.rev = (target.rev||0)+1; target.updatedAt = Date.now();
+    if (notes.length) target.notes = [target.notes, ...notes].filter(Boolean).join("\n").slice(0,900);
+    if (size) target.size = size;
+    if (up.readNow) target.readPages = [...new Set([...(target.readPages||[]), ...up.readNow])].sort((a,b)=>a-b);
+    if (up.pdfBlob && !target.src) { target.src = "pdf"; target.srcPages = srcPages; await idbPut(target.id, {type:"pdf", blob: up.pdfBlob}); }
+    saveLocal(); queueWrite(target.id); hideUpload(); toast(`${sections.length}개 파트를 붙였어요.`);
+    return;
+  }
+  const id = uidGen();
+  const p = {id, name: name || str(title) || "새 도안", size, notes: notes.join("\n").slice(0,900), rows: expand(sections), current:0, src, srcPages, readPages: up.readNow || [], rev:1, updatedAt: Date.now()};
+  if (!p.rows.length){ say("단 정보를 찾지 못했어요."); return; }
+  state.patterns[id] = p; state.activeId = id; saveLocal(); queueWrite(id);
+  if (src === "pdf" && up.pdfBlob) idbPut(id, {type:"pdf", blob: up.pdfBlob});
+  else if (src === "images" && up.imgBlobs) idbPut(id, {type:"images", blobs: up.imgBlobs});
+  hideUpload(); toast(`${p.rows.length}단으로 정리했어요. 1단부터 시작해요.`);
+}
+function lastSecName(sections, target){
+  if (sections && sections.length) return str(sections[sections.length-1].name);
+  if (target && target.rows && target.rows.length) return target.rows[target.rows.length-1].s;
+  return "";
+}
+async function askJson(prompt, opts){
+  ctl = new AbortController(); $("readBtn").disabled = true; $("stopBtn").hidden = false;
+  const res = await sample.json(prompt, {...opts, signal: ctl.signal, modelTier: "default"});
+  if (!res || !Array.isArray(res.sections)) throw {code:"invalid_json"};
+  return res;
+}
+function errCopy(e){
+  const c = e && e.code;
+  if (c === "not_granted") return "Claude 사용을 허용하지 않아서 읽지 못했어요. 텍스트 붙여넣기는 그대로 쓸 수 있어요.";
+  if (c === "rate_limited") return "지금은 요청이 너무 많아요. 잠시 뒤 다시 눌러주세요.";
+  if (c === "image_rejected") return "이미지를 읽지 못했어요. JPG나 PNG로 다시 올려주세요.";
+  if (c === "prompt_too_large") return "한 번에 보내기엔 너무 길어요. 페이지를 나눠서 올려주세요.";
+  if (c === "invalid_json") return "정리 결과를 해석하지 못했어요. 다시 눌러주세요. 계속 안 되면 페이지를 더 적게 골라주세요.";
+  if (c === "session_expired") return "로그인이 만료됐어요. 다시 로그인한 뒤 시도해 주세요.";
+  if (c === "refused") return "이 내용은 읽지 못했어요. 다른 페이지로 시도해 주세요.";
+  return "읽는 중 문제가 생겼어요. 다시 눌러주세요.";
+}
+
+/* ---------- chart row -> words ---------- */
+async function explainRow(){
+  const p = active(); const r = p.rows[p.current]; if (!r || !r.ch) return;
+  const btn = $("explainBtn"); btn.disabled = true; btn.textContent = "차트 읽는 중… (1분 정도)";
+  try {
+    const rec = await idbGet(p.id);
+    if (!rec || rec.type !== "pdf"){ toast("이 기기에 원본 PDF가 없어요. '페이지 더 붙이기'로 PDF를 다시 골라주세요."); return; }
+    const pdf = await openPdf(rec.blob);
+    const c = await renderPage(pdf, r.ch, 1800); const imgs = await tiles(c, 3);
+    const prompt = `첨부 이미지는 뜨개 차트 한 페이지(PDF ${r.ch}쪽)를 위에서 아래로 3조각 낸 거야. 도안 설명: 차트에 안뜨기 기호는 생략되어 있고 겉면에서 보이는 무늬로 표시돼. 홀수단은 겉면(RS)에서 오른쪽→왼쪽으로 읽고, 짝수단은 안면(WS)이라 차트와 반대로 작업해(왼쪽→오른쪽으로 읽고 겉↔안 바꿈). ${p.size ? p.size + " 사이즈 차트야." : ""}
+이 차트의 ${r.n}단을 서술 도안처럼 "안3, 겉2, 2/1LC, …" 형식으로 써줘. 같은 기호가 연속되면 숫자로 묶고, 교차뜨기 기호는 범례 이름 그대로 써. 마지막에 총 콧수를 "(N코)"로. 확실하지 않은 칸이 있으면 끝에 "확인 필요: …"로 짧게 적어. 서술 한 줄과 확인 필요 줄 외에는 아무것도 쓰지 마.`;
+    const out = await sample(prompt, {images: imgs, modelTier: "complex"});
+    r.x = out.text.trim(); p.updatedAt = Date.now(); saveLocal(); queueWrite(p.id); render();
+  } catch (e) { toast(errCopy(e), 4000); }
+  finally { btn.disabled = false; btn.textContent = "이 단 차트를 글로 풀기"; }
+}
+
+/* ---------- original viewer ---------- */
+let viewer = {kind:null, pdf:null, blobs:null, page:1, count:1};
+async function openViewer(page){
+  const p = active(); const rec = await idbGet(p.id);
+  if (!rec){ toast("원본은 도안을 올린 기기에만 저장돼요. 이 기기에서 보려면 '페이지 더 붙이기'로 PDF를 다시 골라주세요.", 4200); return; }
+  viewer.kind = rec.type; viewer.page = page || 1;
+  if (rec.type === "pdf"){ try { viewer.pdf = await openPdf(rec.blob); viewer.count = viewer.pdf.numPages; } catch(e){ toast("원본을 열지 못했어요."); return; } }
+  else { viewer.blobs = rec.blobs; viewer.count = rec.blobs.length; }
+  $("viewer").hidden = false; document.body.style.overflow = "hidden"; drawViewer(); $("vClose").focus();
+}
+async function drawViewer(){
+  const body = $("vBody"); body.innerHTML = ""; $("vLabel").textContent = `${viewer.page} / ${viewer.count}`;
+  $("vPrev").disabled = viewer.page<=1; $("vNext").disabled = viewer.page>=viewer.count;
+  if (viewer.kind === "pdf"){ const w = Math.min(2400, Math.max(1200, body.clientWidth*2)); try { body.append(await renderPage(viewer.pdf, viewer.page, w)); } catch(e){} }
+  else { const img = new Image(); const url = URL.createObjectURL(viewer.blobs[viewer.page-1]); img.onload=()=>URL.revokeObjectURL(url); img.src = url; img.alt = viewer.page + "번째 도안 사진"; body.append(img); }
+}
+function closeViewer(){ $("viewer").hidden = true; document.body.style.overflow = ""; }
+
+/* ---------- wake lock ---------- */
+let wake = null, wantWake = false;
+async function setWake(on){
+  wantWake = on; $("wakeBtn").setAttribute("aria-pressed", on);
+  try {
+    if (on){ wake = await navigator.wakeLock.request("screen"); $("wakeBtn").textContent = "화면 켜두는 중"; wake.addEventListener("release", ()=>{ if(!wantWake) $("wakeBtn").textContent="화면 켜두기"; }); }
+    else { if (wake) await wake.release(); wake = null; $("wakeBtn").textContent = "화면 켜두기"; }
+  } catch (e) { wantWake = false; $("wakeBtn").setAttribute("aria-pressed", false); $("wakeBtn").textContent = "화면 켜두기"; toast("이 화면에서는 켜두기를 쓸 수 없어요."); }
+}
+document.addEventListener("visibilitychange", () => { if (wantWake && document.visibilityState === "visible") setWake(true); });
+
+/* ---------- events ---------- */
+$("prevBtn").onclick = () => setCurrent(active().current - 1);
+$("nextBtn").onclick = () => setCurrent(active().current + 1);
+listEl.addEventListener("click", e => { const b = e.target.closest("button.r"); if (b) setCurrent(+b.dataset.i); });
+document.addEventListener("keydown", e => {
+  if (!$("viewer").hidden){ if (e.key === "Escape") closeViewer(); return; }
+  if (!$("uploadView").hidden || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+  if (e.key === "ArrowRight" || e.key === " "){ e.preventDefault(); setCurrent(active().current + 1); }
+  if (e.key === "ArrowLeft"){ e.preventDefault(); setCurrent(active().current - 1); }
+});
+$("patSel").onchange = e => { state.activeId = e.target.value; saveLocal(); listEl.dataset.k = ""; render(); };
+$("jumpForm").onsubmit = e => {
+  e.preventDefault(); const p = active(); const s = $("jumpSec").value, n = int($("jumpNum").value);
+  const k = p.rows.findIndex(r => r.s === s && r.n === n);
+  if (k < 0){ toast(`${s}에 ${n}단이 없어요.`); return; }
+  setCurrent(k); $("jumpNum").value = "";
+};
+$("editBtn").onclick = () => { const r = active().rows[active().current]; $("editArea").value = r.t || ""; $("editBox").hidden = false; $("editBtn").hidden = true; $("editArea").focus(); };
+$("editCancel").onclick = () => { $("editBox").hidden = true; $("editBtn").hidden = false; };
+$("editSave").onclick = () => {
+  const p = active(); const r = p.rows[p.current]; r.t = $("editArea").value.trim(); r.span = null;
+  p.rev = (p.rev||0)+1; if (!p.example){ p.updatedAt = Date.now(); saveLocal(); queueWrite(p.id); } listEl.dataset.k=""; render(); toast("이 단 서술을 고쳤어요.");
+};
+$("chartBtn").onclick = () => openViewer(active().rows[active().current].ch);
+$("srcBtn").onclick = () => openViewer(active().rows[active().current].pg);
+$("explainBtn").onclick = explainRow;
+$("wakeBtn").onclick = () => setWake(!wantWake);
+$("addBtn").onclick = () => showUpload(null);
+$("moreBtn").onclick = () => showUpload(active().id);
+$("delBtn").onclick = () => { $("delConfirm").hidden = false; };
+$("delNo").onclick = () => { $("delConfirm").hidden = true; };
+$("delYes").onclick = () => {
+  const id = active().id; delete state.patterns[id]; state.activeId = null; saveLocal(); idbDel(id);
+  clearTimeout(timers[id]); flush(id); $("delConfirm").hidden = true; listEl.dataset.k = ""; render(); toast("도안을 지웠어요.");
+};
+$("tabFileBtn").onclick = () => setTab("file");
+$("tabTextBtn").onclick = () => setTab("text");
+$("fileIn").onchange = e => { if (e.target.files.length) takeFiles(e.target.files); };
+const drop = $("drop");
+["dragenter","dragover"].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave","drop"].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", e => { if (e.dataTransfer.files.length) takeFiles(e.dataTransfer.files); });
+$("pgApply").onclick = () => { if (!up.pdf) return; up.selected = parseRange($("pgRange").value, up.pdf.numPages); syncThumbs(); };
+$("pgClear").onclick = () => { up.selected = new Set(); syncThumbs(); };
+$("readBtn").onclick = readPattern;
+$("stopBtn").onclick = () => ctl && ctl.abort();
+$("cancelUp").onclick = () => { ctl && ctl.abort(); hideUpload(); };
+$("vPrev").onclick = () => { viewer.page--; drawViewer(); };
+$("vNext").onclick = () => { viewer.page++; drawViewer(); };
+$("vClose").onclick = closeViewer;
+$("vZoom").onclick = () => { const z = $("vBody").classList.toggle("zoom"); $("vZoom").setAttribute("aria-pressed", z); $("vZoom").textContent = z ? "맞추기" : "확대"; };
+
+/* ---------- boot ---------- */
+render();
+sample = undefined; updateAiNote();
+(async () => {
+  try {
+    const s = await claude.use("sample");
+    sample = s || null;
+    if (s) limits = await s.limits().catch(() => null);
+  } catch (e) { sample = null; }
+  updateAiNote(); render();
+})();
+initDb();
+})();
+</script>
