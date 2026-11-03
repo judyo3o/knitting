@@ -192,3 +192,41 @@ export function boundaries(xs: number[], w: number): number[] {
   }
   return out;
 }
+
+export type RowStitch = { name: string; sym: string; cells: number };
+/** 읽은 칸 → 서술 ("겉2, 안2, 2/2 LC, …"). 안면에서 뜨면 겉↔안을 바꾼다 */
+export function rowText(st: RowStitch[], ws: boolean): string {
+  const label = (x: RowStitch) => {
+    const nm = x.name.replace(/\s+/g, " ").trim();
+    if (/^겉뜨기$/.test(nm) || (!nm && /^[|ㅣ]$/.test(x.sym))) return ws ? "안" : "겉";
+    if (/^안뜨기$/.test(nm) || /^(?:—|-|ㅡ)$/.test(x.sym)) return ws ? "겉" : "안";
+    if (!nm) return x.sym || "?";
+    // "오른코 위 2코 교차뜨기 - 2/2 LC" → "2/2 LC", "[K2tog] 왼코…" → 기호 약어
+    const ab = nm.match(/[-–]\s*(\d\/\d\s*[A-Z]+)\s*$/) || nm.match(/\b(\d\/\d\s*[A-Z]{2,4})\b/);
+    if (ab) return ab[1];
+    if (x.sym && x.sym.length <= 12) return x.sym;
+    return nm.length > 16 ? nm.slice(0, 16) + "…" : nm;
+  };
+  const parts: string[] = [];
+  let prev = "", cnt = 0;
+  const flush = () => {
+    if (!cnt) return;
+    parts.push(prev === "겉" || prev === "안" ? prev + cnt : cnt > 1 ? `${prev} ×${cnt}` : prev);
+  };
+  for (const x of st) {
+    const l = label(x);
+    if (l === prev) cnt++;
+    else { flush(); prev = l; cnt = 1; }
+  }
+  flush();
+  // 같은 두 묶음이 3번 넘게 되풀이되면 "(겉1, 안1) 5번 반복"처럼 (도안 표기와 같게)
+  const out: string[] = [];
+  for (let i = 0; i < parts.length; ) {
+    let rep = 1;
+    while (i + 2 * rep + 1 < parts.length && parts[i + 2 * rep] === parts[i] && parts[i + 2 * rep + 1] === parts[i + 1]) rep++;
+    if (rep >= 3 && parts[i] !== parts[i + 1]) { out.push(`(${parts[i]}, ${parts[i + 1]}) ${rep}번 반복`); i += 2 * rep; }
+    else out.push(parts[i++]);
+  }
+  return out.join(", ");
+}
+

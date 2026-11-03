@@ -84,3 +84,28 @@ import { newPattern } from "../src/model";
   return res.slice(0, 2);
 };
 (window as any).ready = true;
+
+/** 한 단 전체 읽기 점검: readRow → rowText */
+(window as any).readrows = async (b64: string, page: number, rows: number[]) => {
+  const bin = atob(b64);
+  const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  const pdf = await openPdf(new Blob([u]));
+  const p = newPattern({ id: "rr", name: "rr" });
+  for (let n = 1; n <= Math.min(14, pdf.numPages); n++) {
+    const t = await textItems(pdf, n);
+    if (!t.items.some((i) => LEGEND_RE.test(i.str))) continue;
+    const lg = findLegend(t.items);
+    if (lg) { p.legend = { page: n, ...lg }; break; }
+  }
+  const bmp = await chartBitmap(pdf, "rr", page);
+  const { readRow, rowText } = await import("../src/symbolid");
+  const out: string[] = [];
+  for (const n of rows) {
+    const t0 = performance.now();
+    const ws = n % 2 === 0;
+    const st = await readRow(p, pdf, page, bmp, n, ws);
+    out.push(`${n}단 ${ws ? "WS" : "RS"} (${Math.round(performance.now() - t0)}ms, ${st ? st.reduce((a, x) => a + x.cells, 0) : 0}칸): ${st ? rowText(st, ws) : "못 읽음"}`);
+  }
+  return out;
+};

@@ -454,3 +454,19 @@ describe("도안 정보", () => {
     expect(p.notes).toBe("기기에서 읽었어요 (Claude 안 씀).");
   });
 });
+
+describe("차트 한 단 → 서술", () => {
+  it("겉·안은 개수로 묶고, 안면이면 겉↔안을 바꾸고, 교차뜨기는 약어로", async () => {
+    const { rowText } = await import("../src/symbols");
+    const st = [
+      { name: "겉뜨기", sym: "|", cells: 1 }, { name: "겉뜨기", sym: "|", cells: 1 },
+      { name: "안뜨기", sym: "", cells: 1 },
+      { name: "오른코 위 2코 교차뜨기 - 2/2 LC", sym: "", cells: 4 },
+      { name: "왼코 2코 모아 겉뜨기", sym: "K2tog", cells: 1 },
+    ];
+    expect(rowText(st, false)).toBe("겉2, 안1, 2/2 LC, K2tog");
+    expect(rowText(st.slice(0, 3), true)).toBe("안2, 겉1");
+    const k = { name: "겉뜨기", sym: "|", cells: 1 }, pu = { name: "안뜨기", sym: "", cells: 1 };
+    expect(rowText([pu, pu, k, pu, k, pu, k, pu, k, pu, k], false)).toBe("안2, (겉1, 안1) 4번 반복, 겉1");
+  });
+});

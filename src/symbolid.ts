@@ -2,6 +2,8 @@
 import type { Bitmap } from "./chart";
 import { renderPage, renderRegion, textItems, type Pdf } from "./pdf";
 import { rowH, rowY, type Chart } from "./pdfgeom";
+import { rowText, type RowStitch } from "./symbols";
+export { rowText };
 import { boundaries, gridLattice, symbolScore, legendEntries, matchToken, textAt, unreadable, type Box, type LegendEntry } from "./symbols";
 import type { Pattern } from "./types";
 
@@ -137,6 +139,64 @@ function features(img: ImageData, sx: number, sy: number, sw: number, sh: number
     }
   return out;
 }
+/**
+ * 교차뜨기 방향: 가운데 둘레에서 '\\' 쪽(왼위·오른아래) 잉크와 '/' 쪽(오른위·왼아래) 잉크의 차이.
+ * 위로 지나가는 선은 가운데에서 끊기지 않아 그쪽이 많다. 둘 다 비슷하면(교차가 아님) null
+ */
+function crossDir(m: Uint8ClampedArray, W: number, H: number): number | null {
+  const ink = (x: number, y: number) => {
+    const xx = Math.round(x), yy = Math.round(y);
+    return xx >= 0 && yy >= 0 && xx < W && yy < H && !!m[(yy * W + xx) * 4];
+  };
+  // 한 방향 사선들 중 잉크가 끊기지 않고 이어지는 가장 긴 길이 (가로 길이 기준, 0~1)
+  // 위로 지나가는 선은 교차점에서 끊기지 않아 길고, 아래로 지나가는 선은 반쯤에서 끊긴다
+  const run = (sign: number) => {
+    let best = 0;
+    for (const f of [0.6, 0.8, 1, 1.25, 1.5, 2, 3]) {
+      const k = (sign * f * H) / W;
+      for (let c = -H; c <= 2 * H; c += 1) {
+        let cur = 0, mx = 0;
+        for (let x = 0; x < W; x += 0.5) {
+          const y = (sign > 0 ? 0 : H) + c + k * x;
+          if (ink(x, y) || ink(x, y - 1) || ink(x, y + 1)) { cur += 0.5; if (cur > mx) mx = cur; } else cur = 0;
+        }
+        if (mx > best) best = mx;
+      }
+    }
+    return best / W;
+  };
+  const back = run(1), slash = run(-1); // y가 아래로 커지므로 +기울기가 '\\'
+  if (Math.max(back, slash) < 0.3 || Math.abs(back - slash) < 0.1) return null;
+  return back - slash;
+}
+
+/** 안뜨기 교차의 가로줄: 평평한 가로 잉크(위아래 두 줄에는 잉크가 거의 없음)가 폭의 12% 넘게 이어지면 */
+function purlDash(m: Uint8ClampedArray, W: number, H: number): boolean {
+  const ink = (x: number, y: number) => y >= 0 && y < H && !!m[(y * W + x) * 4];
+  const need = Math.max(5, W * 0.14);
+  for (let y = Math.floor(H * 0.35); y < H; y++) {
+    let x = 0;
+    while (x < W) {
+      if (!ink(x, y)) { x++; continue; }
+      let e = x;
+      while (e < W && ink(e, y)) e++;
+      if (e - x >= need) {
+        let off = 0;
+        for (let k = x; k < e; k++) if (ink(k, y - 3) || ink(k, y + 3)) off++;
+        if (off / (e - x) < 0.2) return true;
+      }
+      x = e;
+    }
+  }
+  return false;
+}
+
+/** 교차뜨기 칸 수: 이름의 "2/1"처럼 a/b면 a+b칸 (기호표 상자 크기는 칸 수에 비례하지 않을 때가 많다) */
+function spanOf(e: LegendEntry): number | null {
+  const m = (e.sym + " " + e.name).match(/(?<![\d/])(\d)\s*\/\s*(\d)(?![\d/])/);
+  return m ? +m[1] + +m[2] : null;
+}
+
 /** 글자 하나를 칸 모양 그림으로 (가운데, 칸 높이의 60%) */
 function glyphCell(token: string, cellRatio: number): ImageData {
   const H = 60, W = Math.round(H * cellRatio);
@@ -151,10 +211,89 @@ function glyphCell(token: string, cellRatio: number): ImageData {
 }
 
 const tmplPix = new WeakMap<HTMLCanvasElement, ImageData>();
+/** 기호표 그림의 교차 방향·가로줄 (칸 수별) */
+const tmplDir = new WeakMap<HTMLCanvasElement, Record<string, { dir: number | null; dash: boolean }>>();
 function tpix(c: HTMLCanvasElement) {
   let d = tmplPix.get(c);
   if (!d) tmplPix.set(c, (d = c.getContext("2d", { willReadFrequently: true })!.getImageData(0, 0, c.width, c.height)));
   return d;
+}
+
+type RowCtx = {
+  h: number; yTop: number; S: number; OY: number; img: ImageData;
+  dark: (x: number, y: number) => boolean;
+  lat: { w: number; off: number; xs: number[] } | null; B: number[]; M: number;
+};
+const ctxCache = new Map<string, Promise<RowCtx>>();
+/** 한 단 둘레를 높은 배율로 그리고 격자선(칸 경계)을 찾는다. 같은 단이면 다시 계산하지 않음 */
+function rowCtx(pdf: Pdf, page: number, bmp: Bitmap, c: Chart, n: number): Promise<RowCtx> {
+  const key = `${page}:${c.a}:${c.b}:${n}`;
+  let pr = ctxCache.get(key);
+  if (pr) return pr;
+  if (ctxCache.size > 12) ctxCache.clear();
+  pr = (async () => {
+    const h = rowH(c);
+    const yTop = rowY(c, n) - h / 2;
+    // 이 단 위아래 몇 단만 높은 배율로 따로 그린다 (화면용 차트 그림은 휴대폰 때문에 작게 그려서 가는 선이 사라짐)
+    const ry0 = Math.max(0, rowY(c, Math.min(c.nMax, n + 6)) - h);
+    const ry1 = Math.min(bmp.h, rowY(c, Math.max(c.nMin, n - 6)) + h);
+    const strip = await stripOf(pdf, page, Math.max(bmp.scale, 26 / h), ry0, ry1);
+    const S = strip.width / bmp.w;
+    const OY = ry0 * S;
+    const img = pixels(strip);
+    const dark = (px: number, py: number) => {
+      const i = (Math.round(py - OY) * img.width + Math.round(px)) * 4;
+      const r = img.data[i], g = img.data[i + 1], b = img.data[i + 2]; return r + g + b < 3 * 236 && Math.max(r, g, b) - Math.min(r, g, b) < 14; // 회색·검정 선만 (색칠된 칸 바탕은 아님)
+    };
+    // 격자: 이 단 위아래 몇 단에 걸쳐 찾는다
+    const yA = Math.max(rowY(c, Math.min(c.nMax, n + 6)) - h / 2, rowY(c, c.nMax) - h / 2) * S;
+    const yB = Math.min(rowY(c, Math.max(c.nMin, n - 6)) + h / 2, rowY(c, c.nMin) + h / 2) * S;
+    const lat = gridLattice(dark, c.x0 * S, c.x1 * S, yA, yB);
+    // 칸 경계는 실제로 찾은 격자선 위치로 (너비×번호로 계산하면 칸이 많을 때 오차가 쌓인다)
+    const B = lat ? boundaries(lat.xs, lat.w) : [];
+    return { h, yTop, S, OY, img, dark, lat, B, M: B.length - 1 };
+  })();
+  ctxCache.set(key, pr);
+  pr.catch(() => ctxCache.delete(key));
+  return pr;
+}
+
+/**
+ * 한 단 전체를 기기에서 읽는다: 뜨기 시작하는 쪽부터 칸마다 기호 → 이름.
+ * 이 단에 없는 칸(모양 낸 가장자리·경사뜨기로 안 뜨는 곳 — 위아래 격자선이 없음)은 건너뛴다.
+ * 결과는 차트(겉면) 기호 그대로. 안면 뜨기 변환은 rowText에서.
+ */
+export async function readRow(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, n: number, fromLeft: boolean): Promise<RowStitch[] | null> {
+  const c = bmp.charts.find((ch) => n >= ch.nMin - 1 && n <= ch.nMax + 1);
+  if (!c) return null;
+  const R = await rowCtx(pdf, page, bmp, c, n);
+  if (!R.lat || R.M < 2) return null;
+  const { B, M, S, h, yTop, dark } = R;
+  // 칸이 있나: 위·아래 테두리에 모두 선이 있으면 (안 뜨는 곳은 아래 단의 윗선만 있다)
+  const edge = (yy: number, x: number) => { for (let d = -2; d <= 2; d++) if (dark(x, yy + d)) return true; return false; };
+  const exists = (k: number) => {
+    const xs = [0.3, 0.5, 0.7].map((f) => B[k] + (B[k + 1] - B[k]) * f);
+    const top = Math.round(yTop * S), bot = Math.round((yTop + h) * S);
+    return xs.filter((x) => edge(top, Math.round(x)) && edge(bot, Math.round(x))).length >= 2; // 그려진 칸은 위·아래 선이 다 있다
+  };
+  const yMid = rowY(c, n);
+  const out: RowStitch[] = [];
+  const order = [...Array(M).keys()];
+  if (!fromLeft) order.reverse();
+  const seen = new Set<number>();
+  for (const k of order) {
+    if (seen.has(k)) continue;
+    if (!exists(k)) { seen.add(k); continue; }
+    const hit = await identify(p, pdf, page, bmp, (B[k] + B[k + 1]) / 2 / S, yMid);
+    let cells = 1;
+    if (hit?.rect) {
+      const a = (hit.fromLeft || k + 1) - 1, b = M - (hit.fromRight || M - k);
+      for (let j = a; j <= b; j++) seen.add(j);
+      cells = Math.max(1, b - a + 1);
+    } else seen.add(k);
+    out.push({ name: hit?.name || "", sym: hit?.sym || "", cells });
+  }
+  return out;
 }
 
 /** 누른 점 (차트 쪽 pt 좌표) → 기호 */
@@ -171,27 +310,9 @@ export async function identify(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, 
   });
   if (!c) return null;
   const n = Math.round((y - c.a) / c.b);
-  const h = rowH(c);
-  const yTop = rowY(c, n) - h / 2;
-  // 이 단 위아래 몇 단만 높은 배율로 따로 그린다 (화면용 차트 그림은 휴대폰 때문에 작게 그려서 가는 선이 사라짐)
-  const ry0 = Math.max(0, rowY(c, Math.min(c.nMax, n + 6)) - h);
-  const ry1 = Math.min(bmp.h, rowY(c, Math.max(c.nMin, n - 6)) + h);
-  const strip = await stripOf(pdf, page, Math.max(bmp.scale, 26 / h), ry0, ry1);
-  const S = strip.width / bmp.w;
-  const OY = ry0 * S;
-  const img = pixels(strip);
-  const dark = (px: number, py: number) => {
-    const i = (Math.round(py - OY) * img.width + Math.round(px)) * 4;
-    const r = img.data[i], g = img.data[i + 1], b = img.data[i + 2]; return r + g + b < 3 * 236 && Math.max(r, g, b) - Math.min(r, g, b) < 14; // 회색·검정 선만 (색칠된 칸 바탕은 아님)
-  };
-  // 격자: 이 단 위아래 몇 단에 걸쳐 찾는다
-  const yA = Math.max(rowY(c, Math.min(c.nMax, n + 6)) - h / 2, rowY(c, c.nMax) - h / 2) * S;
-  const yB = Math.min(rowY(c, Math.max(c.nMin, n - 6)) + h / 2, rowY(c, c.nMin) + h / 2) * S;
-  const lat = gridLattice(dark, c.x0 * S, c.x1 * S, yA, yB);
+  const R = await rowCtx(pdf, page, bmp, c, n);
+  const { h, yTop, S, OY, img, dark, lat, B, M } = R;
   let rect: Box | null = null, st: number | null = null, k = 0;
-  // 칸 경계는 실제로 찾은 격자선 위치로 (너비×번호로 계산하면 칸이 많을 때 오차가 쌓인다)
-  const B = lat ? boundaries(lat.xs, lat.w) : [];
-  const M = B.length - 1; // 칸 수
   if (lat) {
     const X = x * S;
     if (M < 1 || X < B[0] - 1 || X > B[M] + 1) return null; // 격자 밖
@@ -228,7 +349,7 @@ export async function identify(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, 
     const ya = Math.round((yTop + h * 0.25) * S), yb = Math.round((yTop + h * 0.75) * S);
     let n2 = 0;
     for (let yy = ya; yy < yb; yy++) if (dark(xb - 1, yy) || dark(xb, yy) || dark(xb + 1, yy)) n2++;
-    return n2 / Math.max(1, yb - ya) > 0.6;
+    return n2 / Math.max(1, yb - ya) > 0.85; // 진짜 격자선은 끊김이 없다 (교차뜨기 사선이 경계를 지나면 30~70%)
   };
   let cL = k, cR = k;
   // 글자가 든 칸은 한 칸짜리 기호
@@ -242,19 +363,36 @@ export async function identify(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, 
   // 글자 칸인데 글자 기호표에 없으면(예: '|') 그림 기호 중에서만 고른다
   const cands = token ? tmpls.filter((tm) => !tm.entry.sym && tm.canvas && tm.canvas.width / tm.canvas.height / cellRatio < 1.5) : tmpls;
   const IN = 0.16; // 테두리·격자선을 빼고 안쪽만 비교
+  const DIN = IN;
   const W = 12 * cells, H = 12;
   const sx = B[cL], cw = B[cR + 1] - B[cL], chh = h * S;
   // 글자 칸(기호표엔 그림으로만 있는 '|' 등)은 그 글자를 칸 가운데에 그려서 비교 — 칸 안 위치와 상관없게
   const b = token ? features(glyphCell(token, cellRatio), 0, 0, 0, 0, W, H, true) : features(img, sx + lat.w * IN, yTop * S - OY + chh * IN, cw - 2 * lat.w * IN, chh * (1 - 2 * IN), W, H);
   // 격자선도 획도 없는 넓은 빈 곳(모양 낸 가장자리 바깥)은 칸이 아니다
   if (!token && cells > 1 && !b.some((v, i) => i % 4 === 0 && v > 0)) return null;
+  // 교차뜨기 방향: 칸 가운데를 끊기지 않고 지나가는 선이 \\ 인가 / 인가
+  const bigB = token ? null : features(img, sx + lat.w * IN, yTop * S - OY + chh * IN, cw - 2 * lat.w * IN, chh * (1 - 2 * IN), W * 2, H * 2);
+  const dirB = bigB ? crossDir(bigB, W * 2, H * 2) : null;
+  const dashB = !token && cells > 1 ? purlDash(features(img, sx + lat.w * IN, yTop * S - OY + chh * DIN, cw - 2 * lat.w * IN, chh * (1 - 2 * DIN), W * 2, H * 2), W * 2, H * 2) : null;
   for (const tm of cands) {
     if (!tm.canvas) continue;
     const tw = tm.canvas.width, th = tm.canvas.height;
     // 기호표 상자가 차트 칸 비율과 크게 다르면(1칸 기호를 3칸에 맞추는 등) 감점
     const want = tw / th / cellRatio;
     const a = features(tpix(tm.canvas), (tw * IN) / cells, th * IN, tw * (1 - (2 * IN) / cells), th * (1 - 2 * IN), W, H);
-    const d = symbolScore(a, b, W, H) + 0.08 * Math.abs(Math.log(Math.max(0.3, want) / cells));
+    const tk = `${cells}`;
+    let tc = tmplDir.get(tm.canvas)?.[tk];
+    if (!tc) {
+      const bigA = features(tpix(tm.canvas), (tw * IN) / cells, th * IN, tw * (1 - (2 * IN) / cells), th * (1 - 2 * IN), W * 2, H * 2);
+      tc = { dir: crossDir(bigA, W * 2, H * 2), dash: purlDash(features(tpix(tm.canvas), (tw * IN) / cells, th * DIN, tw * (1 - (2 * IN) / cells), th * (1 - 2 * DIN), W * 2, H * 2), W * 2, H * 2) };
+      tmplDir.set(tm.canvas, { ...(tmplDir.get(tm.canvas) || {}), [tk]: tc });
+    }
+    const da = tc.dir;
+    // 안뜨기 교차(PC)는 아래에 짧은 가로줄이 있다
+    const dashPen = dashB != null && spanOf(tm.entry) != null && tc.dash !== dashB ? 0.25 : 0;
+    const dirPen = dirB != null && da != null && Math.sign(da) !== Math.sign(dirB) ? 0.25 : 0;
+    // 허용 오차 없는 비교를 조금 더해 좌우 대칭인 교차뜨기(LC/RC)를 가른다 (위로 지나가는 선은 끊기지 않음)
+    const d = symbolScore(a, b, W, H) + 0.35 * symbolScore(a, b, W, H, 0) + dirPen + dashPen + 0.08 * Math.abs(Math.log(Math.max(0.3, want) / cells)) + (!token && spanOf(tm.entry) != null && spanOf(tm.entry) !== cells ? 0.4 : 0) + (!token && cells > 1 && spanOf(tm.entry) == null && /[a-z]/i.test(tm.entry.sym) ? 0.25 : 0); // 여러 칸인데 글자 기호(L, R…)는 거의 아님 // 칸 수가 다른 교차뜨기는 아님
     if (!best || d < best.d) best = { e: tm.entry, d, start: cL, cells };
   }
   if (!best) return { ...out(token, null, true, rect), name: "기호표 그림을 찾지 못했어요" };

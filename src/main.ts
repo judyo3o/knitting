@@ -469,11 +469,38 @@ function narrative(p: Pattern, r: Row) {
     setTimeout(() => ta.focus());
     return wrap;
   }
+  // 서술 없이 '차트를 따라 진행'뿐인 단: 기기에서 차트를 읽어 그 단의 서술을 만들어 보여 준다
+  if (wantsChartText(p, r)) {
+    if (r.t) wrap.append(h("p", { class: "gen", text: "도안: " + r.t.split("\n")[0].slice(0, 80) }));
+    const slot = h("div", { class: "gen", text: "차트에서 이 단을 읽는 중…" });
+    wrap.append(slot);
+    chartRowText(p, r).then((txt) => {
+      if (!slot.isConnected) return;
+      if (!txt) { slot.textContent = "차트에서 이 단을 읽지 못했어요. '이 단 차트를 글로 풀기'를 써 보세요."; if (chunks.length) slot.after(chunkBox(p, r, chunks)); return; }
+      const sideNote = sideOf(p, r) === "WS" && !p.secs[r.s]?.round ? "안면이라 왼쪽부터, 겉↔안 바꿔 읽음" : "오른쪽부터 읽음";
+      slot.replaceWith(
+        h("span", { class: "gen", text: `차트를 기기에서 읽은 이 단 서술 · ${sideNote} · 교차 방향은 차트와 대조해 주세요` }),
+        chunkBox(p, r, chunksOf(txt)),
+        h("div", { class: "actions" }, h("button", { class: "btn ghost", type: "button", text: "이 서술을 이 단에 저장", on: { click: () => {
+          r.t = txt; r.span = null; p.rev++; commit(p); render(); toast("이 단 서술로 저장했어요.");
+        } } })),
+      );
+    }).catch(() => { slot.textContent = "차트에서 이 단을 읽지 못했어요."; });
+    return wrap;
+  }
   if (!chunks.length) {
     wrap.append(h("p", { class: "instr", text: "(서술 없음)" }));
     return wrap;
   }
-  const prog = p.part[k];
+  wrap.append(chunkBox(p, r, chunks));
+  return wrap;
+}
+
+/** 서술 묶음 버튼 (누른 묶음까지 뜬 것으로 저장) + 진행 정보 */
+function chunkBox(p: Pattern, r: Row, chunks: string[]) {
+  const k = key(r.s, r.n);
+  const wrap = h("div", { style: "display:flex;flex-direction:column;gap:6px" });
+  const prog = p.part[k] && p.part[k].i < chunks.length ? p.part[k] : undefined;
   const at = prog ? prog.i : -1;
   const box = h("div", { class: "chunks", role: "list" });
   chunks.forEach((c, i) => {
@@ -496,6 +523,36 @@ function narrative(p: Pattern, r: Row) {
     wrap.append(h("span", { class: "chunk-meta", text: `${prog.i + 1}/${chunks.length} 묶음` + (st != null ? ` · 왼바늘에서 약 ${st}코 뜸` : "") + ` · ${fmtTime(prog.t)}` }));
   } else if (chunks.length > 1) wrap.append(h("span", { class: "gen", text: "뜬 묶음을 누르면 그 자리까지 저장돼요." }));
   return wrap;
+}
+
+/** 단 서술에 코 지시(겉2, 안3, LC…)가 없고 차트만 가리키나 */
+const STITCH_INSTR = /(?:겉|안)\s*\d|겉뜨기\s*\d|안뜨기\s*\d|\b[kp]\d|\b(?:LC|RC|LPC|RPC|k2tog|ssk|p2tog|DS|KDS|PDS|M1[LR]?)\b/i;
+function wantsChartText(p: Pattern, r: Row) {
+  const page = chartPage(p, r);
+  return !!page && p.src === "pdf" && !r.castOn && !r.auto && !(p.draw[r.s] && (view.useDrawing[r.s] ?? true)) && !STITCH_INSTR.test(r.t || "");
+}
+const chartTextCache = new Map<string, Promise<string | null>>();
+function chartRowText(p: Pattern, r: Row): Promise<string | null> {
+  const page = chartPage(p, r)!;
+  const ws = sideOf(p, r) === "WS" && !p.secs[r.s]?.round;
+  const lg = p.legend && "page" in p.legend ? [p.legend.page, p.legend.x0, p.legend.y0].join(",") : "";
+  const ck = [p.id, page, r.n, ws, lg].join(":");
+  let c = chartTextCache.get(ck);
+  if (!c) {
+    if (chartTextCache.size > 40) chartTextCache.clear();
+    c = (async () => {
+      const pdf = await pdfOf(p);
+      if (!pdf) return null;
+      if (!p.legend) await detectLegend(p);
+      const bmp = await chartBitmap(pdf, p.id, page);
+      const { readRow, rowText } = await import("./symbolid");
+      const st = await readRow(p, pdf, page, bmp, r.n, ws);
+      return st && st.length ? rowText(st, ws) : null;
+    })();
+    chartTextCache.set(ck, c);
+    c.catch(() => chartTextCache.delete(ck));
+  }
+  return c;
 }
 
 function rowActions(p: Pattern, r: Row, side: "RS" | "WS", round: boolean) {
