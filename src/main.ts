@@ -3,7 +3,7 @@ import { chunksOf, stitchesThrough } from "./chunks";
 import { MAX_TOKENS } from "./config";
 import { callAi, canCallDirect, errCopy } from "./ai";
 import { inArtifact } from "./artifact";
-import { chartBitmap, drawGrid, drawPdfFull, drawPdfRows, explainStrip, hitCell, legendCanvas, sampleRowColors, yarnHex } from "./chart";
+import { chartBitmap, clearBitmaps, drawGrid, drawPdfFull, drawPdfRows, explainStrip, hitCell, legendCanvas, sampleRowColors, yarnHex } from "./chart";
 import { getFile, putFile } from "./db";
 import { getCell, longestFloat, rowColors } from "./drawing";
 import {
@@ -273,9 +273,13 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
       for (const c2 of cols.slice(0, 5)) yarnBox.append(h("span", { class: "yarn sample", title: "차트에서 뽑은 색" }, h("i", { style: { background: c2.hex } }), Math.round(c2.share * 100) + "%"));
       if (!yarnBox.querySelector(".gen")) yarnBox.prepend(h("span", { class: "gen", text: "차트 색" }));
     }
-  })().catch(() => {
+  })().catch((err) => {
+    console.warn("차트 그리기 실패", err);
     cv.innerHTML = "";
-    cv.append(h("p", { class: "empty", text: "차트를 그리지 못했어요." }));
+    const why = String((err as any)?.message || err || "").slice(0, 120);
+    cv.append(h("div", { class: "empty" },
+      h("p", { text: "차트를 그리지 못했어요." + (why ? ` (이유: ${why})` : "") }),
+      h("button", { class: "btn", type: "button", text: "다시 그리기", on: { click: () => { clearBitmaps(); render(); } } })));
   });
   return wrap;
 }

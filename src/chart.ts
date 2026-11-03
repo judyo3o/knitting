@@ -1,6 +1,6 @@
 /** 차트 표시 (§1-4 ③, §3-1) — PDF 차트 비트맵 / 직접 그린 배색 격자 */
 import { chartFor, findCharts, rowH, rowY, type Chart } from "./pdfgeom";
-import { renderPage, textItems, pageSize, type Pdf } from "./pdf";
+import { MAX_PIXELS, renderPage, textItems, pageSize, type Pdf } from "./pdf";
 import { cellAspect, dominantColors, getCell, hasRow, rowIndex } from "./drawing";
 import type { Drawing, Side, Yarn } from "./types";
 
@@ -21,10 +21,11 @@ export function chartBitmap(pdf: Pdf, pdfKey: string, page: number): Promise<Bit
       const charts = findCharts(t.items, t.w);
       const b = charts.length ? Math.min(...charts.map(rowH)) : 6;
       let scale = 20 / b;
-      const maxScale = Math.sqrt(1e7 / (t.w * t.h));
+      const maxScale = Math.sqrt(MAX_PIXELS / (t.w * t.h));
       scale = Math.max(1, Math.min(scale, maxScale));
       const canvas = await renderPage(pdf, page, scale);
-      return { canvas, scale, charts, w: t.w, h: t.h };
+      // 휴대폰에서 줄여서 그렸을 수 있으니 실제 배율로
+      return { canvas, scale: canvas.width / t.w, charts, w: t.w, h: t.h };
     })();
     bmpCache.set(k, p);
     p.catch(() => bmpCache.delete(k));
@@ -143,8 +144,8 @@ export async function explainStrip(pdf: Pdf, page: number, n: number): Promise<H
   const c = chartFor(findCharts(t.items, t.w), n);
   if (!c) return null;
   const h = rowH(c);
-  const scale = Math.min(48 / h, Math.sqrt(1.6e7 / (t.w * t.h)));
-  const full = await renderPage(pdf, page, scale);
+  const full = await renderPage(pdf, page, Math.min(48 / h, Math.sqrt(MAX_PIXELS / (t.w * t.h))));
+  const scale = full.width / t.w;
   const yTop = rowY(c, n + 2) - h / 2, yBot = rowY(c, n - 2) + h / 2;
   const pad = 4;
   const out = document.createElement("canvas");
@@ -162,8 +163,10 @@ export async function explainStrip(pdf: Pdf, page: number, n: number): Promise<H
 
 /** 기호표 영역 잘라내기 */
 export async function legendCanvas(pdf: Pdf, lg: { page: number; x0: number; y0: number; x1: number; y1: number }, scale = 2) {
-  const full = await renderPage(pdf, lg.page, scale);
+  const full0 = await renderPage(pdf, lg.page, scale);
   const { w, h } = await pageSize(pdf, lg.page);
+  scale = full0.width / w; // 휴대폰에서 줄여서 그렸으면 실제 배율로
+  const full = full0;
   const x0 = Math.max(0, lg.x0), y0 = Math.max(0, lg.y0), x1 = Math.min(w, lg.x1), y1 = Math.min(h, lg.y1);
   const out = document.createElement("canvas");
   out.width = Math.max(1, Math.round((x1 - x0) * scale));

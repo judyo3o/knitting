@@ -20,7 +20,9 @@ sample.json = async () => ({ title: null, notes: null, colors: null, sections: [
 const caps = { sample, db: { collection: col }, user: { id: async () => "u1" }, downloads: { save: async (f) => { window.__calls.dl = f.filename; } } };
 window.claude = { use: async (n) => caps[n] ?? null };
 </script>`;
-writeFileSync("dist-artifact/smoke.html", `<!doctype html><html><head><meta charset="utf8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">${mock}</head><body>${page0}</body></html>`);
+// 아티팩트처럼 엄격한 보안 규칙(CSP): eval 금지, 글꼴은 Google Fonts만, 외부 연결 금지
+const CSP = process.env.NO_CSP ? "" : `<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' blob:; worker-src 'self' blob:; connect-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com">`;
+writeFileSync("dist-artifact/smoke.html", `<!doctype html><html><head><meta charset="utf8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">${CSP}${mock}</head><body>${page0}</body></html>`);
 const server = await createServer({ root: "dist-artifact", server: { port: 5193 }, logLevel: "error", configFile: false });
 await server.listen();
 const browser = await chromium.launch();
@@ -75,7 +77,9 @@ await page.waitForTimeout(4000);
 console.log("   진행:", await page.textContent("#uploadView .progress").catch(() => "-"), "| 대화상자:", await page.locator(".dlg h2").allTextContents());
 await page.waitForSelector("#uploadView", { state: "detached", timeout: 60000 });
 await page.click(".ptab:has-text('스와치')");
-await page.waitForSelector(".chartview canvas", { timeout: 60000 });
+await page.waitForFunction(() => !/그리는 중/.test(document.querySelector(".chartview")?.textContent || ""), null, { timeout: 60000 });
+console.log("   차트 칸:", (await page.textContent(".chartview")).slice(0, 80) || "(그림)");
+await page.waitForSelector(".chartview canvas", { timeout: 5000 });
 console.log("   스와치 차트 띠 표시 ✓");
 await browser.close(); await server.close();
 if (errors.length) { console.error("오류:", errors); process.exit(1); }

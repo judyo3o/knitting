@@ -157,7 +157,8 @@ await step("PDF: 차트 쪽 바꾸기 → 띠 표시", async () => {
   return "p13";
 });
 await step("PDF: 기호 누르기 → 말풍선 → 다시 누르면 닫힘", async () => {
-  // 보이는 차트 그림 안쪽을 누른다
+  // 차트 가운데로 가로 스크롤한 뒤 보이는 그림 안쪽을 누른다 (끝은 단 번호 칸이라 기호가 없음)
+  await T(".chartview").evaluate((el) => { el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2; });
   const v = await T(".chartview").boundingBox(), c = await T(".chartview canvas").boundingBox();
   const x = Math.max(v.x, c.x) + (Math.min(v.x + v.width, c.x + c.width) - Math.max(v.x, c.x)) * 0.5;
   const y = Math.max(v.y, c.y) + (Math.min(v.y + v.height, c.y + c.height) - Math.max(v.y, c.y)) * 0.5;

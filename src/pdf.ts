@@ -113,18 +113,51 @@ export async function pageSize(pdf: Pdf, n: number) {
 }
 
 /** 페이지를 scale 배율로 그린다 (흰 배경) */
+/** 한 그림의 최대 픽셀 수 — 휴대폰(특히 iPhone Safari)은 큰 캔버스를 거부한다 */
+export const MAX_PIXELS = 5_000_000;
+
 export async function renderPage(pdf: Pdf, n: number, scale: number): Promise<HTMLCanvasElement> {
   const page = await pdf.getPage(n);
-  const vp = page.getViewport({ scale });
+  const v1 = page.getViewport({ scale: 1 });
+  // 너무 크면 줄이고, 그래도 캔버스를 못 만들면 더 작게 다시 (최대 3번)
+  scale = Math.min(scale, Math.sqrt(MAX_PIXELS / (v1.width * v1.height)));
+  let lastErr: unknown = null;
+  for (let tries = 0; tries < 3; tries++, scale *= 0.6) {
+    const vp = page.getViewport({ scale });
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(vp.width));
+    c.height = Math.max(1, Math.round(vp.height));
+    const ctx = c.getContext("2d");
+    if (!ctx) { lastErr = new Error(`캔버스를 만들지 못함 (${c.width}×${c.height})`); continue; }
+    try {
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, c.width, c.height);
+      await page.render({ canvasContext: ctx, canvas: c, viewport: vp } as any).promise;
+      return c;
+    } catch (e) {
+      lastErr = e;
+      c.width = c.height = 0; // 메모리 바로 돌려주기
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+}
+/** 쪽의 일부(가로 띠)만 높은 배율로 그린다 — 큰 캔버스 없이 자세히 보려고 (기호 찾기) */
+export async function renderRegion(pdf: Pdf, n: number, scale: number, y0: number, y1: number): Promise<HTMLCanvasElement> {
+  const page = await pdf.getPage(n);
+  const v1 = page.getViewport({ scale: 1 });
+  scale = Math.min(scale, Math.sqrt(MAX_PIXELS / (v1.width * Math.max(1, y1 - y0))));
+  const vp = page.getViewport({ scale, offsetY: -y0 * scale });
   const c = document.createElement("canvas");
-  c.width = Math.max(1, Math.round(vp.width));
-  c.height = Math.max(1, Math.round(vp.height));
-  const ctx = c.getContext("2d")!;
+  c.width = Math.max(1, Math.round(v1.width * scale));
+  c.height = Math.max(1, Math.round((y1 - y0) * scale));
+  const ctx = c.getContext("2d");
+  if (!ctx) throw new Error(`캔버스를 만들지 못함 (${c.width}×${c.height})`);
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, c.width, c.height);
   await page.render({ canvasContext: ctx, canvas: c, viewport: vp } as any).promise;
   return c;
 }
+
 export const renderWidth = async (pdf: Pdf, n: number, w: number) => renderPage(pdf, n, w / (await pageSize(pdf, n)).w);
 
 /** 선택 페이지만 잘라낸 PDF (Claude document 블록용) */

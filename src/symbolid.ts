@@ -1,6 +1,6 @@
 /** 차트에서 누른 칸의 기호 → 기법 이름 (기기에서) */
 import type { Bitmap } from "./chart";
-import { renderPage, textItems, type Pdf } from "./pdf";
+import { renderPage, renderRegion, textItems, type Pdf } from "./pdf";
 import { rowH, rowY, type Chart } from "./pdfgeom";
 import { boundaries, gridLattice, symbolScore, legendEntries, matchToken, textAt, unreadable, type Box, type LegendEntry } from "./symbols";
 import type { Pattern } from "./types";
@@ -19,7 +19,7 @@ export type SymHit = {
 };
 
 type Tmpl = { entry: LegendEntry; canvas: HTMLCanvasElement | null };
-type LegendData = { entries: LegendEntry[]; tmpls: Tmpl[]; page: HTMLCanvasElement | null; lg: Box | null };
+type LegendData = { entries: LegendEntry[]; tmpls: Tmpl[]; page: HTMLCanvasElement | null; lg: Box | null; sc?: number };
 const legendCache = new Map<string, Promise<LegendData>>();
 const T_SCALE = 3;
 
@@ -29,13 +29,14 @@ function legendData(p: Pattern, pdf: Pdf): Promise<LegendData> {
   let c = legendCache.get(key);
   if (!c) {
     c = (async () => {
-      if (!lg) return { entries: [], tmpls: [], page: null, lg: null };
+      if (!lg) return { entries: [], tmpls: [], page: null, lg: null, sc: T_SCALE };
       const t = await textItems(pdf, lg.page);
       const entries = legendEntries(t.items, lg);
-      const page = await renderPage(pdf, lg.page, T_SCALE);
+      const page = await renderPage(pdf, lg.page, T_SCALE); // 크면 renderPage가 알아서 줄임
       const ctx = page.getContext("2d", { willReadFrequently: true })!;
-      const tmpls = entries.map((entry) => ({ entry, canvas: tightCrop(ctx, entry.area, T_SCALE) }));
-      return { entries, tmpls, page, lg };
+      const sc = page.width / (await pdf.getPage(lg.page)).getViewport({ scale: 1 }).width;
+      const tmpls = entries.map((entry) => ({ entry, canvas: tightCrop(ctx, entry.area, sc) }));
+      return { entries, tmpls, page, lg, sc };
     })();
     legendCache.set(key, c);
   }
@@ -48,8 +49,8 @@ function lineImage(L: LegendData, e: LegendEntry | null): HTMLCanvasElement | nu
   // 기호 + 이름이 있는 부분만 꼭 맞게 (+ 여백)
   const ctx = L.page.getContext("2d", { willReadFrequently: true })!;
   // 기호와 이름 사이 빈 공간은 빼고 [기호] [이름]으로 붙인다
-  const sym = tightCrop(ctx, { x0: L.lg.x0, x1: e.area.x1, y0: e.area.y0, y1: e.area.y1 }, T_SCALE);
-  const name = tightCrop(ctx, { x0: e.area.x1, x1: L.lg.x1, y0: e.area.y0, y1: e.area.y1 }, T_SCALE);
+  const sym = tightCrop(ctx, { x0: L.lg.x0, x1: e.area.x1, y0: e.area.y0, y1: e.area.y1 }, L.sc || T_SCALE);
+  const name = tightCrop(ctx, { x0: e.area.x1, x1: L.lg.x1, y0: e.area.y0, y1: e.area.y1 }, L.sc || T_SCALE);
   const parts = [sym, name].filter(Boolean) as HTMLCanvasElement[];
   if (!parts.length) return null;
   const pad = 6, gap = 16;
@@ -84,6 +85,19 @@ function tightCrop(ctx: CanvasRenderingContext2D, a: Box, s: number): HTMLCanvas
   out.height = My - my + 1;
   out.getContext("2d")!.drawImage(ctx.canvas, x0 + mx, y0 + my, out.width, out.height, 0, 0, out.width, out.height);
   return out;
+}
+
+const stripCache = new Map<string, Promise<HTMLCanvasElement>>();
+function stripOf(pdf: Pdf, page: number, scale: number, y0: number, y1: number) {
+  const k = `${page}:${Math.round(y0)}:${Math.round(y1)}`;
+  let p = stripCache.get(k);
+  if (!p) {
+    if (stripCache.size > 6) stripCache.clear(); // 메모리 아끼기
+    p = renderRegion(pdf, page, scale, y0, y1);
+    stripCache.set(k, p);
+    p.catch(() => stripCache.delete(k));
+  }
+  return p;
 }
 
 const pixCache = new WeakMap<HTMLCanvasElement, ImageData>();
@@ -159,10 +173,15 @@ export async function identify(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, 
   const n = Math.round((y - c.a) / c.b);
   const h = rowH(c);
   const yTop = rowY(c, n) - h / 2;
-  const S = bmp.scale;
-  const img = pixels(bmp.canvas);
+  // 이 단 위아래 몇 단만 높은 배율로 따로 그린다 (화면용 차트 그림은 휴대폰 때문에 작게 그려서 가는 선이 사라짐)
+  const ry0 = Math.max(0, rowY(c, Math.min(c.nMax, n + 6)) - h);
+  const ry1 = Math.min(bmp.h, rowY(c, Math.max(c.nMin, n - 6)) + h);
+  const strip = await stripOf(pdf, page, Math.max(bmp.scale, 26 / h), ry0, ry1);
+  const S = strip.width / bmp.w;
+  const OY = ry0 * S;
+  const img = pixels(strip);
   const dark = (px: number, py: number) => {
-    const i = (Math.round(py) * img.width + Math.round(px)) * 4;
+    const i = (Math.round(py - OY) * img.width + Math.round(px)) * 4;
     const r = img.data[i], g = img.data[i + 1], b = img.data[i + 2]; return r + g + b < 3 * 236 && Math.max(r, g, b) - Math.min(r, g, b) < 14; // 회색·검정 선만 (색칠된 칸 바탕은 아님)
   };
   // 격자: 이 단 위아래 몇 단에 걸쳐 찾는다
@@ -226,7 +245,7 @@ export async function identify(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, 
   const W = 12 * cells, H = 12;
   const sx = B[cL], cw = B[cR + 1] - B[cL], chh = h * S;
   // 글자 칸(기호표엔 그림으로만 있는 '|' 등)은 그 글자를 칸 가운데에 그려서 비교 — 칸 안 위치와 상관없게
-  const b = token ? features(glyphCell(token, cellRatio), 0, 0, 0, 0, W, H, true) : features(img, sx + lat.w * IN, yTop * S + chh * IN, cw - 2 * lat.w * IN, chh * (1 - 2 * IN), W, H);
+  const b = token ? features(glyphCell(token, cellRatio), 0, 0, 0, 0, W, H, true) : features(img, sx + lat.w * IN, yTop * S - OY + chh * IN, cw - 2 * lat.w * IN, chh * (1 - 2 * IN), W, H);
   // 격자선도 획도 없는 넓은 빈 곳(모양 낸 가장자리 바깥)은 칸이 아니다
   if (!token && cells > 1 && !b.some((v, i) => i % 4 === 0 && v > 0)) return null;
   for (const tm of cands) {
