@@ -248,8 +248,8 @@ export function openEditor(p: Pattern, part: string, o: { onSave: () => void; st
         return h("div", { class: "set-sec" },
           toggle("범례 보이기", "색마다 이름과 코 수를 격자 아래에 보여줘요.", !!opt.legend, (x) => (opt.legend = x)),
           h("div", { class: "field" }, "칸 그리기", v, h("small", { text: "코 모양은 뜬 편물처럼 보여 주고, 격자는 편집할 때 보기 쉬워요." })),
-          h("button", { class: "btn", type: "button", text: "픽셀 보기 받기 (1코 = 1픽셀 PNG)", on: { click: async () => download(`${part}-픽셀.png`, await canvasBlob(pixelCanvas(d, colors, 1), "image/png")) } }),
-          h("button", { class: "btn ghost", type: "button", text: "크게 받기 (1코 = 10픽셀)", on: { click: async () => download(`${part}-격자.png`, await canvasBlob(pixelCanvas(d, colors, 10), "image/png")) } }));
+          h("button", { class: "btn", type: "button", text: "픽셀 보기 받기 (1코 = 1픽셀 PNG)", on: { click: async () => download(`colorwork-pixel.png`, await canvasBlob(pixelCanvas(d, colors, 1), "image/png")) } }),
+          h("button", { class: "btn ghost", type: "button", text: "크게 받기 (1코 = 10픽셀)", on: { click: async () => download(`colorwork-grid.png`, await canvasBlob(pixelCanvas(d, colors, 10), "image/png")) } }));
       },
       서식: () => {
         const b = h("select", {}, ...[5, 10].map((k) => new Option(`${k}칸마다`, String(k), false, (opt.bold || 10) === k)));

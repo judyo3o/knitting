@@ -54,7 +54,7 @@ export function manualHandler(req: CallReq, label: string): Promise<string> {
     const ans = h("textarea", { rows: 6, placeholder: "Claude의 답을 여기에 붙여넣으세요" });
     const fileBtns = files.map((f: any, i) => {
       const isPdf = f.kind === "pdf";
-      const name = isPdf ? `도안-${label.replace(/[^\w가-힣-]+/g, "_")}.pdf` : `이미지-${i + 1}.${f.media === "image/png" ? "png" : "jpg"}`;
+      const name = isPdf ? `pattern-pages.pdf` : `pattern-image-${i + 1}.${f.media === "image/png" ? "png" : "jpg"}`;
       return h("button", { class: "btn", type: "button", text: `${i + 1}. ${isPdf ? "PDF" : "이미지"} 받기`, on: { click: () => download(name, b64Blob(f.b64, isPdf ? "application/pdf" : f.media)) } });
     });
     let done = false;

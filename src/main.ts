@@ -298,7 +298,7 @@ function symbolTap(p: Pattern, pdf: any, page: number, bmp: any, cv: HTMLElement
     const x = v.x0 + cx / v.k, y = v.yTop + cy / v.k;
     const { identify } = await import("./symbolid");
     if (!p.legend) await detectLegend(p);
-    const hit = await identify(p, pdf, page, bmp, x, y).catch(() => null);
+    const hit = await identify(p, pdf, page, bmp, x, y).catch((err) => { console.warn("기호 찾기 실패", err); return null; });
     if (!hit) return closePop(cv);
     // 그 단을 뜨기 시작하는 쪽에서 센다: 겉면(RS)·원통은 오른쪽부터, 안면(WS)은 왼쪽부터
     const rowObj = partRows(p, p.tab).find((x) => x.n === hit.n) || { s: p.tab, n: hit.n, t: "", st: null, side: null, pg: null, ch: null, span: null };
@@ -417,7 +417,8 @@ async function detectLegend(p: Pattern) {
 
 function chartPicker(p: Pattern, r: Row) {
   const chIn = h("input", { type: "number", min: 1, inputmode: "numeric", value: String(chartPage(p, r) || "") });
-  const lgIn = h("input", { type: "number", min: 1, inputmode: "numeric", value: p.legend && "page" in p.legend ? String(p.legend.page) : "" });
+  const lgInit = p.legend && "page" in p.legend ? String(p.legend.page) : "";
+  const lgIn = h("input", { type: "number", min: 1, inputmode: "numeric", value: lgInit });
   const dl = dialog(`${r.s} 차트 쪽`, [
     h("label", { class: "field" }, "이 파트 차트 PDF 쪽", chIn, h("small", { text: "비우면 차트 없이 서술만 보여요." })),
     h("label", { class: "field" }, "기호표 PDF 쪽", lgIn, h("small", { text: "그 쪽 전체를 기호표로 써요. 비우면 기호표를 숨겨요." })),
@@ -427,11 +428,17 @@ function chartPicker(p: Pattern, r: Row) {
         p.secs[r.s] = { ...p.secs[r.s], ch };
         for (const x of partRows(p, r.s)) x.ch = ch;
         const lp = parseInt(lgIn.value, 10);
-        if (lp) {
+        const curLg = p.legend && "page" in p.legend ? p.legend.page : null;
+        if (lgIn.value === lgInit || lp === curLg) {
+          // 기호표 쪽을 안 바꿨으면 자동으로 찾은 영역 그대로
+        } else if (lp) {
           const pdf = await pdfOf(p);
           const { pageSize } = await import("./pdf");
           const sz = pdf ? await pageSize(pdf, lp) : { w: 595, h: 842 };
-          p.legend = { page: lp, x0: 0, y0: 0, x1: sz.w, y1: sz.h };
+          // 그 쪽에서 기호표 제목을 찾으면 그 영역, 없으면 쪽 전체
+          const t = pdf ? await (await import("./pdf")).textItems(pdf, lp) : null;
+          const box = t ? findLegend(t.items) : null;
+          p.legend = box ? { page: lp, ...box, auto: true } : { page: lp, x0: 0, y0: 0, x1: sz.w, y1: sz.h };
         } else p.legend = { none: true };
         commit(p); dl.close(); render();
       } } }),
@@ -601,7 +608,7 @@ function dangerZone(p: Pattern) {
   box.append(...([
     h("button", { class: "link", type: "button", text: "이 도안에 페이지 더 읽어서 붙이기", on: { click: () => openUpload({ appendTo: p.id, onDone: render }) } }), sep(),
     p.src === "pdf" ? h("button", { class: "link", type: "button", text: "이 기기에 PDF 다시 연결", on: { click: () => openUpload({ appendTo: p.id, relink: true, onDone: render }) } }) : null, p.src === "pdf" ? sep() : null,
-    h("button", { class: "link", type: "button", text: "진행 내보내기", on: { click: () => download(`뜨개진행-${new Date().toISOString().slice(0, 10)}.json`, exportJson()) } }), sep(),
+    h("button", { class: "link", type: "button", text: "진행 내보내기", on: { click: () => download(`knitting-progress-${new Date().toISOString().slice(0, 10)}.json`, exportJson()) } }), sep(),
     h("button", { class: "link", type: "button", text: "가져오기", on: { click: importFile } }), sep(),
     h("button", { class: "link", type: "button", text: "백업에서 복원", on: { click: restoreDialog } }), sep(),
   ].filter(Boolean) as Node[]));

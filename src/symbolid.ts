@@ -2,7 +2,7 @@
 import type { Bitmap } from "./chart";
 import { renderPage, textItems, type Pdf } from "./pdf";
 import { rowH, rowY, type Chart } from "./pdfgeom";
-import { gridLattice, symbolScore, legendEntries, matchToken, textAt, unreadable, type Box, type LegendEntry } from "./symbols";
+import { boundaries, gridLattice, symbolScore, legendEntries, matchToken, textAt, unreadable, type Box, type LegendEntry } from "./symbols";
 import type { Pattern } from "./types";
 
 export type SymHit = {
@@ -153,7 +153,7 @@ export async function debugTemplates(p: Pattern, pdf: Pdf) {
 export async function identify(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, x: number, y: number): Promise<SymHit | null> {
   const c: Chart | undefined = bmp.charts.find((ch) => {
     const n = (y - ch.a) / ch.b;
-    return n >= ch.nMin - 0.6 && n <= ch.nMax + 0.6 && x >= ch.x0 && x <= ch.x1;
+    return n >= ch.nMin - 1.6 && n <= ch.nMax + 1.6 && x >= ch.x0 && x <= ch.x1; // 번호가 없는 끝 단(예: 코잡기 1단)까지
   });
   if (!c) return null;
   const n = Math.round((y - c.a) / c.b);
@@ -170,22 +170,25 @@ export async function identify(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, 
   const yB = Math.min(rowY(c, Math.max(c.nMin, n - 6)) + h / 2, rowY(c, c.nMin) + h / 2) * S;
   const lat = gridLattice(dark, c.x0 * S, c.x1 * S, yA, yB);
   let rect: Box | null = null, st: number | null = null, k = 0;
+  // 칸 경계는 실제로 찾은 격자선 위치로 (너비×번호로 계산하면 칸이 많을 때 오차가 쌓인다)
+  const B = lat ? boundaries(lat.xs, lat.w) : [];
+  const M = B.length - 1; // 칸 수
   if (lat) {
-    k = Math.floor((x * S - lat.off) / lat.w);
-    if (x * S < Math.min(...lat.xs) - 1 || x * S > Math.max(...lat.xs) + 1) return null; // 격자 밖
-    const left = lat.off + k * lat.w;
-    rect = { x0: left / S, x1: (left + lat.w) / S, y0: yTop, y1: yTop + h };
-    const right = Math.max(...lat.xs);
-    if (left + lat.w <= right + 1) st = Math.round((right - (left + lat.w)) / lat.w) + 1;
+    const X = x * S;
+    if (M < 1 || X < B[0] - 1 || X > B[M] + 1) return null; // 격자 밖
+    k = 0;
+    while (k < M - 1 && X >= B[k + 1]) k++;
+    rect = { x0: B[k] / S, x1: B[k + 1] / S, y0: yTop, y1: yTop + h };
+    st = M - k;
   }
   const L = await legendData(p, pdf);
   const { entries, tmpls } = L;
   // 기호 칸 범위 → 오른쪽/왼쪽에서 몇 번째 (뜨기 시작하는 쪽에서 세려고 둘 다)
   const idx = (r: Box | null) => {
     if (!lat || !r) return { fromRight: st, fromLeft: null };
-    const first = Math.round((Math.min(...lat.xs) - lat.off) / lat.w), last = Math.round((Math.max(...lat.xs) - lat.off) / lat.w) - 1;
-    const a = Math.round((r.x0 * S - lat.off) / lat.w), b = Math.round((r.x1 * S - lat.off) / lat.w) - 1;
-    return { fromRight: last - b + 1, fromLeft: a - first + 1 };
+    const near = (v: number) => B.reduce((bi, bv, i) => (Math.abs(bv - v * S) < Math.abs(B[bi] - v * S) ? i : bi), 0);
+    const a = near(r.x0), b = near(r.x1) - 1;
+    return { fromRight: M - b, fromLeft: a + 1 };
   };
   const out = (sym: string, e: LegendEntry | null, guess: boolean, r: Box | null): SymHit => ({
     sym, name: e ? (unreadable(e.name) ? "" : e.name) : "", guess, rect: r, n, st, ...idx(r), entry: e, img: e && unreadable(e.name) ? lineImage(L, e) : null,
@@ -211,15 +214,17 @@ export async function identify(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, 
   let cL = k, cR = k;
   // 글자가 든 칸은 한 칸짜리 기호
   if (!token) {
-    while (cL > k - 8 && !lineAt(lat.off + cL * lat.w)) cL--;
-    while (cR < k + 8 && !lineAt(lat.off + (cR + 1) * lat.w)) cR++;
+    while (cL > 0 && cL > k - 8 && !lineAt(B[cL])) cL--;
+    while (cR < M - 1 && cR < k + 8 && !lineAt(B[cR + 1])) cR++;
   }
+  // 교차뜨기도 6칸(3/3)이 가장 넓다: 더 넓게 이어지면 격자선을 못 찾은 것 → 누른 칸 하나로
+  if (cR - cL + 1 > 8) { cL = k; cR = k; }
   const cells = cR - cL + 1;
   // 글자 칸인데 글자 기호표에 없으면(예: '|') 그림 기호 중에서만 고른다
   const cands = token ? tmpls.filter((tm) => !tm.entry.sym && tm.canvas && tm.canvas.width / tm.canvas.height / cellRatio < 1.5) : tmpls;
   const IN = 0.16; // 테두리·격자선을 빼고 안쪽만 비교
   const W = 12 * cells, H = 12;
-  const sx = lat.off + cL * lat.w, cw = lat.w * cells, chh = h * S;
+  const sx = B[cL], cw = B[cR + 1] - B[cL], chh = h * S;
   // 글자 칸(기호표엔 그림으로만 있는 '|' 등)은 그 글자를 칸 가운데에 그려서 비교 — 칸 안 위치와 상관없게
   const b = token ? features(glyphCell(token, cellRatio), 0, 0, 0, 0, W, H, true) : features(img, sx + lat.w * IN, yTop * S + chh * IN, cw - 2 * lat.w * IN, chh * (1 - 2 * IN), W, H);
   // 격자선도 획도 없는 넓은 빈 곳(모양 낸 가장자리 바깥)은 칸이 아니다
@@ -234,7 +239,6 @@ export async function identify(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, 
     if (!best || d < best.d) best = { e: tm.entry, d, start: cL, cells };
   }
   if (!best) return { ...out(token, null, true, rect), name: "기호표 그림을 찾지 못했어요" };
-  const bx = lat.off + best.start * lat.w;
-  const r2 = { x0: bx / S, x1: (bx + best.cells * lat.w) / S, y0: yTop, y1: yTop + h };
+  const r2 = { x0: B[best.start] / S, x1: B[best.start + best.cells] / S, y0: yTop, y1: yTop + h };
   return out(token || best.e.sym, best.e, true, r2);
 }

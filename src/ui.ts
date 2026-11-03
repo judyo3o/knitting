@@ -49,6 +49,7 @@ export const fmtShort = (t: number) => {
 /** 오늘이면 시각만 */
 export const fmtSmart = (t: number) => (new Date(t).toDateString() === new Date().toDateString() ? fmtTime(t) : fmtShort(t));
 
+/** 파일 받기. 이름은 영문으로 (브라우저에 따라 한글 이름이 'download'로 바뀌어 확장자가 사라짐) */
 export async function download(name: string, data: Blob) {
   // 아티팩트에선 일반 다운로드 링크가 막혀 있어 downloads 기능으로 (보는 사람이 확인)
   const { getDownloads, inArtifact } = await import("./artifact");

@@ -177,3 +177,18 @@ export function unreadable(s: string): boolean {
   const ok = chars.filter((c) => /[\u0020-\u007e\uac00-\ud7a3\u00b7·–—~×]/.test(c)).length;
   return ok / chars.length < 0.7;
 }
+
+/** 찾은 격자선(xs)으로 칸 경계 목록: 빠진 선은 칸 너비로 채운다 (계산값이 아니라 실제 선 위치를 쓰려고) */
+export function boundaries(xs: number[], w: number): number[] {
+  const s = [...xs].sort((a, b) => a - b);
+  const out: number[] = [];
+  for (let i = 0; i < s.length; i++) {
+    if (i > 0) {
+      const gap = s[i] - s[i - 1];
+      const m = Math.round(gap / w);
+      for (let k = 1; k < m; k++) out.push(s[i - 1] + (gap * k) / m);
+    }
+    out.push(s[i]);
+  }
+  return out;
+}
