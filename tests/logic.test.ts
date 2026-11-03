@@ -537,3 +537,102 @@ describe("스와치로 사이즈 다시 고르기", () => {
     expect(sizeAdvice(["S", "M", "L"], [96, 104, 110], "L", { st: 18, rows: 23 }, { st: 18, rows: 23 }).best).toBe("L");
   });
 });
+
+describe("기호표 범위", () => {
+  it("약어표 블록 아래 다른 내용(머리말·큰 간격)은 넣지 않는다", async () => {
+    const { findLegend } = await import("../src/pdfgeom");
+    const I = (str: string, x: number, y: number, w = 120) => ({ str, x, y, w, h: 9 });
+    const items = [I("ABBREVIATIONS", 40, 100)];
+    for (let k = 0; k < 9; k++) items.push(I(`Alt = Alternate ${k}`, 40, 112 + k * 11), I(`P = Purl ${k}`, 200, 112 + k * 11), I(`Ssk = Slip ${k}`, 360, 112 + k * 11));
+    items.push(I("SIZES", 40, 225), I("To fit bust measurement 32-34 in", 40, 237, 500), I("Finished bust 40 in", 40, 248, 500));
+    const lg = findLegend(items as any)!;
+    expect(lg.y1).toBeLessThan(220);
+    expect(lg.x1).toBeLessThan(500);
+  });
+});
+
+describe("길이로 정한 반복 풀기", () => {
+  it("Rep last 2 rows for 2\" [5 cm], ending on a 2nd row → 게이지 16단/10cm면 8단까지, 뒤 단은 밀린다", async () => {
+    const { newPattern, expandLengthRepeats, partRows } = await import("../src/model");
+    const R = (s: string, n: number, t: string) => ({ s, n, t, st: null, side: null, pg: null, ch: null, span: null });
+    const p = newPattern({ id: "x", name: "x", rows: [
+      R("rib", 1, "1st row: (RS). *K2. P2. Rep from * to last 2 sts. K2."),
+      R("rib", 2, "2nd row: *P2. K2. Rep from * to last 2 sts. P2."),
+      R("rib", 3, "Rep last 2 rows (K2. P2) ribbing for 2\" [5 cm], ending on a 2nd row and dec 1 st."),
+      R("rib", 4, "Bind off."),
+    ] as any, gauges: [{ label: "st", pattern: { st: 12, rows: 16 }, before: null, after: null }] });
+    p.done["rib#4"] = 1;
+    expandLengthRepeats(p);
+    const rows = partRows(p, "rib");
+    expect(rows.map((r) => r.n)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(rows[2].t).toBe("*K2. P2. Rep from * to last 2 sts. K2.");
+    expect(rows[3].t).toBe("*P2. K2. Rep from * to last 2 sts. P2.");
+    expect(rows[7].t).toMatch(/dec 1 st/);
+    expect(rows[8].t).toBe("Bind off.");
+    expect(p.done["rib#9"]).toBe(1);
+    expandLengthRepeats(p); // 다시 해도 그대로
+    expect(partRows(p, "rib").length).toBe(9);
+  });
+});
+
+describe("완성 시간·페이스", () => {
+  it("작업 기록으로 걸린 시간, 단 끝 콧수로 뜬 코 수", async () => {
+    const { newPattern, finishText, partStats } = await import("../src/model");
+    const R = (n: number, t: string, st: string | null = null) => ({ s: "a", n, t, st, side: null, pg: null, ch: null, span: null });
+    const p = newPattern({ id: "x", name: "x", rows: [R(1, "40코 기초코"), R(2, "겉뜨기"), R(3, "겉뜨기", "40코"), R(4, "안뜨기", "40코")] as any });
+    const t0 = 1_000_000;
+    // 단마다 10분, 3단과 4단 사이에 2시간 쉼
+    p.done["a#1"] = t0; p.done["a#2"] = t0 + 600000; p.done["a#3"] = t0 + 1200000; p.done["a#4"] = t0 + 1200000 + 600000 + 7200000;
+    p.fin["a"] = p.done["a#4"];
+    const st = partStats(p, "a");
+    expect(Math.round(st.ms / 60000)).toBe(40);
+    expect(Math.round(st.rest / 60000)).toBe(120);
+    expect(st.stitches).toBe(160);
+    expect(finishText(p, "a")).toBe("실제 뜬 시간 40분 · 쉰 시간까지 2시간 40분 · 시간당 약 240코 페이스 (총 160코 · 4단)");
+    // 시작·중지 버튼을 썼으면 켜 둔 시간만
+    const { workStart, workStop } = await import("../src/model");
+    workStart(p, p.done["a#1"] - 600000); workStop(p, p.done["a#3"]);
+    workStart(p, p.done["a#4"] - 900000); workStop(p, p.done["a#4"]);
+    expect(Math.round(partStats(p, "a").ms / 60000)).toBe(45);
+  });
+});
+
+describe("사이즈별 차트 범위", () => {
+  it("차트 아래 XL · 2/3XL · 4/5XL 선 → 내 사이즈 시작선부터", async () => {
+    const { sizeMarks, sizeRange } = await import("../src/pdfgeom");
+    const c = { a: 300, b: -10, nMin: 1, nMax: 20, x0: 20, x1: 520, axes: [515] } as any; // 1단 y=290
+    const I = (str: string, x: number, y: number) => ({ str, x, y, w: 14, h: 6 });
+    const items = [I("XL", 393, 305), I("2/3XL", 450, 305), I("4/5XL", 497, 305), I("Start Here", 480, 318)];
+    expect(sizeMarks(items as any, c).map((m) => m.sizes.join(","))).toEqual(["XL", "2XL,3XL", "4XL,5XL"]);
+    const r = sizeRange(items as any, c, "2XL")!;
+    expect(r[1]).toBe(457);
+    expect(r[0]).toBe(20);
+    expect(sizeRange(items as any, c, "M")).toBe(null);
+  });
+});
+
+describe("스트레칭 알림", () => {
+  it("10분 넘게 빈 곳에서 끊어 쉬지 않고 뜬 시간을 센다", async () => {
+    const { newPattern, continuousKnitMs } = await import("../src/model");
+    const p = newPattern({ id: "x", name: "x" });
+    const now = 10_000_000;
+    p.done = { "a#1": now - 3600000, "a#2": now - 35 * 60000, "a#3": now - 25 * 60000, "a#4": now - 15 * 60000, "a#5": now - 5 * 60000 };
+    expect(continuousKnitMs(p, now) / 60000).toBe(35);
+    expect(continuousKnitMs(p, now + 20 * 60000)).toBe(0);
+  });
+});
+
+describe("원하는 만큼 뜨는 단 늘리고 줄이기", () => {
+  it("두 단 반복이면 번갈아 더하고, 뒤 단과 완료 기록이 밀린다", async () => {
+    const { newPattern, addRowAfter, removeRow, partRows } = await import("../src/model");
+    const R = (n: number, t: string, ln?: string) => ({ s: "a", n, t, st: null, side: null, pg: null, ch: null, span: null, ...(ln ? { ln } : {}) });
+    const p = newPattern({ id: "x", name: "x", rows: [R(1, "K2. P2."), R(2, "P2. K2."), R(3, "K2. P2.", "길이"), R(4, "P2. K2.\nRep for 2in", "길이"), R(5, "Bind off.")] as any });
+    p.done["a#5"] = 9;
+    addRowAfter(p, "a", 4);
+    expect(partRows(p, "a").map((r) => r.t.split("\n")[0])).toEqual(["K2. P2.", "P2. K2.", "K2. P2.", "P2. K2.", "K2. P2.", "Bind off."]);
+    expect(p.done["a#6"]).toBe(9);
+    removeRow(p, "a", 5);
+    expect(partRows(p, "a").map((r) => r.n)).toEqual([1, 2, 3, 4, 5]);
+    expect(p.done["a#5"]).toBe(9);
+  });
+});

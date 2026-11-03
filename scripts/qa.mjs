@@ -463,6 +463,24 @@ await step("단 안 적고 이동 → 그 파트 첫 단", async () => {
   ok(now === first, `첫 단이 아님: ${now} (첫 단 ${first})`);
   return `${target} ${now}단`;
 });
+await step("뜨개 시작·중지", async () => {
+  await T("#meta button:has-text('시작')").click();
+  await T("#meta .work-clock").waitFor();
+  await page.waitForTimeout(1200);
+  const t = await txt("#meta .work-clock");
+  ok(/뜨는 중 0:00:0[1-9]/.test(t), "시계가 안 감: " + t);
+  await T("#meta button:has-text('중지')").click();
+  ok(await T("#meta button:has-text('시작')").count(), "중지 안 됨");
+  return t;
+});
+await step("진행 기록 지우기", async () => {
+  await T("summary:has-text('진행 기록')").click();
+  if (!(await T("text=진행 기록 지우기").count())) return "기록 없음(건너뜀)";
+  await T("text=진행 기록 지우기").click();
+  await T(".dlg button.primary:has-text('지우기')").click();
+  await page.waitForTimeout(200);
+  ok(!(await T("text=진행 기록 지우기").count()), "안 지워짐");
+});
 await step("새로고침 후 유지 (도안·탭·단)", async () => {
   const sel = await T("#patSel").inputValue();
   const row = await txt(".rowno b");

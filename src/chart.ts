@@ -34,7 +34,7 @@ export function chartBitmap(pdf: Pdf, pdfKey: string, page: number): Promise<Bit
 }
 export const clearBitmaps = () => bmpCache.clear();
 
-export type ViewOpts = { n: number; side: Side; round: boolean; rowPx: number; below?: number; above?: number };
+export type ViewOpts = { n: number; side: Side; round: boolean; rowPx: number; below?: number; above?: number; range?: [number, number] | null }; // range: 내 사이즈 차트 범위 (pt)
 
 /** 화살표가 단 번호를 가리지 않게: 바깥 경계에서 축 숫자 너머까지 (pt) */
 /** 왼쪽·오른쪽 축 숫자 너머 (축이 그쪽에 없으면 작게) */
@@ -46,7 +46,7 @@ const axisInset = (c: Chart): [number, number] => {
 
 /** 현재 단 주변(아래 3단 ~ 위 6단)을 잘라 크게, 띠·음영·화살표 */
 export type PdfView = { chart: Chart | null; startX: "left" | "right"; x0: number; yTop: number; k: number };
-export function drawPdfRows(out: HTMLCanvasElement, bmp: Bitmap, o: ViewOpts): PdfView {
+export function drawPdfRows(out: HTMLCanvasElement, bmp: Bitmap, o: ViewOpts, hi?: { canvas: HTMLCanvasElement; scale: number; y0: number }): PdfView {
   const c = chartFor(bmp.charts, o.n);
   const ctx = out.getContext("2d")!;
   if (!c) {
@@ -65,9 +65,11 @@ export function drawPdfRows(out: HTMLCanvasElement, bmp: Bitmap, o: ViewOpts): P
   out.style.width = out.width / dpr + "px";
   out.style.height = out.height / dpr + "px";
   ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(bmp.canvas, sx, sy, sw, sh, 0, 0, out.width, out.height);
+  if (hi) ctx.drawImage(hi.canvas, c.x0 * hi.scale, (yTop - hi.y0) * hi.scale, (c.x1 - c.x0) * hi.scale, (yBot - yTop) * hi.scale, 0, 0, out.width, out.height);
+  else ctx.drawImage(bmp.canvas, sx, sy, sw, sh, 0, 0, out.width, out.height);
   const toY = (y: number) => (y - yTop) * k * dpr;
-  overlay(ctx, out.width, (n) => [toY(rowY(c, n) - h / 2), toY(rowY(c, n) + h / 2)], o, Math.max(o.n - below, c.nMin - 1), dpr, axisInset(c).map((v) => v * k * dpr) as [number, number]);
+  const xr = o.range ? (o.range.map((x) => (x - c.x0) * k * dpr) as [number, number]) : null;
+  overlay(ctx, out.width, (n) => [toY(rowY(c, n) - h / 2), toY(rowY(c, n) + h / 2)], o, Math.max(o.n - below, c.nMin - 1), dpr, axisInset(c).map((v) => v * k * dpr) as [number, number], xr);
   return { chart: c, startX: o.side === "RS" || o.round ? "right" : "left", x0: c.x0, yTop, k };
 }
 
@@ -90,27 +92,41 @@ export function drawPdfFull(out: HTMLCanvasElement, bmp: Bitmap, o: ViewOpts, wi
   ctx.rect(c.x0 * f, 0, (c.x1 - c.x0) * f, out.height);
   ctx.clip();
   ctx.translate(c.x0 * f, 0);
-  overlay(ctx, (c.x1 - c.x0) * f, (n) => [(rowY(c, n) - h / 2) * f, (rowY(c, n) + h / 2) * f], o, c.nMin - 1, dpr, axisInset(c).map((v) => v * f) as [number, number]);
+  const xr = o.range ? (o.range.map((x) => (x - c.x0) * f) as [number, number]) : null;
+  overlay(ctx, (c.x1 - c.x0) * f, (n) => [(rowY(c, n) - h / 2) * f, (rowY(c, n) + h / 2) * f], o, c.nMin - 1, dpr, axisInset(c).map((v) => v * f) as [number, number], xr);
   ctx.restore();
 }
 
-function overlay(ctx: CanvasRenderingContext2D, w: number, band: (n: number) => [number, number], o: ViewOpts, fromN: number, dpr: number, inset: [number, number] = [4 * dpr, 4 * dpr]) {
+function overlay(ctx: CanvasRenderingContext2D, w: number, band: (n: number) => [number, number], o: ViewOpts, fromN: number, dpr: number, inset: [number, number] = [4 * dpr, 4 * dpr], xr: [number, number] | null = null) {
+  // 내 사이즈 범위가 있으면 띠·음영은 그 안에만, 바깥은 흐리게
+  const L = xr ? Math.max(0, xr[0]) : 0, R = xr ? Math.min(w, xr[1]) : w;
   for (let n = Math.max(1, fromN); n < o.n; n++) {
     const [y0, y1] = band(n);
     ctx.fillStyle = DONE;
-    ctx.fillRect(0, y0, w, y1 - y0);
+    ctx.fillRect(L, y0, R - L, y1 - y0);
+  }
+  if (xr) {
+    ctx.fillStyle = "rgba(255,255,255,0.62)";
+    const H = ctx.canvas.height;
+    ctx.fillRect(0, 0, L, H);
+    ctx.fillRect(R, 0, w - R, H);
+    ctx.strokeStyle = MARK_LINE;
+    ctx.lineWidth = 1.5 * dpr;
+    ctx.setLineDash([5 * dpr, 4 * dpr]);
+    for (const x of [L, R]) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+    ctx.setLineDash([]);
   }
   const [y0, y1] = band(o.n);
   ctx.fillStyle = MARK;
-  ctx.fillRect(0, y0, w, y1 - y0);
+  ctx.fillRect(L, y0, R - L, y1 - y0);
   ctx.strokeStyle = MARK_LINE;
   ctx.lineWidth = 2 * dpr;
-  ctx.strokeRect(1 * dpr, y0, w - 2 * dpr, y1 - y0);
+  ctx.strokeRect(L + 1 * dpr, y0, R - L - 2 * dpr, y1 - y0);
   // 진행 방향 화살표 (시작하는 쪽에서 안쪽으로)
   const rs = o.side === "RS" || o.round;
   const mid = (y0 + y1) / 2;
   const s = Math.max(6 * dpr, Math.min((y1 - y0) * 0.45, 14 * dpr));
-  const x = rs ? w - inset[1] - s * 1.2 : inset[0] + s * 1.2;
+  const x = xr ? (rs ? R + s * 1.4 : L - s * 1.4) : rs ? w - inset[1] - s * 1.2 : inset[0] + s * 1.2;
   ctx.fillStyle = MARK_LINE;
   ctx.beginPath();
   if (rs) {
@@ -338,4 +354,20 @@ export function pixelCanvas(d: Drawing, yarns: Yarn[], scale = 1): HTMLCanvasEle
       ctx.fillRect(x * scale, (d.h - 1 - r) * scale, scale, scale);
     }
   return c;
+}
+
+/** 지금 보이는 단들(drawPdfRows와 같은 범위)만 화면 배율로 PDF에서 다시 그린다 — 전체 쪽 그림은 휴대폰 때문에 작아서 흐림 */
+export async function sharpRows(pdf: Pdf, page: number, bmp: Bitmap, o: ViewOpts): Promise<{ canvas: HTMLCanvasElement; scale: number; y0: number } | null> {
+  const c = chartFor(bmp.charts, o.n);
+  if (!c) return null;
+  const below = o.below ?? 3, above = o.above ?? 6;
+  const h = rowH(c);
+  const yTop = Math.max(rowY(c, Math.min(o.n + above, c.nMax + 1)) - h / 2, 0);
+  const yBot = Math.min(rowY(c, Math.max(o.n - below, c.nMin - 1)) + h / 2, bmp.h);
+  const k = o.rowPx / h;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const want = k * dpr * 1.1;
+  if (want <= bmp.scale * 1.05) return null; // 이미 충분히 선명
+  const canvas = await renderRegion(pdf, page, want, yTop, yBot);
+  return { canvas, scale: canvas.width / bmp.w, y0: yTop };
 }

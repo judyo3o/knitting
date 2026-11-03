@@ -196,13 +196,26 @@ export const LEGEND_RE = /기법\s*설명|기호\s*(설명|표|안내|보는)|�
 export function findLegend(items: TItem[]): { x0: number; y0: number; x1: number; y1: number } | null {
   const title = items.find((i) => LEGEND_RE.test(i.str) && i.str.trim().length <= 30);
   if (!title) return null;
+  // 제목 아래 줄들: 같은 높이끼리 한 줄로 묶고, 줄 간격이 갑자기 벌어지거나 다른 제목(대문자 머리말)이 나오면 거기서 끝
   const below = items.filter((i) => i.y > title.y + 1 && i.str.trim()).sort((p, q) => p.y - q.y);
+  const lines: { y: number; h: number; its: TItem[] }[] = [];
+  for (const i of below) {
+    const l = lines[lines.length - 1];
+    if (l && Math.abs(i.y - l.y) < Math.max(2, Math.min(l.h, i.h) * 0.5)) l.its.push(i);
+    else lines.push({ y: i.y, h: i.h, its: [i] });
+  }
   const take: TItem[] = [];
   let lastY = title.y;
-  for (const i of below) {
-    if (i.y - lastY > 60) break;
-    take.push(i);
-    lastY = i.y;
+  const gaps: number[] = [];
+  const HEAD = /^[A-Z][A-Z0-9 &'’()-]{3,}:?$/;
+  for (const l of lines) {
+    const gap = l.y - lastY;
+    const med = gaps.length >= 3 ? [...gaps].sort((x, y) => x - y)[gaps.length >> 1] : 0;
+    if (gap > 60 || (med && gap > Math.max(med * 2.2, l.h * 2.4))) break;
+    if (take.length && l.its.length <= 2 && l.its.every((i) => HEAD.test(i.str.trim())) && !LEGEND_RE.test(l.its[0].str)) break; // 다음 머리말
+    take.push(...l.its);
+    if (take.length > l.its.length) gaps.push(gap);
+    lastY = l.y;
   }
   if (!take.length) return null;
   const x0 = Math.min(title.x, ...take.map((i) => i.x)) - 40;
@@ -288,4 +301,43 @@ export function findRowSpot(items: TItem[], n: number, span: [number, number] | 
   const next = labels.find((i) => i.y > hit.y + hit.h * 0.8);
   const y1 = Math.min(next ? next.y - next.h : hit.y + hit.h * 3, hi === Infinity ? Infinity : hi - hit.h);
   return { y0: hit.y - hit.h - 2, y1: Math.max(hit.y + 3, y1) };
+}
+
+/**
+ * 사이즈별 시작·끝 선: 차트 아래(또는 위)의 사이즈 이름("XL", "2/3XL", "4/5XL", "S/M")과 그 x 위치.
+ * 이름 하나가 여러 사이즈를 묶기도 한다 ("2/3XL" = 2XL, 3XL).
+ */
+export function sizeMarks(items: TItem[], c: Chart): { sizes: string[]; x: number }[] {
+  const h = rowH(c);
+  const yBot = rowY(c, c.nMin) + h / 2, yTopC = rowY(c, c.nMax) - h / 2;
+  const LBL = /^\s*(?:(\d)\s*\/\s*(\d)\s*(XL)|(\d?)\s*(XS|XL|S|M|L|X)(?:\s*\/\s*(\d?)\s*(XS|XL|S|M|L))?)\s*$/i;
+  const norm = (n: string, t: string) => { t = t.toUpperCase(); if (t === "X") t = "XL"; return (n && n !== "1" ? n : "") + t; };
+  const out: { sizes: string[]; x: number }[] = [];
+  for (const i of items) {
+    const inBand = (i.y > yBot && i.y < yBot + h * 5) || (i.y < yTopC && i.y > yTopC - h * 4);
+    if (!inBand || i.x < c.x0 - h * 2 || i.x > c.x1 + h * 2) continue;
+    const m = i.str.match(LBL);
+    if (!m) continue;
+    const sizes = m[3] ? [norm(m[1], "XL"), norm(m[2], "XL")] : [norm(m[4], m[5]), ...(m[7] ? [norm(m[6] || "", m[7])] : [])];
+    out.push({ sizes, x: i.x + i.w / 2 });
+  }
+  return out;
+}
+
+/** 내 사이즈의 차트 범위 [왼쪽 x, 오른쪽 x] (pt). 양쪽에 표시가 있으면 그 사이, 한쪽만 있으면 그 선부터 차트 반대쪽 끝까지 */
+export function sizeRange(items: TItem[], c: Chart, size: string): [number, number] | null {
+  if (!size) return null;
+  const want = size.toUpperCase().replace(/^XXXL$/, "3XL").replace(/^XXL$/, "2XL").replace(/^1XL$/, "XL");
+  const marks = sizeMarks(items, c);
+  if (marks.length < 2) return null; // 사이즈 표시가 하나뿐이면 사이즈별 선이 아님
+  const mine = marks.filter((m) => m.sizes.includes(want)).map((m) => m.x).sort((a, b) => a - b);
+  if (!mine.length) return null;
+  if (mine.length >= 2) return [mine[0], mine[mine.length - 1]];
+  const mid = (c.x0 + c.x1) / 2;
+  // 축 숫자 칸을 뺀 격자 끝
+  const left = c.axes.filter((a) => a < mid);
+  const right = c.axes.filter((a) => a >= mid);
+  const gl = left.length ? Math.max(...left) + rowH(c) * 0.8 : c.x0;
+  const gr = right.length ? Math.min(...right) - rowH(c) * 0.8 : c.x1;
+  return mine[0] > mid ? [gl, mine[0]] : [mine[0], gr];
 }

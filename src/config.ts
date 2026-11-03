@@ -2,7 +2,7 @@
 export const MODEL = "claude-opus-5-5";
 
 /** 프롬프트를 바꾸면 올려서 Claude 응답 캐시가 저절로 무효가 되게 한다. */
-export const PROMPT_VERSION = 3;
+export const PROMPT_VERSION = 4;
 
 export const MAX_TOKENS = { structure: 16000, explain: 1000 } as const;
 

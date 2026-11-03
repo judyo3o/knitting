@@ -3,21 +3,21 @@ import { chunksOf, splitNarrative, stitchesThrough } from "./chunks";
 import { MAX_TOKENS } from "./config";
 import { callAi, canCallDirect, errCopy } from "./ai";
 import { inArtifact } from "./artifact";
-import { chartBitmap, clearBitmaps, drawGrid, drawPdfFull, drawPdfRows, explainStrip, hitCell, legendCanvas, sampleRowColors, yarnHex } from "./chart";
+import { chartBitmap, clearBitmaps, sharpRows, drawGrid, drawPdfFull, drawPdfRows, explainStrip, hitCell, legendCanvas, sampleRowColors, yarnHex } from "./chart";
 import { getFile, putFile } from "./db";
 import { getCell, longestFloat, rowColors } from "./drawing";
 import {
-  applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, spanParts, sideOf, stepNext, stepPrev,
+  applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, spanParts, finishText, continuousKnitMs, castLabel, flexibleRow, addRowAfter, removeRow, workIn, workStart, workStop, sideOf, stepNext, stepPrev,
 } from "./model";
 import { blobB64, canvasBlob, textItems } from "./pdf";
-import { chartFor, findCharts, findLegend, LEGEND_RE, stitchAxis } from "./pdfgeom";
+import { chartFor, findCharts, findLegend, LEGEND_RE, sizeRange, stitchAxis } from "./pdfgeom";
 import { explainCheck, explainDraft, explainHead } from "./prompts";
 import { active, commit, exportJson, importJson, load, pdfOf, removePattern, saveNow, setActive, startAutosave, state, syncRemote } from "./store";
 import { openSettings, manualHandler, openViewer } from "./dialogs";
 import { openUpload } from "./upload";
 import { openEditor, type DrawSize } from "./drawui";
 import { gaugeSummary, openGauge } from "./gaugeui";
-import { $, dialog, download, fmtFull, fmtShort, fmtSmart, fmtTime, h, toast } from "./ui";
+import { $, ask, dialog, download, fmtFull, fmtShort, fmtSmart, fmtTime, h, toast } from "./ui";
 import type { Pattern, Row } from "./types";
 
 const app = $("#app");
@@ -105,7 +105,28 @@ function renderMeta(p: Pattern) {
     m.append(
       h("span", { text: state.lastSaved ? `마지막 저장 ${fmtSmart(state.lastSaved)} · 10분마다 자동` : "기기에 바로 저장돼요 · 10분마다 백업" }),
       h("button", { class: "btn ghost", type: "button", text: "지금 저장", on: { click: async () => { await saveNow(); renderMeta(p); toast("저장했어요."); } } }),
+      workButtons(p),
     );
+}
+
+/** 뜨개 시작·중지: 켜 둔 동안만 뜬 시간으로 센다 (페이스·스트레칭 알림) */
+let workTick: number | undefined;
+function workButtons(p: Pattern) {
+  const on = !!p.work?.on;
+  const clock = h("span", { class: "work-clock" });
+  const today = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return workIn(p, d.getTime(), Date.now()); };
+  const hms = (ms: number) => { const t = Math.floor(ms / 1000); return `${Math.floor(t / 3600)}:${String(Math.floor((t % 3600) / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`; };
+  const tick = () => { clock.textContent = on ? `뜨는 중 ${hms(Date.now() - p.work!.on!)} · 오늘 ${hms(today())}` : today() > 0 ? `오늘 뜬 시간 ${hms(today())}` : ""; };
+  clearInterval(workTick);
+  tick();
+  if (on) workTick = window.setInterval(() => { if (!clock.isConnected) return clearInterval(workTick); tick(); if (Date.now() % 30000 < 1000) stretchReminder(p); }, 1000);
+  const b = h("button", { class: "btn " + (on ? "work-on" : "primary"), type: "button", text: on ? "⏸ 중지" : "▶ 시작", "aria-pressed": String(on), on: { click: () => {
+    if (on) { workStop(p); stretchShown = 0; toast("중지했어요. 쉰 시간은 페이스에서 빠져요."); }
+    else { workStart(p); toast("시작! 켜 둔 동안만 뜬 시간으로 셀게요."); }
+    commit(p);
+    renderMeta(p);
+  } } });
+  return h("span", { class: "work" }, b, clock);
 }
 
 function tabs(p: Pattern, s: string) {
@@ -133,7 +154,7 @@ function nowCard(p: Pattern, r: Row) {
     h("div", { class: "now-head" },
       h("div", { class: "chips" },
         h("span", { class: "chip", text: s }),
-        r.castOn ? h("span", { class: "chip side", text: "코잡기 단" }) : h("span", { class: "chip side", text: round ? "원통 RS" : side === "RS" ? "겉면 RS" : "안면 WS" }),
+        r.castOn ? h("span", { class: "chip side", text: `${castLabel(r)} 단` }) : h("span", { class: "chip side", text: round ? "원통 RS" : side === "RS" ? "겉면 RS" : "안면 WS" }),
         r.castOn ? null : h("span", { class: "chip dir", text: directionText(p, r) }),
         fin && h("span", { class: "chip fin", text: "이 파트 완료 ✓" }),
       ),
@@ -151,8 +172,19 @@ function nowCard(p: Pattern, r: Row) {
   card.append(narrative(p, r));
   if (r.castOn) {
     const nx = list[k + 1];
-    card.append(h("p", { class: "span-note", text: `코잡기 자체가 1단이에요. 코를 잡았으면 '다음 단'을 누르고 ${nx ? `${nx.n}단(${sideOf(p, nx) === "WS" ? "안면" : "겉면"})` : "다음 단"}부터 떠요.` }));
+    const cl = castLabel(r);
+    card.append(h("p", { class: "span-note", text: `${cl} 자체가 1단이에요. ${cl === "코줍기" ? "코를 다 주웠으면" : "코를 잡았으면"} '다음 단'을 누르고 ${nx ? `${nx.n}단(${sideOf(p, nx) === "WS" ? "안면" : "겉면"})` : "다음 단"}부터 떠요.` }));
   }
+  if (fin) { const ft = finishText(p, s); if (ft) card.append(h("p", { class: "span-note fin-note", text: `✓ 완성 · ${ft}` })); }
+  if (r.ln) card.append(h("p", { class: "span-note", text: r.ln }));
+  // 원하는 만큼 뜨는 단: 게이지로 정한 단 수는 추정이라 직접 늘리고 줄인다
+  if (flexibleRow(r)) card.append(h("div", { class: "actions flex-rows" },
+    h("span", { class: "gen", text: "원하는 길이만큼 뜨는 단이에요." }),
+    h("button", { class: "btn", type: "button", text: "＋ 한 단 더", on: { click: () => { addRowAfter(p, s, r.n); p.rev++; commit(p); render(); toast(`${r.n + 1}단을 더했어요. 뒤 단 번호도 하나씩 밀렸어요.`); } } }),
+    partRows(p, s).length > 1 ? h("button", { class: "btn ghost", type: "button", text: "− 이 단 빼기", on: { click: async () => {
+      if (!(await ask("이 단 빼기", `${r.n}단을 빼고 뒤 단 번호를 하나씩 당겨요.`, "빼기"))) return;
+      removeRow(p, s, r.n); p.rev++; commit(p); render(); toast(`${r.n}단을 뺐어요.`);
+    } } }) : null));
   if (r.span) {
     const sp = spanParts(r.t, r.span);
     const last = r.n === r.span[1];
@@ -251,22 +283,35 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
     }
     const bmp = await chartBitmap(pdf, p.id, page);
     if (seq !== renderSeq) return;
+    // 이 단이 차트에 없으면(고무단처럼 차트 없이 서술로만 뜨는 파트) 그냥 '차트 없음'
+    if (!chartFor(bmp.charts, r.n)) {
+      box.remove();
+      t.prepend(h("span", { class: "gen", text: `차트 없음 (p${page} 차트에 ${r.n}단이 없어요) ·` }));
+      for (const b of [...t.querySelectorAll("button")].filter((b) => /^[−+]$|차트 전체/.test(b.textContent || ""))) b.remove();
+      return;
+    }
+    const range = await sizeRangeOf(p, pdf, page, bmp, r.n);
+    if (seq !== renderSeq) return;
     cv.innerHTML = "";
     const c = h("canvas", { "aria-label": `차트 p${page}, ${r.n}단 표시` });
     if (view.full) {
       const width = Math.max(cv.clientWidth, 320) * (view.rowPx / 22);
-      drawPdfFull(c, bmp, { n: r.n, side, round, rowPx: view.rowPx }, width);
+      drawPdfFull(c, bmp, { n: r.n, side, round, rowPx: view.rowPx, range }, width);
       cv.append(c);
-      symbolTap(p, pdf, page, bmp, cv, c, { x0: 0, yTop: 0, k: width / bmp.w });
+      symbolTap(p, pdf, page, bmp, cv, c, { x0: 0, yTop: 0, k: width / bmp.w }, range);
     } else {
-      const res = drawPdfRows(c, bmp, { n: r.n, side, round, rowPx: view.rowPx });
+      const vo = { n: r.n, side, round, rowPx: view.rowPx, range };
+      const res = drawPdfRows(c, bmp, vo);
+      // 먼저 빠르게 그리고, 보이는 단들만 선명하게 다시
+      sharpRows(pdf, page, bmp, vo).then((hi) => { if (hi && seq === renderSeq && c.isConnected) drawPdfRows(c, bmp, vo, hi); }).catch(() => {});
       if (!res.chart) {
         cv.append(h("p", { class: "empty", text: `p${page}에서 단 번호 축을 찾지 못했어요. '차트 전체'로 보거나 '차트 쪽 바꾸기'로 다른 쪽을 골라주세요.` }));
         return;
       }
       cv.append(c);
-      scrollStart(cv, res.startX === "right");
-      symbolTap(p, pdf, page, bmp, cv, c, res);
+      scrollStart(cv, res.startX === "right", range && res.chart ? ((res.startX === "right" ? range[1] : range[0]) - res.x0) * res.k : null);
+      symbolTap(p, pdf, page, bmp, cv, c, res, range);
+      if (range) cv.append(h("div", { class: "size-note", text: `${p.size} 사이즈 범위만 표시 (점선 사이)` }));
     }
     // 배색 차트면 띠에서 실제 색을 뽑아 보여준다
     // 회색·검정(격자선·기호)은 빼고 채도 있는 색만 → 흑백 차트에선 안 보인다
@@ -296,7 +341,7 @@ function chroma(hex: string) {
 
 /* ---------- 기호를 누르면 기법 이름 ---------- */
 type View = { x0: number; yTop: number; k: number };
-function symbolTap(p: Pattern, pdf: any, page: number, bmp: any, cv: HTMLElement, c: HTMLCanvasElement, v: View) {
+function symbolTap(p: Pattern, pdf: any, page: number, bmp: any, cv: HTMLElement, c: HTMLCanvasElement, v: View, range: [number, number] | null = null) {
   c.title = "기호를 누르면 기법 이름이 보여요";
   c.addEventListener("click", async (e) => {
     const b = c.getBoundingClientRect();
@@ -305,8 +350,8 @@ function symbolTap(p: Pattern, pdf: any, page: number, bmp: any, cv: HTMLElement
     if (open && Math.hypot(+open.dataset.x! - cx, +open.dataset.y! - cy) < 10) return closePop(cv); // 같은 자리 다시 누르면 닫기
     const x = v.x0 + cx / v.k, y = v.yTop + cy / v.k;
     const { identify } = await import("./symbolid");
-    if (!p.legend) await detectLegend(p);
-    const hit = await identify(p, pdf, page, bmp, x, y).catch((err) => { console.warn("기호 찾기 실패", err); return null; });
+    if (!p.legend || staleLegend(p)) await detectLegend(p);
+    const hit = await identify(p, pdf, page, bmp, x, y, range).catch((err) => { console.warn("기호 찾기 실패", err); return null; });
     if (!hit) return closePop(cv);
     // 그 단을 뜨기 시작하는 쪽에서 센다: 겉면(RS)·원통은 오른쪽부터, 안면(WS)은 왼쪽부터
     const rowObj = partRows(p, p.tab).find((x) => x.n === hit.n) || { s: p.tab, n: hit.n, t: "", st: null, side: null, pg: null, ch: null, span: null };
@@ -324,6 +369,8 @@ function symbolTap(p: Pattern, pdf: any, page: number, bmp: any, cv: HTMLElement
       where2 = `${where} · 차트 기호는 ${hit.name.trim()}(안면이라 반대로)`;
       title = real;
     }
+    // 코잡기 단(예: "코잡기가 1단")의 칸은 기호가 아니라 코잡기
+    if (rowObj.castOn) { const cl = castLabel(rowObj as Row); title = cl; where2 = `${hit.n}단 · ${cl === "코줍기" ? "코를 줍는" : "코를 잡는"} 것 자체가 이 단이에요`; }
     showPop(cv, e.clientX, e.clientY, title, where2, box, null, { x: cx, y: cy }, hit.name ? null : hit.img);
     highlightLegend(hit.entry);
   });
@@ -375,9 +422,17 @@ function highlightLegend(entry: { area: { x0: number; y0: number; x1: number; y1
   }
 }
 
-function scrollStart(cv: HTMLElement, right: boolean) {
+/** 내 사이즈 차트 범위 (차트 아래 사이즈별 시작·끝 선) */
+async function sizeRangeOf(p: Pattern, pdf: any, page: number, bmp: any, n: number): Promise<[number, number] | null> {
+  if (!p.size) return null;
+  const c = chartFor(bmp.charts, n);
+  if (!c) return null;
+  return sizeRange((await textItems(pdf, page)).items, c, p.size);
+}
+
+function scrollStart(cv: HTMLElement, right: boolean, startPx: number | null = null) {
   requestAnimationFrame(() => {
-    cv.scrollLeft = right ? cv.scrollWidth : 0;
+    cv.scrollLeft = startPx != null ? (right ? startPx - cv.clientWidth + 40 : startPx - 40) : right ? cv.scrollWidth : 0;
     const band = cv.scrollHeight;
     if (view.full) cv.scrollTop = band / 2 - cv.clientHeight / 2;
   });
@@ -400,7 +455,7 @@ function legendPane(p: Pattern) {
   (async () => {
     const pdf = await pdfOf(p);
     if (!pdf) return;
-    if (!p.legend) await detectLegend(p);
+    if (!p.legend || staleLegend(p)) await detectLegend(p);
     if (!p.legend || "none" in p.legend) {
       pane.remove();
       return;
@@ -443,6 +498,10 @@ async function openLegendBig(p: Pattern) {
   body.append(c);
 }
 
+/** 기호표 자동 찾기 규칙 버전: 올리면 예전에 자동으로 찾은 범위를 다시 찾는다 */
+const LEGEND_V = 2;
+const staleLegend = (p: Pattern) => !!p.legend && "page" in p.legend && p.legend.auto && (p.legend.v || 1) < LEGEND_V;
+
 async function detectLegend(p: Pattern) {
   const pdf = await pdfOf(p);
   if (!pdf) return;
@@ -452,7 +511,7 @@ async function detectLegend(p: Pattern) {
     if (!t.items.some((i) => LEGEND_RE.test(i.str))) continue;
     const lg = findLegend(t.items);
     if (lg) {
-      p.legend = { page: n, ...lg, auto: true };
+      p.legend = { page: n, ...lg, auto: true, v: LEGEND_V };
       commit(p, false);
       return;
     }
@@ -523,8 +582,8 @@ function narrative(p: Pattern, r: Row) {
         chunkBox(p, r, chunksOf(txt)),
         h("span", { class: "gen", text: "기기가 차트 그림을 읽은 거라 교차뜨기 방향(LC/RC)은 차트와 한 번 대조해 주세요." }),
         h("div", { class: "actions" }, h("button", { class: "btn ghost", type: "button", text: "이 서술을 이 단에 저장", on: { click: () => {
-          r.t = txt; r.span = null; p.rev++; commit(p); render(); toast("이 단 서술로 저장했어요.");
-        } } })),
+          r.t = withEnd(r, txt); r.span = null; p.rev++; commit(p); render(); toast("이 단 서술로 저장했어요.");
+        } } }), saveAllBtn(p, r.s)),
       );
     }).catch(() => { slot.textContent = "차트에서 이 단을 읽지 못했어요."; });
     return wrap;
@@ -593,6 +652,37 @@ function chunkBox(p: Pattern, r: Row, chunks: string[]) {
   return wrap;
 }
 
+/** 차트로 읽은 서술로 바꿀 때, 공통 지시의 마지막 단이면 '다 뜬 뒤 할 일'은 남긴다 */
+function withEnd(r: Row, txt: string) {
+  if (!r.span || r.n !== r.span[1]) return txt;
+  const end = spanParts(r.t, r.span).end;
+  return end ? `${txt}\n${end}` : txt;
+}
+
+/** 이 파트에서 서술 없이 차트만 따르는 단을 모두 차트로 읽어 서술로 저장 */
+function saveAllBtn(p: Pattern, s: string) {
+  const todo = () => partRows(p, s).filter((x) => wantsChartText(p, x));
+  const n = todo().length;
+  if (n < 2) return null;
+  const b = h("button", { class: "btn ghost", type: "button", text: `서술 없는 단 모두 저장 (${n}단)` });
+  b.onclick = async () => {
+    if (!(await ask("서술 없는 단 모두 저장", `${s}에서 서술 없이 차트만 따르는 ${n}단을 기기에서 차트로 읽어 그 단 서술로 저장해요. 교차 방향은 나중에 차트와 대조해 주세요.`, "저장"))) return;
+    b.disabled = true;
+    const list = todo();
+    let ok = 0;
+    for (let i = 0; i < list.length; i++) {
+      b.textContent = `읽는 중… ${i + 1}/${list.length}`;
+      const txt = await chartRowText(p, list[i]).catch(() => null);
+      if (txt) { list[i].t = withEnd(list[i], txt); list[i].span = null; ok++; }
+    }
+    p.rev++;
+    commit(p);
+    render();
+    toast(`${ok}단을 저장했어요${ok < list.length ? ` (${list.length - ok}단은 읽지 못해 그대로)` : ""}.`, 4000);
+  };
+  return b;
+}
+
 /** 단 서술에 코 지시(겉2, 안3, LC…)가 없고 차트만 가리키나 */
 const STITCH_INSTR = /(?:겉|안)\s*\d|겉뜨기\s*\d|안뜨기\s*\d|\b[kp]\d|\b(?:LC|RC|LPC|RPC|k2tog|ssk|p2tog|DS|KDS|PDS|M1[LR]?)\b/i;
 function wantsChartText(p: Pattern, r: Row) {
@@ -604,17 +694,17 @@ function chartRowText(p: Pattern, r: Row): Promise<string | null> {
   const page = chartPage(p, r)!;
   const ws = sideOf(p, r) === "WS" && !p.secs[r.s]?.round;
   const lg = p.legend && "page" in p.legend ? [p.legend.page, p.legend.x0, p.legend.y0].join(",") : "";
-  const ck = [p.id, page, r.n, ws, lg].join(":");
+  const ck = [p.id, page, r.n, ws, lg, p.size].join(":");
   let c = chartTextCache.get(ck);
   if (!c) {
     if (chartTextCache.size > 40) chartTextCache.clear();
     c = (async () => {
       const pdf = await pdfOf(p);
       if (!pdf) return null;
-      if (!p.legend) await detectLegend(p);
+      if (!p.legend || staleLegend(p)) await detectLegend(p);
       const bmp = await chartBitmap(pdf, p.id, page);
       const { readRow, rowText } = await import("./symbolid");
-      const st = await readRow(p, pdf, page, bmp, r.n, ws);
+      const st = await readRow(p, pdf, page, bmp, r.n, ws, await sizeRangeOf(p, pdf, page, bmp, r.n));
       return st && st.length ? rowText(st, ws) : null;
     })();
     chartTextCache.set(ck, c);
@@ -651,7 +741,7 @@ async function explainRow(p: Pattern, r: Row, side: "RS" | "WS", round: boolean,
       return;
     }
     const parts: any[] = [{ kind: "image", media: "image/jpeg", b64: await blobB64(await canvasBlob(strip, "image/jpeg", 0.92)) }];
-    if (!p.legend) await detectLegend(p);
+    if (!p.legend || staleLegend(p)) await detectLegend(p);
     const hasLegend = !!(p.legend && "page" in p.legend);
     if (hasLegend) parts.push({ kind: "image", media: "image/jpeg", b64: await blobB64(await canvasBlob(await legendCanvas(pdf, p.legend as any, 2), "image/jpeg", 0.9)) });
     const head = explainHead(r.n, side, round, hasLegend, p.colors);
@@ -754,7 +844,11 @@ function history(p: Pattern) {
     ul.append(h("li", {}, h("span", { text: `${l.s} ${l.from}→${l.to}단` }), h("span", { class: "d", text: `${fmtShort(l.a)}–${fmtTime(l.b)} · ${d >= 0 ? "+" : ""}${d}단` })));
   }
   if (!recent.length) ul.append(h("li", { class: "d", text: "아직 기록이 없어요. '다음 단'을 누르면 시각이 남아요." }));
-  return h("details", { class: "sheet" }, h("summary", { text: "진행 기록" }), ul);
+  const clear = p.log.length ? h("div", { class: "actions", style: "padding:8px 16px 0" }, h("button", { class: "btn ghost", type: "button", text: "진행 기록 지우기", on: { click: async () => {
+    if (!(await ask("진행 기록 지우기", `진행 기록 ${p.log.length}개를 지워요. 지금 단 위치와 뜬 단 표시는 그대로예요.`, "지우기"))) return;
+    p.log = []; commit(p); render(); toast("진행 기록을 지웠어요.");
+  } } })) : null;
+  return h("details", { class: "sheet" }, h("summary", { text: "진행 기록" }), ul, clear);
 }
 
 function dangerZone(p: Pattern) {
@@ -814,12 +908,34 @@ function importFile() {
 }
 
 /* ---------------- 이동 · 키보드 · 화면 켜두기 ---------------- */
+/** 30분 넘게 쉬지 않고 뜨면 스트레칭 알림 (쉬지 않은 시간 30분마다 한 번) */
+let stretchShown = 0;
+function stretchReminder(p: Pattern) {
+  const ms = continuousKnitMs(p);
+  const step = Math.floor(ms / (30 * 60000));
+  if (step < 1) { stretchShown = 0; return; }
+  if (step <= stretchShown) return;
+  stretchShown = step;
+  const min = Math.round(ms / 60000);
+  const long = ms >= 2 * 3600000; // 2시간 넘으면 스트레칭이 아니라 쉬기
+  const box = h("div", { class: "stretch" + (long ? " rest" : ""), role: "status" },
+    h("b", { text: long ? `${Math.floor(min / 60)}시간 ${min % 60}분째 뜨고 있어요. 이제 쉬다 오세요` : `${min}분째 뜨고 있어요` }),
+    h("span", { text: long
+      ? "손과 눈이 많이 지쳤을 거예요. 일어나서 물 한 잔 마시고 15분쯤 쉬었다 와요. 지금 단은 그대로 저장돼 있어요 ☕"
+      : "손목을 돌리고 손가락을 쫙 펴고, 어깨·목을 천천히 늘려 주세요. 눈도 잠깐 먼 곳을 봐요 🙆" }),
+    h("button", { class: "btn", type: "button", text: long ? "쉬고 올게요" : "스트레칭했어요", on: { click: () => box.remove() } }));
+  document.querySelector(".stretch")?.remove();
+  document.body.append(box);
+  setTimeout(() => box.remove(), 60000);
+}
+
 function next() {
   const p = active();
   const before = currentTab(p);
   const res = stepNext(p);
   if (res === "all-done") toast("모든 파트를 다 떴어요! 🎉");
-  if (res === "finished") toast(`${before} 완료 ✓ ${fmtTime(Date.now())}`);
+  if (res === "finished") { const ft = finishText(p, before); toast(`${before} 완료 ✓ ${fmtTime(Date.now())}` + (ft ? ` · ${ft}` : ""), 6000); }
+  else if (res === "moved") stretchReminder(p);
   view.editing = false;
   commit(p);
   render();

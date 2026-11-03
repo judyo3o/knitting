@@ -7,6 +7,9 @@ export { rowText };
 import { boundaries, gridLattice, symbolScore, legendEntries, matchToken, textAt, unreadable, type Box, type LegendEntry } from "./symbols";
 import type { Pattern } from "./types";
 
+/** 시작 화살표로 쓰는 글자 (→ ˃ › ▶ …) — 코가 아님 */
+const ARROW = /^[\s\-–—=]*[→←⟵⟶➜➔➝▶◀►◄▷◁˃˂›‹»«<>⇒⇐][\s\-–—=]*$/;
+
 export type SymHit = {
   sym: string;
   name: string;
@@ -258,6 +261,16 @@ function rowCtx(pdf: Pdf, page: number, bmp: Bitmap, c: Chart, n: number): Promi
   return pr;
 }
 
+/** 칸 안에 글자 기호가 있나 (화살표·숫자 제외) — 코 번호 밖의 감아코 같은 칸 */
+function cellHasMark(R: RowCtx, k: number, items: { str: string; x: number; y: number; w: number; h: number }[], axes: number[] = []): boolean {
+  const { B, S, h, yTop, dark } = R;
+  const x0 = B[k] / S, x1 = B[k + 1] / S;
+  if (axes.some((a) => a > x0 - (x1 - x0) * 0.3 && a < x1 + (x1 - x0) * 0.3)) return false; // 단 번호 칸
+  if (items.some((i) => i.str.trim() && !/^\s*\d{1,3}\s*$/.test(i.str) && !ARROW.test(i.str) && i.x + i.w / 2 > x0 && i.x + i.w / 2 < x1 && i.y - i.h / 2 > yTop && i.y - i.h / 2 < yTop + h)) return true;
+  void dark;
+  return false;
+}
+
 /** 칸이 있나: 위·아래 테두리에 모두 선이 있으면 (경사뜨기로 안 뜨는 곳·모양 낸 가장자리 바깥은 아래 단의 윗선만 있다) */
 function cellExists(R: RowCtx, k: number): boolean {
   const { B, S, h, yTop, dark } = R;
@@ -272,7 +285,7 @@ function cellExists(R: RowCtx, k: number): boolean {
  * 이 단에 없는 칸(모양 낸 가장자리·경사뜨기로 안 뜨는 곳 — 위아래 격자선이 없음)은 건너뛴다.
  * 결과는 차트(겉면) 기호 그대로. 안면 뜨기 변환은 rowText에서.
  */
-export async function readRow(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, n: number, fromLeft: boolean): Promise<RowStitch[] | null> {
+export async function readRow(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, n: number, fromLeft: boolean, range: [number, number] | null = null): Promise<RowStitch[] | null> {
   const c = bmp.charts.find((ch) => n >= ch.nMin - 1 && n <= ch.nMax + 1);
   if (!c) return null;
   const R = await rowCtx(pdf, page, bmp, c, n);
@@ -287,19 +300,20 @@ export async function readRow(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, n
   const span: [number, number] | null = ax ? [ax.x0, ax.x1] : null;
   const cw = (B[M] - B[0]) / M / S;
   const inSpan = (k: number) => {
-    if (!span) return true;
     const cx = (B[k] + B[k + 1]) / 2 / S;
+    if (range) return cx >= range[0] && cx <= range[1]; // 내 사이즈 범위
+    if (!span) return true;
     return cx >= span[0] - cw * 0.6 && cx <= span[1] + cw * 0.6;
   };
-  const arrowIn = (k: number) => items.some((i) => /^\s*[→←⟵⟶➜➔▶◀]\s*$/.test(i.str) && i.x + i.w / 2 > B[k] / S && i.x + i.w / 2 < B[k + 1] / S && i.y - i.h / 2 > yTop - 1 && i.y - i.h / 2 < yTop + h + 1);
+  const arrowIn = (k: number) => items.some((i) => ARROW.test(i.str) && i.x + i.w / 2 > B[k] / S && i.x + i.w / 2 < B[k + 1] / S && i.y - i.h / 2 > yTop - 1 && i.y - i.h / 2 < yTop + h + 1);
   const out: RowStitch[] = [];
   const order = [...Array(M).keys()];
   if (!fromLeft) order.reverse();
   const seen = new Set<number>();
   for (const k of order) {
     if (seen.has(k)) continue;
-    if (!inSpan(k) || arrowIn(k) || !exists(k)) { seen.add(k); continue; }
-    const hit = await identify(p, pdf, page, bmp, (B[k] + B[k + 1]) / 2 / S, yMid);
+    if ((!inSpan(k) && (range || !cellHasMark(R, k, items, c.axes))) || arrowIn(k) || !exists(k)) { seen.add(k); continue; } // 코 번호 밖이라도 감아코처럼 표시가 있으면 읽는다
+    const hit = await identify(p, pdf, page, bmp, (B[k] + B[k + 1]) / 2 / S, yMid, range);
     let cells = 1;
     if (hit?.rect) {
       const near = (v: number) => B.reduce((bi, bv, i) => (Math.abs(bv - v * S) < Math.abs(B[bi] - v * S) ? i : bi), 0);
@@ -320,7 +334,7 @@ export async function debugTemplates(p: Pattern, pdf: Pdf) {
   return L.tmpls.map((t) => (t.canvas ? t.canvas.toDataURL("image/png") : ""));
 }
 
-export async function identify(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, x: number, y: number): Promise<SymHit | null> {
+export async function identify(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, x: number, y: number, range: [number, number] | null = null): Promise<SymHit | null> {
   const c: Chart | undefined = bmp.charts.find((ch) => {
     const n = (y - ch.a) / ch.b;
     return n >= ch.nMin - 1.6 && n <= ch.nMax + 1.6 && x >= ch.x0 && x <= ch.x1; // 번호가 없는 끝 단(예: 코잡기 1단)까지
@@ -342,9 +356,13 @@ export async function identify(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, 
   // 코 번호 축이 있으면 그 번호로 센다. 번호 밖 칸(단 번호 상자·시작 화살표 칸)은 코가 아님
   const ax = stitchAxis(items, c);
   const vAt = (px: number) => (ax ? Math.round((px - ax.a) / ax.b) : 0);
-  if (ax && rect) {
+  if (range && rect) {
+    const cx = (rect.x0 + rect.x1) / 2;
+    if (cx < range[0] || cx > range[1]) return null; // 내 사이즈 범위 밖
+  } else if (ax && rect) {
+    // 코 번호 밖 칸: 단 번호 상자·시작 화살표 같은 빈 칸은 코가 아니다. 다만 글자나 그림 기호가 있으면(가장자리 감아코 등) 읽는다
     const v = vAt((rect.x0 + rect.x1) / 2);
-    if (v < 1 || v > ax.max) return null;
+    if ((v < 1 || v > ax.max) && !cellHasMark(R, k, items, c.axes)) return null;
   }
   if (lat && rect && !cellExists(R, k)) return null; // 이 단에 없는 칸 (경사뜨기로 안 뜨는 곳 등)
   const L = await legendData(p, pdf);
@@ -352,13 +370,19 @@ export async function identify(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, 
   // 기호 칸 범위 → 오른쪽/왼쪽에서 몇 번째 (뜨기 시작하는 쪽에서 세려고 둘 다)
   const idx = (r: Box | null) => {
     if (!lat || !r) return { fromRight: st, fromLeft: null };
+    const near = (v: number) => B.reduce((bi, bv, i) => (Math.abs(bv - v * S) < Math.abs(B[bi] - v * S) ? i : bi), 0);
+    const a = near(r.x0), b = near(r.x1) - 1;
+    if (range) {
+      // 내 사이즈 범위 안에서 센다
+      const ins = B.slice(0, -1).map((bv, i) => (bv + B[i + 1]) / 2 / S).map((cx, i) => (cx >= range[0] && cx <= range[1] ? i : -1)).filter((i) => i >= 0);
+      const kL = ins[0], kR = ins[ins.length - 1];
+      return { fromRight: kR - b + 1, fromLeft: a - kL + 1 };
+    }
     if (ax) {
       const cw = Math.abs(ax.b);
       const vl = vAt(r.x0 + cw / 2), vr = vAt(r.x1 - cw / 2); // 기호의 왼쪽 끝 칸, 오른쪽 끝 칸 번호
       return ax.b < 0 ? { fromRight: vr, fromLeft: ax.max - vl + 1 } : { fromLeft: vl, fromRight: ax.max - vr + 1 };
     }
-    const near = (v: number) => B.reduce((bi, bv, i) => (Math.abs(bv - v * S) < Math.abs(B[bi] - v * S) ? i : bi), 0);
-    const a = near(r.x0), b = near(r.x1) - 1;
     return { fromRight: M - b, fromLeft: a + 1 };
   };
   const out = (sym: string, e: LegendEntry | null, guess: boolean, r: Box | null): SymHit => ({
@@ -390,6 +414,15 @@ export async function identify(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, 
   }
   // 교차뜨기도 6칸(3/3)이 가장 넓다: 더 넓게 이어지면 격자선을 못 찾은 것 → 누른 칸 하나로
   if (cR - cL + 1 > 8) { cL = k; cR = k; }
+  // 여러 칸 기호 안에 글자(SSK, k2tog…)가 있으면 그 글자로 (누른 자리가 글자 옆이어도)
+  if (!token) {
+    const bx0 = B[cL] / S, bx1 = B[cR + 1] / S;
+    const inBox = items.filter((i) => i.str.trim() && !/^\s*\d{1,3}\s*$/.test(i.str) && i.x + i.w / 2 > bx0 && i.x + i.w / 2 < bx1 && i.y - i.h / 2 > yTop - 1 && i.y - i.h / 2 < yTop + h + 1);
+    for (const it of inBox) {
+      const e = matchToken(it.str.trim(), entries);
+      if (e) return out(it.str.trim(), e, false, { x0: bx0, x1: bx1, y0: yTop, y1: yTop + h });
+    }
+  }
   const cells = cR - cL + 1;
   // 글자 칸인데 글자 기호표에 없으면(예: '|') 그림 기호 중에서만 고른다
   const cands = token ? tmpls.filter((tm) => !tm.entry.sym && tm.canvas && tm.canvas.width / tm.canvas.height / cellRatio < 1.5) : tmpls;

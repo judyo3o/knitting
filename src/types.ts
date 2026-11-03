@@ -13,6 +13,7 @@ export type Row = {
   castOn?: boolean; // 코잡기 자체가 이 단 ("코잡기가 1단") — 뜨는 단이 아님
   auto?: boolean; // 그린 배색에서 자동으로 만든 서술 (격자를 고치면 다시 만든다)
   co?: string[]; // 배색: 이 단에 쓰는 색 기호 (예: ["A","B"])
+  ln?: string; // 길이로 정한 반복("for 2\" [5 cm]")을 게이지로 단 수로 푼 단: 그 안내
 };
 
 /** 배색 도안의 색 (도안 표기 그대로) */
@@ -23,7 +24,7 @@ export type SecInfo = { ch?: number | null; round?: boolean; odd?: Side };
 export type LogEntry = { a: number; b: number; s: string; from: number; to: number };
 
 export type Legend =
-  | { page: number; x0: number; y0: number; x1: number; y1: number; auto?: boolean }
+  | { page: number; x0: number; y0: number; x1: number; y1: number; auto?: boolean; v?: number }
   | { none: true };
 
 export type Pattern = {
@@ -44,6 +45,7 @@ export type Pattern = {
   colors: Yarn[];
   draw: Record<string, Drawing>; // 파트별 직접 그린 배색 격자
   gauges: GaugeSet[]; // 무늬별 게이지 (도안 · 세탁 전 · 세탁 후)
+  work?: { on: number | null; spans: [number, number][] }; // 뜨개 시작·중지 버튼: 켜 둔 시간만 뜬 시간
   src: "pdf" | "images" | "text" | null;
   srcPages: number | null;
   readPages: number[];

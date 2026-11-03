@@ -7,7 +7,7 @@ import { cacheGet, cacheSet, getFile, putFile } from "./db";
 import { manualHandler } from "./dialogs";
 import { openEditor } from "./drawui";
 import { newDrawing } from "./drawing";
-import { applyDrawing, colorsInText, expand, mergeSections, mergeYarns, newPattern, str, toSections } from "./model";
+import { applyDrawing, colorsInText, expand, expandLengthRepeats, mergeSections, mergeYarns, newPattern, str, toSections } from "./model";
 import { extractInfo, localGoodEnough, localParseLines, parseRange, resolveSizes, sizeOrder, toRanges } from "./parse";
 import { b64, blobB64, canvasBlob, extractPages, openPdf, renderWidth, sha256, textItems, type Pdf } from "./pdf";
 import { autoPick, findCharts, normSize, pageInfo, toLines, type PageInfo } from "./pdfgeom";
@@ -305,6 +305,7 @@ export function openUpload(o: Opts) {
       if (appNote) target.notes = appNote;
       if (!rows.some((r) => r.s === target.tab)) target.tab = rows[0]?.s || target.tab;
       fillColors(target);
+      expandLengthRepeats(target);
       for (const s2 of Object.keys(target.draw)) if (rows.some((r) => r.s === s2)) applyDrawing(target, s2);
       clearBitmaps();
       commit(target);
@@ -325,6 +326,7 @@ export function openUpload(o: Opts) {
       if (up.pdfBlob && target.src !== "images") { await putFile(target.id, { type: "pdf", blob: up.pdfBlob }); target.src = "pdf"; target.srcPages = srcPages; target.pdfHash = pdfHash; forgetPdf(target.id); }
       fillColors(target);
       if (!target.gauges.length) target.gauges = await gaugesFrom(null, up.pdf, up.info);
+      expandLengthRepeats(target);
       for (const s of Object.keys(target.draw)) applyDrawing(target, s);
       commit(target);
       toast(`${sections.length}개 파트를 붙였어요.`);
@@ -335,6 +337,7 @@ export function openUpload(o: Opts) {
     const p = newPattern({ id, name: name || str(title) || "새 도안", size, notes: appNote, info: mergeInfo("", notes), rows, secs, colors, src, srcPages, readPages: readNow, pdfHash });
     if (!p.rows.length) return say("단 정보를 찾지 못했어요.");
     p.gauges = await gaugesFrom(up.mode === "text" ? textIn.value : null, up.pdf, up.info);
+    expandLengthRepeats(p); // "for 2\" [5 cm]" 같은 길이 반복을 게이지로 단 수로
     p.tab = p.rows[0].s;
     fillColors(p);
     if (src === "pdf" && up.pdfBlob) await putFile(id, { type: "pdf", blob: up.pdfBlob });
