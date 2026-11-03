@@ -1,32 +1,12 @@
-import { defineConfig, loadEnv, type Plugin } from "vite";
+import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
-/** 개발 서버에서도 /api/claude를 쓸 수 있게 (선택: .env에 ANTHROPIC_API_KEY, APP_PASSWORD) */
-function devApi(): Plugin {
-  return {
-    name: "dev-api",
-    configureServer(server) {
-      server.middlewares.use("/api/claude", async (req, res) => {
-        const chunks: Buffer[] = [];
-        for await (const c of req) chunks.push(c as Buffer);
-        const { POST } = await server.ssrLoadModule("/api/claude.ts");
-        const r: Response = await POST(new Request("http://local/api/claude", { method: "POST", headers: req.headers as any, body: Buffer.concat(chunks) }));
-        res.statusCode = r.status;
-        res.setHeader("content-type", "application/json");
-        res.end(await r.text());
-      });
-    },
-  };
-}
-
-export default defineConfig(({ mode }) => {
-  Object.assign(process.env, loadEnv(mode, process.cwd(), ""));
+export default defineConfig(() => {
   return {
     // GitHub Pages(저장소 이름 경로)에 올릴 때: BASE_PATH=/knitting/ npm run build
     base: process.env.BASE_PATH || "/",
     build: { target: "es2022", chunkSizeWarningLimit: 2000 },
     plugins: [
-      devApi(),
       VitePWA({
         registerType: "autoUpdate",
         includeAssets: ["icon.svg", "icon-192.png", "icon-512.png"],
@@ -47,7 +27,6 @@ export default defineConfig(({ mode }) => {
         workbox: {
           globPatterns: ["**/*.{js,css,html,svg,png,mjs,wasm,bcmap,pfb,ttf}"],
           maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
-          navigateFallbackDenylist: [/^\/api\//],
         },
       }),
     ],

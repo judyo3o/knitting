@@ -3,7 +3,7 @@ import { AUTOSAVE_MS } from "./config";
 import * as db from "./db";
 import { applyDrawing, expand, mergeSections, newPattern, normalize } from "./model";
 import { openPdf, type Pdf } from "./pdf";
-import { DEFAULT_SETTINGS, type AiSettings } from "./ai";
+import { migrateSettings, type AiSettings } from "./ai";
 import type { AiSection, Drawing, Pattern } from "./types";
 
 export const state = {
@@ -11,7 +11,7 @@ export const state = {
   activeId: null as string | null,
   lastSaved: 0,
   dirty: false,
-  ai: { ...DEFAULT_SETTINGS } as AiSettings,
+  ai: { provider: "manual" } as AiSettings,
 };
 
 /* ---------- 예시 도안 (내 도안이 없을 때만) ---------- */
@@ -64,7 +64,7 @@ export async function load() {
   try {
     for (const p of await db.loadPatterns()) state.patterns[p.id] = normalize(p);
     state.activeId = (await db.getSetting<string>("activeId")) || null;
-    state.ai = { ...DEFAULT_SETTINGS, ...((await db.getSetting<AiSettings>("ai")) || {}) };
+    state.ai = migrateSettings(await db.getSetting("ai"));
     state.lastSaved = (await db.getSetting<number>("lastSaved")) || 0;
   } catch {
     /* 사생활 보호 모드 등: 메모리에서만 */

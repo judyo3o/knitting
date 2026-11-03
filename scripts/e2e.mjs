@@ -10,6 +10,16 @@ try { ({ chromium } = await import("playwright")); } catch { ({ chromium } = cre
 mkdirSync("check-out", { recursive: true });
 const pdfPath = "check-out/synthetic-pattern.pdf";
 if (!existsSync(pdfPath)) execFileSync("python3", ["scripts/make-fixture.py", pdfPath], { stdio: "inherit" });
+// 2색 테스트 이미지 (어두운 바탕에 밝은 사슴 비슷한 모양, 가장자리는 흰 여백)
+const imgPath = "check-out/test-image.png";
+execFileSync("python3", ["-c", `
+from PIL import Image, ImageDraw
+im = Image.new("RGB", (400, 340), "#f2f0ea"); d = ImageDraw.Draw(im)
+d.rectangle([40, 40, 360, 300], fill="#0e1622")
+d.rectangle([150, 160, 280, 220], fill="#ece9e1"); d.rectangle([250, 90, 275, 165], fill="#ece9e1")
+for x in (160, 190, 240, 265): d.rectangle([x, 220, x + 12, 290], fill="#ece9e1")
+for (x, y) in ((80, 80), (120, 130), (320, 70), (300, 240)): d.rectangle([x, y, x + 10, y + 10], fill="#ece9e1")
+im.save("${imgPath}")`]);
 
 const server = await createServer({ server: { port: 5198 }, logLevel: "error" });
 await server.listen();
@@ -60,6 +70,40 @@ await shot("3-editor");
 await page.click(".editor >> text=저장");
 await page.waitForSelector(".editor", { state: "detached" });
 
+step("편집기 설정: 코 모양 보기 + 범례 + 경계선");
+await page.click("text=배색 고치기");
+await page.click(".editor >> text=⚙ 설정");
+await page.click(".set-nav >> text=보기");
+await page.click(".set-pane >> text=♡ 코 모양");
+await page.check(".set-pane input[type=checkbox]");
+await page.click(".set-nav >> text=테두리");
+await page.check(".set-pane input[type=checkbox]");
+await page.click(".dlg >> text=적용");
+await page.waitForSelector(".editor .yarns .yarn");
+await shot("3b-editor-stitch");
+await page.click(".editor >> text=💾 저장");
+await page.waitForSelector(".editor", { state: "detached" });
+
+step("이미지로 시작 (자르기·보기·팔레트)");
+await page.click("#addBtn");
+await page.click("text=배색 차트 그리기");
+const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.click("text=이미지로 시작")]);
+await chooser.setFiles(imgPath);
+await page.waitForSelector(".editor[aria-label='이미지로 시작'] canvas");
+await page.waitForFunction(() => document.querySelectorAll(".editor[aria-label='이미지로 시작'] .pal input[type=color]").length >= 2);
+await shot("8-image-overlay");
+await page.click("text=▩ 격자");
+await shot("9-image-grid");
+await page.click(".editor[aria-label='이미지로 시작'] >> text=💾 저장");
+await page.waitForSelector(".editor[aria-label='이미지로 시작']", { state: "detached" });
+await page.waitForSelector(".editor canvas");
+await shot("10-image-in-editor");
+await page.click(".editor >> text=💾 저장");
+await page.waitForSelector(".editor", { state: "detached" });
+const chunks2 = await page.locator(".chunk").allTextContents();
+console.log("   이미지 차트 1단:", chunks2.slice(0, 4).join(" | "));
+assert.ok(chunks2.length >= 1);
+
 step("설정: 복사·붙여넣기 기본");
 await page.click("#setBtn");
 assert.ok(await page.isChecked("input[value=manual]"));
@@ -75,7 +119,25 @@ console.log("   자동 선택:", pick);
 assert.equal(pick, "2, 5, 7-12");
 await shot("4-upload");
 
-step("읽기 (복사·붙여넣기 모드) → 답 붙여넣기");
+step("기기에서 읽기 (Claude 안 씀)");
+await page.click("text=도안 읽기");
+await page.waitForSelector("#uploadView", { state: "detached", timeout: 60000 });
+const localTabs = await page.locator(".ptab").allTextContents();
+console.log("   파트:", localTabs.join(" / "));
+assert.ok(localTabs.some((t) => t.startsWith("스와치")));
+await page.click(".ptab:has-text('오른쪽 앞판')");
+const rowTxt = await page.textContent(".chunks");
+console.log("   오른쪽 앞판:", rowTxt.slice(0, 60));
+assert.match(rowTxt, /110코가 되도록/); // L 사이즈 숫자만 남김
+assert.doesNotMatch(rowTxt, /\(104\)/);
+await shot("4b-local-read");
+
+step("Claude로 정확하게 읽기 (키 없음 → 복사·붙여넣기) → 답 붙여넣기");
+await page.click("#addBtn");
+await page.fill("input[placeholder='예: L']", "L");
+await page.setInputFiles("#fileIn", pdfPath);
+await page.waitForFunction(() => /쪽을 골랐어요/.test(document.querySelector(".pg-tools .hint")?.textContent || ""), null, { timeout: 30000 });
+await page.check("#uploadView label:has-text('Claude로 정확하게') input");
 const answer = (pages) => JSON.stringify({
   title: "하트 체인 가디건", notes: "L 사이즈 기준", colors: pages.includes(2) ? [{ code: "A", name: "버건디", hex: "#B23A48" }, { code: "B", name: "네이비", hex: "#2F5D8A" }] : null,
   sections: pages.includes(2)
@@ -109,6 +171,20 @@ await page.waitForSelector(".chartview canvas", { timeout: 30000 });
 await page.waitForSelector(".legend canvas", { timeout: 30000 });
 assert.match(await page.textContent(".chip.dir"), /왼쪽에서 오른쪽/);
 await shot("6-back-row60");
+
+step("게이지: PDF에서 미리 채움 + 세탁 후 입력 → 비교");
+assert.match(await page.textContent(".gauge-line"), /도안 18코 23단|도안 게이지\(메리야스뜨기\) 18코 23단/);
+await page.click(".gauge-line");
+await page.fill(".gauge-set >> nth=0 >> input[aria-label='세탁 후 콧수']", "20");
+await page.fill(".gauge-set >> nth=0 >> input[aria-label='세탁 후 단수']", "23");
+await page.fill(".gauge-set >> nth=0 >> input[aria-label='도안 콧수나 단수']", "110");
+const gout = await page.textContent(".gauge-set >> nth=0");
+console.log("   ", gout.replace(/\s+/g, " ").slice(0, 200));
+assert.match(gout, /굵게/);
+assert.match(gout, /122코/);
+await shot("11-gauge");
+await page.click(".dlg >> text=저장");
+assert.match(await page.textContent(".gauge-line"), /내 20코 23단/);
 
 step("스와치: 배색 차트 색 뽑기");
 await page.click(".ptab:has-text('스와치')");

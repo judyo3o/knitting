@@ -1,20 +1,27 @@
 /** 배색 격자 편집기 */
-import { drawGrid, hitCell, yarnHex, chartBitmap, type GridGeom } from "./chart";
+import { drawGrid, hitCell, pixelCanvas, yarnHex, chartBitmap, type GridGeom } from "./chart";
 import {
-  copyRect, deleteCol, deleteRow, describeRow, fillRow, floodFill, gridFromPixels, insertCol, insertRow, longestFloat, mirrorRect, newDrawing, normRect, paste,
-  resize, rgbToHex, setCell, tileRepeat, type Clip, type Rect,
+  colorCounts, copyRect, deleteCol, deleteRow, describeRow, fillRow, floodFill, gridFromPixels, insertCol, insertRow, longestFloat, mirrorRect, newDrawing, normRect,
+  paste, resize, setCell, tileRepeat, type Clip, type Rect,
 } from "./drawing";
+import { primaryGauge } from "./gauge";
+import { openImageImport } from "./imageimport";
 import { applyDrawing, partRows, sideOf } from "./model";
 import { chartFor, rowY } from "./pdfgeom";
+import { canvasBlob } from "./pdf";
 import { commit, pdfOf } from "./store";
-import { dialog, h, toast } from "./ui";
-import type { Drawing, Pattern, Yarn } from "./types";
+import { dialog, download, h, toast } from "./ui";
+import type { Drawing, DrawOpt, Pattern, Yarn } from "./types";
 
-type Tool = "pen" | "fill" | "select" | "paste";
+type Tool = "select" | "pen" | "fill" | "erase" | "paste";
 const CODES = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const IDX = "0123456789abcdefghijklmnopqrstuvwxyz";
 
-export function openEditor(p: Pattern, part: string, o: { onSave: () => void }) {
-  let d: Drawing = p.draw[part] ? { ...p.draw[part] } : newDrawing(24, Math.max(10, partRows(p, part).length || 20), partRows(p, part)[0]?.n || 1);
+export function openEditor(p: Pattern, part: string, o: { onSave: () => void; startImage?: File }) {
+  const rowsOf = partRows(p, part);
+  let d: Drawing = p.draw[part] ? structuredClone(p.draw[part]) : newDrawing(24, Math.max(10, rowsOf.length || 20), rowsOf[0]?.n || 1);
+  if (!d.opt) d.opt = {};
+  if (d.opt.gauge === undefined) d.opt.gauge = primaryGauge(p.gauges);
   let colors: Yarn[] = p.colors.length ? p.colors.map((y) => ({ ...y })) : [{ code: "A", name: "바탕색", hex: "#EFE8D8" }, { code: "B", name: "배색", hex: "#2F5D8A" }];
   let cur = Math.min(1, colors.length - 1);
   let tool: Tool = "pen";
@@ -28,69 +35,68 @@ export function openEditor(p: Pattern, part: string, o: { onSave: () => void }) 
   let dirty = false;
 
   const canvas = h("canvas", { "aria-label": "배색 격자. 칸을 눌러 칠해요." });
-  const body = h("div", { class: "ed-body" }, canvas);
+  const legend = h("div", { class: "yarns", style: "justify-content:center;margin-top:8px" });
+  const body = h("div", { class: "ed-body" }, canvas, legend);
   const pal = h("div", { class: "pal", role: "radiogroup", "aria-label": "색" });
   const desc = h("div", { class: "ed-desc", "aria-live": "polite" });
-  const wIn = h("input", { type: "number", min: 1, max: 400, value: String(d.w), "aria-label": "콧수" });
-  const hIn = h("input", { type: "number", min: 1, max: 400, value: String(d.h), "aria-label": "단수" });
-  const sIn = h("input", { type: "number", min: 1, max: 999, value: String(d.start), "aria-label": "시작 단" });
-  const toolBtns: Record<Tool, HTMLButtonElement> = {
-    pen: h("button", { class: "btn", type: "button", text: "✏ 칠하기" }),
-    fill: h("button", { class: "btn", type: "button", text: "▦ 채우기" }),
+  const zoomSel = h("select", { "aria-label": "확대" }, ...[["fit", "맞춤"], ["8", "40%"], ["12", "60%"], ["16", "80%"], ["20", "100%"], ["28", "140%"], ["36", "180%"], ["44", "220%"]].map(([v, t]) => new Option(t, v, false, v === "20")));
+  zoomSel.onchange = () => { cell = zoomSel.value === "fit" ? fitCell() : +zoomSel.value; draw(); };
+  const toolBtns: Record<Exclude<Tool, "paste">, HTMLButtonElement> = {
     select: h("button", { class: "btn", type: "button", text: "▭ 선택" }),
-    paste: h("button", { class: "btn", type: "button", text: "📋 붙이기", disabled: true }),
+    pen: h("button", { class: "btn", type: "button", text: "🎨 색칠" }),
+    fill: h("button", { class: "btn", type: "button", text: "▦ 채우기" }),
+    erase: h("button", { class: "btn", type: "button", text: "⌫ 지우개" }),
   };
-  (Object.keys(toolBtns) as Tool[]).forEach((t) => (toolBtns[t].onclick = () => setTool(t)));
-  const selBtns = h("span", { class: "actions", style: "display:inline-flex;gap:6px" },
-    btn("복사", () => { if (sel) { clip = copyRect(d, sel); toolBtns.paste.disabled = false; toast("복사했어요. '붙이기'로 놓을 칸을 누르세요."); } }),
+  (Object.keys(toolBtns) as (keyof typeof toolBtns)[]).forEach((t) => (toolBtns[t].onclick = () => setTool(t)));
+  const selBar = h("div", { class: "ed-bar", hidden: true },
+    h("span", { class: "gen", text: "선택 영역:" }),
+    btn("복사", () => { if (sel) { clip = copyRect(d, sel); setTool("paste"); toast("붙일 자리(왼쪽 위 칸)를 누르세요."); } }),
     btn("좌우 반전", () => sel && edit(mirrorRect(d, sel, "h"))),
     btn("상하 반전", () => sel && edit(mirrorRect(d, sel, "v"))),
-    btn("가로 반복", () => sel && edit(tileRepeat(d, sel, "x"))),
-    btn("세로 반복", () => sel && edit(tileRepeat(d, sel, "y"))),
+    btn("가로로 반복", () => sel && edit(tileRepeat(d, sel, "x"))),
+    btn("세로로 반복", () => sel && edit(tileRepeat(d, sel, "y"))),
+    btn("반복 단위로 표시", () => { if (sel) edit({ ...d, opt: { ...d.opt, rep: normRect(sel) } }); }),
     btn("선택 칠하기", () => { if (!sel) return; const q = normRect(sel); let nd = d; for (let r = q.r0; r <= q.r1; r++) for (let c = q.c0; c <= q.c1; c++) nd = setCell(nd, c, r, cur); edit(nd); }),
+    btn("선택 해제", () => { sel = null; draw(); }),
   );
 
   const ed = h("div", { class: "editor", role: "dialog", "aria-modal": "true", "aria-label": `${part} 배색 그리기` },
     h("div", { class: "ed-bar" },
-      h("strong", { text: part }), h("span", { class: "sep" }),
-      pal, btn("+ 색", addColor), btn("색 편집", editColor), h("span", { class: "sep" }),
-      toolBtns.pen, toolBtns.fill, toolBtns.select, toolBtns.paste,
+      h("strong", { text: "✏ " + part }), h("span", { class: "sep" }),
+      btn("−", () => zoomStep(-4), "축소"), btn("+", () => zoomStep(4), "확대"), zoomSel,
+      h("span", { class: "sep" }),
+      btn("↶", () => { if (undo.length) { redo.push(d); d = undo.pop()!; dirty = true; draw(); } }, "되돌리기"),
+      btn("↷", () => { if (redo.length) { undo.push(d); d = redo.pop()!; dirty = true; draw(); } }, "다시"),
+      h("span", { style: "flex:1" }),
+      btn("⚙ 설정", openSettings),
+      h("button", { class: "btn primary", type: "button", text: "💾 저장", on: { click: save } }),
+      btn("닫기", closeAsk),
     ),
-    h("div", { class: "ed-bar" }, selBtns),
-    h("div", { class: "ed-bar" },
-      btn("↶ 되돌리기", () => { if (undo.length) { redo.push(d); d = undo.pop()!; dirty = true; draw(); } }),
-      btn("↷ 다시", () => { if (redo.length) { undo.push(d); d = redo.pop()!; dirty = true; draw(); } }),
-      h("span", { class: "sep" }),
-      btn("단 한 줄 칠하기", () => focus && edit(fillRow(d, focus.r, cur))),
-      btn("단 추가", () => edit(insertRow(d, focus ? focus.r + 1 : d.h))),
-      btn("단 삭제", () => focus && edit(deleteRow(d, focus.r))),
-      btn("코 추가", () => edit(insertCol(d, focus ? focus.c + 1 : d.w))),
-      btn("코 삭제", () => focus && edit(deleteCol(d, focus.c))),
-      h("span", { class: "sep" }),
-      h("label", {}, "콧수 ", wIn), h("label", {}, "단수 ", hIn), h("label", {}, "시작 단 ", sIn),
-      btn("크기 적용", () => { const nd = resize(d, +wIn.value, +hIn.value); nd.start = Math.max(1, +sIn.value || 1); edit(nd); }),
-      h("span", { class: "sep" }),
-      btn("−", () => { cell = Math.max(8, cell - 4); draw(); }), btn("+", () => { cell = Math.min(44, cell + 4); draw(); }),
-      h("span", { class: "sep" }),
-      btn("PDF 차트에서 불러오기", importFromPdf), btn("사진에서 불러오기", importFromPhoto),
-    ),
+    selBar,
     body,
-    h("div", { class: "ed-foot" }, desc,
-      h("span", { class: "actions" },
-        h("button", { class: "btn primary", type: "button", text: "저장", on: { click: save } }),
-        h("button", { class: "btn ghost", type: "button", text: "닫기", on: { click: closeAsk } }))),
+    h("div", { class: "ed-foot", style: "flex-direction:column;align-items:stretch" },
+      desc,
+      h("div", { class: "actions", style: "align-items:center" }, pal, btn("+", addColor, "색 추가")),
+      h("div", { class: "actions ed-tools" }, toolBtns.select, toolBtns.pen, toolBtns.fill, toolBtns.erase),
+    ),
   );
   document.body.append(ed);
   document.body.style.overflow = "hidden";
   setTool("pen");
+  if (o.startImage) importImage(o.startImage);
 
-  function btn(text: string, fn: () => void) {
-    return h("button", { class: "btn", type: "button", text, on: { click: fn } });
+  function btn(text: string, fn: () => void, label?: string) {
+    return h("button", { class: "btn", type: "button", text, "aria-label": label || null, on: { click: fn } });
   }
+  function zoomStep(dx: number) {
+    cell = Math.max(6, Math.min(48, cell + dx));
+    zoomSel.value = [...zoomSel.options].some((op) => op.value === String(cell)) ? String(cell) : zoomSel.value;
+    draw();
+  }
+  const fitCell = () => Math.max(4, Math.floor((body.clientWidth - 80) / d.w));
   function setTool(t: Tool) {
     tool = t;
-    (Object.keys(toolBtns) as Tool[]).forEach((k) => toolBtns[k].setAttribute("aria-pressed", String(k === t)));
-    selBtns.querySelectorAll("button").forEach((b) => ((b as HTMLButtonElement).disabled = !sel));
+    (Object.keys(toolBtns) as (keyof typeof toolBtns)[]).forEach((k) => toolBtns[k].setAttribute("aria-pressed", String(k === t || (t === "paste" && k === "select"))));
     draw();
   }
   function edit(nd: Drawing) {
@@ -100,27 +106,35 @@ export function openEditor(p: Pattern, part: string, o: { onSave: () => void }) 
     redo.length = 0;
     d = nd;
     dirty = true;
-    wIn.value = String(d.w); hIn.value = String(d.h); sIn.value = String(d.start);
     draw();
   }
   function drawPalette() {
     pal.innerHTML = "";
     colors.forEach((y, i) => {
-      const b = h("button", { type: "button", role: "radio", "aria-checked": String(cur === i), "aria-pressed": String(cur === i), title: y.name || y.code, style: { background: yarnHex(y, i) }, text: y.code });
-      b.onclick = () => { cur = i; if (tool === "select" || tool === "paste") setTool("pen"); drawPalette(); };
+      const on = cur === i && tool !== "erase";
+      const b = h("button", { type: "button", role: "radio", "aria-checked": String(on), "aria-pressed": String(on), title: (y.name || y.code) + " · 다시 누르면 편집", style: { background: yarnHex(y, i) }, text: y.code });
+      b.onclick = () => {
+        if (cur === i && tool !== "erase" && tool !== "select") return editColor();
+        cur = i;
+        if (tool === "erase" || tool === "select" || tool === "paste") setTool("pen");
+        else drawPalette();
+      };
       pal.append(b);
     });
-    const er = h("button", { type: "button", class: "erase", role: "radio", "aria-checked": String(cur === -1), "aria-pressed": String(cur === -1), title: "지우개", "aria-label": "지우개" });
-    er.onclick = () => { cur = -1; drawPalette(); };
-    pal.append(er);
   }
   function draw() {
     drawPalette();
+    selBar.hidden = !(tool === "select" || tool === "paste") || !sel;
     geom = drawGrid(canvas, d, colors, cell, { sel, n: focusRow, side: sideFor(focusRow), round: !!p.secs[part]?.round });
     const s = sideFor(focusRow);
     const line = describeRow(d, focusRow, s, colors);
     const fl = longestFloat(d, focusRow);
-    desc.textContent = `${focusRow}단 (${p.secs[part]?.round ? "원통" : s}) · ` + (line || "빈 단") + (fl && fl.len >= 6 ? ` · ⚠ 긴 플로트 ${fl.len}코` : "");
+    desc.textContent = `${focusRow}단 (${p.secs[part]?.round ? "원통" : s}) · ` + (line || "빈 단") + (fl && fl.len >= 6 ? ` · ⚠ 긴 플로트 ${fl.len}코` : "") + (tool === "paste" ? " · 붙일 자리를 누르세요" : "");
+    legend.innerHTML = "";
+    if (d.opt?.legend) {
+      const cnt = colorCounts(d);
+      colors.forEach((y, i) => legend.append(h("span", { class: "yarn" }, h("i", { style: { background: yarnHex(y, i) } }), `${y.code}${y.name ? " " + y.name : ""} · ${cnt[i] || 0}코`)));
+    }
   }
   function sideFor(n: number) {
     const r = partRows(p, part).find((x) => x.n === n) || { s: part, n, t: "", st: null, side: null, pg: null, ch: null, span: null };
@@ -133,6 +147,7 @@ export function openEditor(p: Pattern, part: string, o: { onSave: () => void }) 
     const b = canvas.getBoundingClientRect();
     return hitCell(geom, e.clientX - b.left, e.clientY - b.top);
   };
+  const paintColor = () => (tool === "erase" ? -1 : cur);
   canvas.addEventListener("pointerdown", (e) => {
     const hc = pos(e);
     if (!hc) return;
@@ -140,22 +155,22 @@ export function openEditor(p: Pattern, part: string, o: { onSave: () => void }) 
     down = true;
     focus = hc;
     focusRow = hc.r + d.start;
-    if (tool === "pen") edit(setCell(d, hc.c, hc.r, cur));
+    if (tool === "pen" || tool === "erase") edit(setCell(d, hc.c, hc.r, paintColor()));
     else if (tool === "fill") edit(floodFill(d, hc.c, hc.r, cur));
-    else if (tool === "select") { anchor = hc; sel = { c0: hc.c, r0: hc.r, c1: hc.c, r1: hc.r }; setTool("select"); }
-    else if (tool === "paste" && clip) edit(paste(d, clip, hc.c, hc.r - clip.h + 1));
+    else if (tool === "select") { anchor = hc; sel = { c0: hc.c, r0: hc.r, c1: hc.c, r1: hc.r }; }
+    else if (tool === "paste" && clip) { edit(paste(d, clip, hc.c, hc.r - clip.h + 1)); }
     draw();
   });
   canvas.addEventListener("pointermove", (e) => {
     if (!down) return;
     const hc = pos(e);
     if (!hc) return;
-    if (tool === "pen") {
-      const nd = setCell(d, hc.c, hc.r, cur);
+    if (tool === "pen" || tool === "erase") {
+      const nd = setCell(d, hc.c, hc.r, paintColor());
       if (nd !== d) { d = nd; dirty = true; draw(); } // 드래그 한 번 = 되돌리기 한 번
     } else if (tool === "select" && anchor) { sel = { c0: anchor.c, r0: anchor.r, c1: hc.c, r1: hc.r }; draw(); }
   });
-  const up = () => { down = false; anchor = null; selBtns.querySelectorAll("button").forEach((b) => ((b as HTMLButtonElement).disabled = !sel)); };
+  const up = () => { down = false; anchor = null; };
   canvas.addEventListener("pointerup", up);
   canvas.addEventListener("pointercancel", up);
 
@@ -165,10 +180,10 @@ export function openEditor(p: Pattern, part: string, o: { onSave: () => void }) 
     colors.push({ code, name: null, hex: ["#B23A48", "#E0A526", "#3E7C59", "#6B4E9B", "#222222", "#FFFFFF"][colors.length % 6] });
     cur = colors.length - 1;
     dirty = true;
+    setTool("pen");
     editColor();
   }
   function editColor() {
-    if (cur < 0) return toast("지우개 말고 색을 먼저 골라주세요.");
     const y = colors[cur];
     const code = h("input", { type: "text", value: y.code, maxLength: 6 });
     const name = h("input", { type: "text", value: y.name || "", placeholder: "예: 아이보리 #101" });
@@ -184,8 +199,6 @@ export function openEditor(p: Pattern, part: string, o: { onSave: () => void }) 
           dirty = true; dl.close(); draw();
         } } }),
         colors.length > 1 ? h("button", { class: "btn ghost", type: "button", text: "이 색 빼기", on: { click: () => {
-          // 이 색 칸은 빈칸으로, 뒤 색 인덱스는 하나씩 당긴다
-          const IDX = "0123456789abcdefghijklmnopqrstuvwxyz";
           const nd = { ...d, cells: d.cells.split("").map((ch) => { if (ch === ".") return ch; const v = IDX.indexOf(ch); return v === cur ? "." : v > cur ? IDX[v - 1] : ch; }).join("") };
           colors.splice(cur, 1); cur = Math.max(0, cur - 1); edit(nd); dl.close();
         } } }) : null,
@@ -193,28 +206,97 @@ export function openEditor(p: Pattern, part: string, o: { onSave: () => void }) 
     ]);
   }
 
-  /* ----- 불러오기 ----- */
-  function paletteFrom(samples: [number, number, number][]): Yarn[] {
-    const bins = new Map<string, { r: number; g: number; b: number; n: number }>();
-    for (const [r, g, b] of samples) {
-      const k = `${r >> 5},${g >> 5},${b >> 5}`;
-      const x = bins.get(k) || { r: 0, g: 0, b: 0, n: 0 };
-      x.r += r; x.g += g; x.b += b; x.n++;
-      bins.set(k, x);
-    }
-    const top = [...bins.values()].sort((a, b) => b.n - a.n).filter((x) => x.n / samples.length > 0.02).slice(0, 8);
-    return top.map((x, i) => ({ code: CODES[i], name: null, hex: rgbToHex(x.r / x.n, x.g / x.n, x.b / x.n) }));
+  /* ----- 설정 ----- */
+  function openSettings() {
+    const opt: DrawOpt = { ...d.opt };
+    const sections: Record<string, () => HTMLElement> = {
+      게이지: () => {
+        const st = h("input", { type: "number", min: 1, step: "0.5", value: opt.gauge ? String(opt.gauge.st) : "" });
+        const rows = h("input", { type: "number", min: 1, step: "0.5", value: opt.gauge ? String(opt.gauge.rows) : "" });
+        const upd = () => { const a = +st.value, b = +rows.value; opt.gauge = a > 0 && b > 0 ? { st: a, rows: b } : null; };
+        st.oninput = upd; rows.oninput = upd;
+        const pg = primaryGauge(p.gauges);
+        return h("div", { class: "set-sec" },
+          h("p", { class: "hint", text: "10cm 안 콧수·단수. 칸을 실제 뜨개처럼 납작하게 그려서 완성 모양을 미리 볼 수 있어요. 비우면 정사각형." }),
+          h("div", { class: "actions", style: "align-items:center" }, st, "코", rows, "단"),
+          pg ? h("button", { class: "btn ghost", type: "button", text: `도안 게이지 쓰기 (${pg.st}코 ${pg.rows}단)`, on: { click: () => { st.value = String(pg.st); rows.value = String(pg.rows); upd(); } } }) : h("p", { class: "gen", text: "진행 화면의 '게이지'에 적으면 여기서 가져올 수 있어요." }));
+      },
+      크기: () => {
+        const w = h("input", { type: "number", min: 1, max: 400, value: String(d.w) });
+        const hh = h("input", { type: "number", min: 1, max: 400, value: String(d.h) });
+        const s = h("input", { type: "number", min: 1, max: 999, value: String(d.start) });
+        return h("div", { class: "set-sec" },
+          h("div", { class: "actions", style: "align-items:center" }, h("label", {}, "콧수 ", w), h("label", {}, "단수 ", hh), h("label", {}, "시작 단 ", s)),
+          h("p", { class: "gen", text: "왼쪽 아래 기준으로 늘리고 줄여요." }),
+          h("button", { class: "btn", type: "button", text: "크기 적용", on: { click: () => { const nd = resize(d, +w.value, +hh.value); nd.start = Math.max(1, +s.value || 1); nd.opt = d.opt; edit(nd); toast("크기를 바꿨어요."); } } }),
+          h("p", { class: "gen", text: focus ? `마지막으로 누른 칸: ${focus.r + d.start}단 · ${d.w - focus.c}번째 코` : "칸을 하나 누른 뒤 아래로 그 자리에 단·코를 넣거나 뺄 수 있어요." }),
+          h("div", { class: "actions" },
+            btn("그 단 위에 단 추가", () => edit(insertRow(d, focus ? focus.r + 1 : d.h))),
+            btn("그 단 삭제", () => focus && edit(deleteRow(d, focus.r))),
+            btn("그 코 옆에 코 추가", () => edit(insertCol(d, focus ? focus.c + 1 : d.w))),
+            btn("그 코 삭제", () => focus && edit(deleteCol(d, focus.c))),
+            btn("그 단 한 줄 칠하기", () => focus && edit(fillRow(d, focus.r, cur)))));
+      },
+      반복: () => h("div", { class: "set-sec" },
+        h("p", { class: "hint", text: "아래 '선택'으로 반복 단위를 고른 뒤 선택 막대의 '반복 단위로 표시'를 누르면 빨간 상자로 보여요. '가로로/세로로 반복'은 그 단위를 끝까지 이어 그려요." }),
+        opt.rep ? h("p", { text: `지금 반복 단위: ${Math.abs(opt.rep.c1 - opt.rep.c0) + 1}코 × ${Math.abs(opt.rep.r1 - opt.rep.r0) + 1}단` }) : h("p", { class: "gen", text: "표시된 반복 단위가 없어요." }),
+        opt.rep ? h("button", { class: "btn ghost", type: "button", text: "반복 표시 지우기", on: { click: () => { opt.rep = null; } } }) : null),
+      테두리: () => toggle("색 경계선 굵게", "색이 바뀌는 곳에 굵은 선을 그려 모양이 잘 보여요.", !!opt.outline, (v) => (opt.outline = v)),
+      보기: () => {
+        const v = h("div", { class: "tabs", role: "radiogroup" },
+          ...(["grid", "stitch"] as const).map((k) => h("button", { type: "button", role: "radio", "aria-selected": String((opt.view || "grid") === k), text: k === "grid" ? "□ 격자" : "♡ 코 모양", on: { click: (e: Event) => { opt.view = k; (e.target as HTMLElement).parentElement!.querySelectorAll("button").forEach((b) => b.setAttribute("aria-selected", String(b === e.target))); } } })));
+        return h("div", { class: "set-sec" },
+          toggle("범례 보이기", "색마다 이름과 코 수를 격자 아래에 보여줘요.", !!opt.legend, (x) => (opt.legend = x)),
+          h("div", { class: "field" }, "칸 그리기", v, h("small", { text: "코 모양은 뜬 편물처럼 보여 주고, 격자는 편집할 때 보기 쉬워요." })),
+          h("button", { class: "btn", type: "button", text: "픽셀 보기 받기 (1코 = 1픽셀 PNG)", on: { click: async () => download(`${part}-픽셀.png`, await canvasBlob(pixelCanvas(d, colors, 1), "image/png")) } }),
+          h("button", { class: "btn ghost", type: "button", text: "크게 받기 (1코 = 10픽셀)", on: { click: async () => download(`${part}-격자.png`, await canvasBlob(pixelCanvas(d, colors, 10), "image/png")) } }));
+      },
+      서식: () => {
+        const b = h("select", {}, ...[5, 10].map((k) => new Option(`${k}칸마다`, String(k), false, (opt.bold || 10) === k)));
+        b.onchange = () => (opt.bold = +b.value);
+        return h("div", { class: "set-sec" }, h("label", { class: "field" }, "굵은 격자선", b));
+      },
+      번호: () => {
+        const dir = h("select", {}, new Option("오른쪽부터 (뜨개 차트 기본)", "r", false, !opt.colsFromLeft), new Option("왼쪽부터", "l", false, !!opt.colsFromLeft));
+        dir.onchange = () => (opt.colsFromLeft = dir.value === "l");
+        const ev = h("select", {}, new Option("칸 크기에 맞춰", "0", false, !opt.numEvery), ...[1, 2, 5, 10].map((k) => new Option(`${k}마다`, String(k), false, opt.numEvery === k)));
+        ev.onchange = () => (opt.numEvery = +ev.value || undefined);
+        return h("div", { class: "set-sec" }, h("label", { class: "field" }, "코 번호", dir), h("label", { class: "field" }, "번호 간격", ev));
+      },
+      불러오기: () => h("div", { class: "set-sec" },
+        h("p", { class: "hint", text: "지금 격자를 바꿔요 (되돌리기 가능)." }),
+        btn("이미지에서 불러오기", () => { dl.close(); importImage(); }),
+        btn("PDF 차트에서 불러오기", () => { dl.close(); importFromPdf(); })),
+    };
+    const pane = h("div", { class: "set-pane" });
+    const nav = h("div", { class: "set-nav", role: "tablist" });
+    const show = (k: string) => {
+      pane.innerHTML = "";
+      pane.append(sections[k]());
+      nav.querySelectorAll("button").forEach((b) => b.setAttribute("aria-selected", String(b.textContent === k)));
+    };
+    for (const k of Object.keys(sections)) nav.append(h("button", { type: "button", role: "tab", text: k, on: { click: () => show(k) } }));
+    const dl = dialog("격자 설정", [
+      h("div", { class: "set-wrap" }, nav, pane),
+      h("div", { class: "actions" },
+        h("button", { class: "btn primary", type: "button", text: "적용", on: { click: () => { edit({ ...d, opt }); dl.close(); } } }),
+        h("button", { class: "btn ghost", type: "button", text: "취소", on: { click: () => dl.close() } })),
+    ]);
+    show("게이지");
   }
-  let replace = false;
-  async function choosePalette(samples: [number, number, number][]) {
-    return new Promise<void>((res) => {
-      const dl = dialog("색 정하기", [
-        h("p", { class: "hint", text: "칸 색을 어떤 팔레트에 맞출까요?" }),
-        h("div", { class: "actions" },
-          h("button", { class: "btn primary", type: "button", text: "지금 팔레트에 맞추기", on: { click: () => { replace = false; dl.close(); } } }),
-          h("button", { class: "btn", type: "button", text: "이미지 색으로 새 팔레트", on: { click: () => { replace = true; dl.close(); } } })),
-      ], { onClose: () => { if (replace) colors = paletteFrom(samples); res(); } });
-    });
+  function toggle(label: string, help: string, on: boolean, set: (v: boolean) => void) {
+    const cb = h("input", { type: "checkbox", checked: on, on: { change: (e: Event) => set((e.target as HTMLInputElement).checked) } });
+    return h("label", { class: "field", style: "flex-direction:row;gap:8px;align-items:flex-start" }, cb, h("span", {}, label, h("small", { style: "display:block", text: help })));
+  }
+
+  /* ----- 불러오기 ----- */
+  async function importImage(file?: File) {
+    const res = await openImageImport({ w: d.w, h: d.h, start: d.start, gauge: d.opt?.gauge, colors, file });
+    if (!res) return;
+    colors = res.colors;
+    cur = Math.min(cur, colors.length - 1);
+    edit({ ...res.drawing, opt: d.opt });
+    toast(`이미지를 ${d.w}×${d.h}칸으로 바꿨어요. 틀린 칸은 직접 고쳐 주세요.`, 3600);
   }
 
   async function importFromPdf() {
@@ -223,11 +305,10 @@ export function openEditor(p: Pattern, part: string, o: { onSave: () => void }) 
     if (!pdf || !page) return toast("이 파트에 연결된 PDF 차트 쪽이 없어요. 진행 화면의 '차트 쪽 바꾸기'로 먼저 골라주세요.", 4200);
     const bmp = await chartBitmap(pdf, p.id, page);
     const c0 = chartFor(bmp.charts, d.start);
-    if (!c0) return toast(`p${page}에서 단 번호 축을 찾지 못했어요. '사진에서 불러오기'로 차트 부분을 잘라 올려주세요.`, 4200);
+    if (!c0) return toast(`p${page}에서 단 번호 축을 찾지 못했어요. '이미지에서 불러오기'로 차트 부분을 잘라 올려주세요.`, 4200);
     const ctx = bmp.canvas.getContext("2d", { willReadFrequently: true })!;
     const px = (x: number, y: number): [number, number, number] => { const v = ctx.getImageData(Math.round(x), Math.round(y), 1, 1).data; return [v[0], v[1], v[2]]; };
     const S = bmp.scale;
-    // 격자 가로 범위: 가운데 단에서 축 안쪽으로 첫 진한 선을 찾는다
     const yMid = rowY(c0, Math.round((c0.nMin + c0.nMax) / 2)) * S;
     const dark = (x: number) => { const [r, g, b] = px(x, yMid); return r + g + b < 300; };
     let gx0 = (c0.axes.length > 1 ? c0.axes[0] + 6 : c0.x0) * S, gx1 = (c0.axes.length > 1 ? c0.axes[c0.axes.length - 1] - 6 : c0.x1) * S;
@@ -254,35 +335,14 @@ export function openEditor(p: Pattern, part: string, o: { onSave: () => void }) 
       const q = [px(x, y), px(x - cw * 0.2, y), px(x + cw * 0.2, y)];
       return [0, 1, 2].map((k) => (q[0][k] + q[1][k] + q[2][k]) / 3) as [number, number, number];
     };
-    const samples: [number, number, number][] = [];
-    for (let r = 0; r < hgt; r += Math.max(1, Math.floor(hgt / 40))) for (let c = 0; c < w; c += Math.max(1, Math.floor(w / 40))) samples.push(get(c, r));
-    await choosePalette(samples);
-    edit(gridFromPixels(get, w, hgt, colors.map((y) => y.hex), start));
-    toast("PDF 차트 색으로 칸을 채웠어요. 틀린 칸은 직접 고쳐 주세요.", 3600);
-  }
-
-  function importFromPhoto() {
-    const inp = h("input", { type: "file", accept: "image/*" });
-    inp.onchange = async () => {
-      const f = inp.files?.[0];
-      if (!f) return;
-      const bmp = await createImageBitmap(f);
-      const c = document.createElement("canvas");
-      c.width = bmp.width; c.height = bmp.height;
-      const ctx = c.getContext("2d", { willReadFrequently: true })!;
-      ctx.drawImage(bmp, 0, 0);
-      const cw = c.width / d.w, ch = c.height / d.h;
-      const get = (x: number, r: number): [number, number, number] => {
-        const v = ctx.getImageData(Math.floor((x + 0.5) * cw), Math.floor((d.h - 1 - r + 0.5) * ch), 1, 1).data;
-        return [v[0], v[1], v[2]];
-      };
+    if (!colors.some((y) => y.hex)) {
       const samples: [number, number, number][] = [];
-      for (let r = 0; r < d.h; r++) for (let x = 0; x < d.w; x++) samples.push(get(x, r));
-      await choosePalette(samples);
-      edit(gridFromPixels(get, d.w, d.h, colors.map((y) => y.hex), d.start));
-      toast(`사진을 ${d.w}×${d.h}칸으로 나눠 색을 읽었어요. 사진은 차트 부분만 잘라 올리면 정확해요.`, 4200);
-    };
-    inp.click();
+      for (let r = 0; r < hgt; r += Math.max(1, Math.floor(hgt / 40))) for (let c = 0; c < w; c += Math.max(1, Math.floor(w / 40))) samples.push(get(c, r));
+      const { quantize } = await import("./drawing");
+      colors = quantize(samples, 4).map((hex, i) => ({ code: CODES[i], name: null, hex }));
+    }
+    edit({ ...gridFromPixels(get, w, hgt, colors.map((y) => y.hex), start), opt: d.opt });
+    toast("PDF 차트 색으로 칸을 채웠어요. 틀린 칸은 직접 고쳐 주세요.", 3600);
   }
 
   /* ----- 저장 ----- */

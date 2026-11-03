@@ -220,3 +220,81 @@ describe("drawing tools", () => {
     expect(g.cells).toBe("01");
   });
 });
+
+import { quantize, gridFromImage, colorCounts, cellAspect, rowsForWidth } from "../src/drawing";
+describe("image import", () => {
+  it("quantize finds the main colors, most used first", () => {
+    const px: [number, number, number][] = [...Array(60).fill([240, 238, 230]), ...Array(30).fill([15, 22, 35]), ...Array(10).fill([20, 25, 40])];
+    const pal = quantize(px, 2);
+    expect(pal).toHaveLength(2);
+    expect(parseInt(pal[0].slice(1, 3), 16)).toBeGreaterThan(200);
+  });
+  it("grid from image crop (top of image = top row)", () => {
+    const get = (_x: number, y: number): [number, number, number] => (y < 50 ? [0, 0, 0] : [255, 255, 255]);
+    const d = gridFromImage(get, { x: 0, y: 0, w: 100, h: 100 }, 2, 2, ["#ffffff", "#000000"]);
+    expect(d.cells).toBe("0011"); // 아래 단(흰) → 위 단(검정)
+    expect(colorCounts(d)).toEqual([2, 2]);
+  });
+  it("gauge aspect", () => {
+    expect(cellAspect({ w: 1, h: 1, start: 1, cells: ".", opt: { gauge: { st: 18, rows: 23 } } })).toBeCloseTo(0.783, 2);
+    expect(rowsForWidth(20, 100, 100, { st: 18, rows: 23 })).toBe(26);
+  });
+});
+
+import { compare, washChange, convertSt, findGauges, myGauge, cmToRows } from "../src/gauge";
+describe("gauge", () => {
+  it("compare & advice", () => {
+    const c = compare({ st: 18, rows: 23 }, { st: 20, rows: 23 });
+    expect(c.stOk).toBe(false);
+    expect(c.stPct).toBe(11.1);
+    expect(c.advice).toMatch(/굵게/);
+    expect(compare({ st: 18, rows: 23 }, { st: 18.2, rows: 23.3 }).advice).toBe("게이지가 맞아요.");
+  });
+  it("wash, convert, pick", () => {
+    expect(washChange({ st: 18, rows: 22 }, { st: 19, rows: 24 })).toEqual({ widthPct: -5.3, lengthPct: -8.3 });
+    expect(convertSt(110, { st: 18, rows: 23 }, { st: 20, rows: 24 })).toBe(122);
+    expect(cmToRows(10, { st: 18, rows: 23 })).toBe(23);
+    expect(myGauge({ label: "", pattern: null, before: { st: 1, rows: 1 }, after: null })).toEqual({ st: 1, rows: 1 });
+  });
+  it("finds gauges in pattern text", () => {
+    expect(findGauges("게이지: 18코 23단 메리야스뜨기 / 38코 27단 무늬뜨기 (10cm)")).toEqual([
+      { label: "메리야스뜨기", st: 18, rows: 23 }, { label: "무늬뜨기", st: 38, rows: 27 }]);
+  });
+});
+
+import { sizeOrder, resolveSizes, chartRef, localParseLines, localGoodEnough } from "../src/parse";
+describe("on-device reading", () => {
+  it("size order & numbers", () => {
+    const order = sizeOrder("사이즈 S (M) L (XL) 2XL (3XL)");
+    expect(order).toEqual(["S", "M", "L", "XL", "2XL", "3XL"]);
+    expect(resolveSizes("100 (104) 110 (114) 124 (134)코가 되도록, 겉2 (3)", "L", order)).toBe("110코가 되도록, 겉2 (3)");
+    expect(resolveSizes("5 (5) 6 (6) - (7)회", "2XL", order)).toBe("-회");
+  });
+  it("chart refs", () => {
+    expect(chartRef("16단~58단까지 [차트 S:p13 / M:p18 / L:p23]를 따라", "L")).toBe(23);
+    expect(chartRef("차트 p26 참고", "")).toBe(26);
+    expect(chartRef("겉뜨기 p2", "")).toBeNull();
+  });
+  it("parses lines across pages with chart & stitches", () => {
+    const secs = localParseLines([
+      { t: "뒷판 경사뜨기 — L, XL 사이즈", pg: 5 }, { t: "1단(RS) 110코 기초코, 겉11, DS, 턴", pg: 5 }, { t: "2단(WS) 안뜨기 (110코)", pg: 5 },
+      { t: "3단 겉뜨기", pg: 7 }, { t: "16단~58단까지 [차트 S:p13 / M:p18 / L:p23]를 따라 진행", pg: 7 },
+      { t: "소매", pg: 10 }, { t: "1단 원통으로 연결해 겉뜨기", pg: 10 },
+    ], "L");
+    expect(secs.map((s) => s.name)).toEqual(["뒷판 경사뜨기", "소매"]);
+    expect(secs[0].chart).toBe(23);
+    expect(secs[0].rows[1].stitches).toBe("110코");
+    expect(secs[0].rows[2].page).toBe(7);
+    expect(secs[1].round).toBe(true);
+    expect(localGoodEnough(secs, "").ok).toBe(true);
+    expect(localGoodEnough(secs, "3단: 1단과 동일").ok).toBe(false);
+  });
+});
+
+import { toLines } from "../src/pdfgeom";
+describe("text lines", () => {
+  it("joins same-height items left to right, drops axis numbers", () => {
+    expect(toLines([t("겉11, DS", 110, 100, 40), t("1단(RS)", 40, 100.5, 30), t("2", 5, 100), t("2단(WS)", 40, 124, 30), t("안뜨기", 110, 124, 30)]))
+      .toEqual(["1단(RS) 겉11, DS", "2단(WS) 안뜨기"]);
+  });
+});
