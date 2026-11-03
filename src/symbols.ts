@@ -196,10 +196,11 @@ export function boundaries(xs: number[], w: number): number[] {
   return out;
 }
 
-export type RowStitch = { name: string; sym: string; cells: number };
+export type RowStitch = { name: string; sym: string; cells: number; yarn?: boolean }; // yarn: 배색 칸 (name = 색 기호)
 /** 읽은 칸 → 서술 ("겉2, 안2, 2/2 LC, …"). 안면에서 뜨면 겉↔안을 바꾼다 */
 export function rowText(st: RowStitch[], ws: boolean): string {
   const label = (x: RowStitch) => {
+    if (x.yarn) return "\u0001" + x.name; // 배색: 색 기호로 묶는다
     const nm = x.name.replace(/\s+/g, " ").trim();
     if (/^겉뜨기$/.test(nm) || (!nm && /^[|ㅣ]$/.test(x.sym))) return ws ? "안" : "겉";
     if (/^안뜨기$/.test(nm) || /^(?:—|-|ㅡ)$/.test(x.sym)) return ws ? "겉" : "안";
@@ -214,7 +215,7 @@ export function rowText(st: RowStitch[], ws: boolean): string {
   let prev = "", cnt = 0;
   const flush = () => {
     if (!cnt) return;
-    parts.push(prev === "겉" || prev === "안" ? prev + cnt : cnt > 1 ? `${prev} ×${cnt}` : prev);
+    parts.push(prev.startsWith("\u0001") ? `${prev.slice(1)} ${cnt}코` : prev === "겉" || prev === "안" ? prev + cnt : cnt > 1 ? `${prev} ×${cnt}` : prev);
   };
   for (const x of st) {
     const l = label(x);

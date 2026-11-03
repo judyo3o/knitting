@@ -3,14 +3,14 @@ import { chunksOf, splitNarrative, stitchesThrough } from "./chunks";
 import { MAX_TOKENS } from "./config";
 import { callAi, canCallDirect, errCopy } from "./ai";
 import { inArtifact } from "./artifact";
-import { chartBitmap, clearBitmaps, sharpRows, drawGrid, drawPdfFull, drawPdfRows, explainStrip, hitCell, legendCanvas, sampleRowColors, yarnHex } from "./chart";
+import { cellKeyColor, chartBitmap, chartKey, clearBitmaps, labelColor, sharpRows, sizeLabelColors, sizeLineRange, drawGrid, drawPdfFull, drawPdfRows, explainStrip, hitCell, legendCanvas, sampleRowColors, yarnHex } from "./chart";
 import { getFile, putFile } from "./db";
 import { getCell, longestFloat, rowColors } from "./drawing";
 import {
   applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, spanParts, finishText, continuousKnitMs, castLabel, flexibleRow, addRowAfter, removeRow, workIn, workStart, workStop, sideOf, stepNext, stepPrev,
 } from "./model";
 import { blobB64, canvasBlob, textItems } from "./pdf";
-import { chartFor, findCharts, findLegend, LEGEND_RE, sizeRange, stitchAxis } from "./pdfgeom";
+import { chartFor, chartsForSize, findCharts, findLegend, LEGEND_RE, rowH, sizeRange, stitchAxis } from "./pdfgeom";
 import { explainCheck, explainDraft, explainHead } from "./prompts";
 import { active, commit, exportJson, importJson, load, pdfOf, removePattern, saveNow, setActive, startAutosave, state, syncRemote } from "./store";
 import { openSettings, manualHandler, openViewer } from "./dialogs";
@@ -177,6 +177,12 @@ function nowCard(p: Pattern, r: Row) {
     card.append(h("p", { class: "span-note", text: `${cl} 자체가 1단이에요. ${cl === "코줍기" ? "코를 다 주웠으면" : "코를 잡았으면"} '다음 단'을 누르고 ${nx ? `${nx.n}단(${sideOf(p, nx) === "WS" ? "안면" : "겉면"})` : "다음 단"}부터 떠요.` }));
   }
   if (fin) { const ft = finishText(p, s); if (ft) card.append(h("p", { class: "span-note fin-note", text: `✓ 완성 · ${ft}` })); }
+  // 파트 첫 단 바로 앞 단이 다른 파트에 있으면 (예: 몸통 74단 ← '앞, 뒤판 연결' 73단)
+  if (k === 0 && r.n > 1) {
+    const prevRow = p.rows.find((x) => x.s !== s && x.n === r.n - 1 && (x.ch || p.secs[x.s]?.ch) === chartPage(p, r));
+    if (prevRow) card.append(h("p", { class: "span-note" }, `${prevRow.n}단은 '${prevRow.s}' 탭에서 떠요` + (p.done[key(prevRow.s, prevRow.n)] ? " (떴어요 ✓)" : " — 아직 안 떴어요. 먼저 뜨고 오세요."),
+      p.done[key(prevRow.s, prevRow.n)] ? null : h("button", { class: "link", type: "button", text: " 그 탭으로", on: { click: () => { p.tab = prevRow.s; commit(p, false); render(); } } })));
+  }
   if (r.ln) card.append(h("p", { class: "span-note", text: r.ln }));
   // 원하는 만큼 뜨는 단: 게이지로 정한 단 수는 추정이라 직접 늘리고 줄인다
   if (flexibleRow(r)) card.append(h("div", { class: "actions flex-rows" },
@@ -282,7 +288,7 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
       cv.append(h("p", { class: "empty", text: "이 기기에 원본 PDF가 없어요. 아래 '이 기기에 PDF 다시 연결'로 골라주세요." }));
       return;
     }
-    const bmp = await chartBitmap(pdf, p.id, page);
+    const bmp = await bmpForSize(p, pdf, page, await chartBitmap(pdf, p.id, page));
     if (seq !== renderSeq) return;
     // 이 단이 차트에 없으면(고무단처럼 차트 없이 서술로만 뜨는 파트) 그냥 '차트 없음'
     if (!chartFor(bmp.charts, r.n)) {
@@ -297,11 +303,11 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
     const c = h("canvas", { "aria-label": `차트 p${page}, ${r.n}단 표시` });
     if (view.full) {
       const width = Math.max(cv.clientWidth, 320) * (view.rowPx / 22);
-      drawPdfFull(c, bmp, { n: r.n, side, round, rowPx: view.rowPx, range }, width);
+      drawPdfFull(c, bmp, { n: r.n, side, round, rowPx: view.rowPx, range, done: doneOnPage(p, page) }, width);
       cv.append(c);
       symbolTap(p, pdf, page, bmp, cv, c, { x0: 0, yTop: 0, k: width / bmp.w }, range);
     } else {
-      const vo = { n: r.n, side, round, rowPx: view.rowPx, range };
+      const vo = { n: r.n, side, round, rowPx: view.rowPx, range, done: doneOnPage(p, page) };
       const res = drawPdfRows(c, bmp, vo);
       // 먼저 빠르게 그리고, 보이는 단들만 선명하게 다시
       sharpRows(pdf, page, bmp, vo).then((hi) => { if (hi && seq === renderSeq && c.isConnected) drawPdfRows(c, bmp, vo, hi); }).catch(() => {});
@@ -372,9 +378,12 @@ function symbolTap(p: Pattern, pdf: any, page: number, bmp: any, cv: HTMLElement
     }
     // 배색 도안: 칸 색으로 어느 실인지 (그림 기호 추정은 빼고, 글자 기호가 확실하면 같이)
     if (p.colors.length >= 2 && hit.rect) {
-      const cy = cellYarn(bmp, hit.rect, p.colors);
+      // 차트에 색 KEY가 있으면 그 실제 색으로, 없으면 실 목록의 색으로
+      const key = chartKey(bmp, (await textItems(pdf, page)).items);
+      const kc = key.length ? cellKeyColor(bmp, hit.rect, key) : null;
+      const cy = kc ? { yarn: p.colors.find((x) => x.code === kc) || { code: kc, name: null, hex: null }, white: false } : cellYarn(bmp, hit.rect, p.colors);
       // 그림 기호표가 있는 흑백 차트의 흰 칸은 기호로 (배색 칸은 색이 칠해져 있다)
-      const y = cy && (!hit.entry || hit.entry.abbr || !cy.white) ? cy.yarn : null;
+      const y = cy && (kc || !hit.entry || hit.entry.abbr || !cy.white) ? cy.yarn : null;
       if (y) {
         const sym = !hit.guess && hit.name && !hit.entry?.abbr ? hit.name + abbr : !hit.guess && hit.entry?.abbr ? `${hit.entry.sym} (${hit.entry.name})` : "";
         title = `${y.code}${y.name ? " · " + y.name : ""}`;
@@ -455,12 +464,35 @@ function cellYarn(bmp: any, r: { x0: number; x1: number; y0: number; y1: number 
   return best ? { yarn: best as Pattern["colors"][number], white } : null;
 }
 
-/** 내 사이즈 차트 범위 (차트 아래 사이즈별 시작·끝 선) */
+/** 내 사이즈 차트 범위: 단마다 내 사이즈 색 선을 찾고, 없으면 차트 아래 사이즈 표시 사이 */
 async function sizeRangeOf(p: Pattern, pdf: any, page: number, bmp: any, n: number): Promise<[number, number] | null> {
   if (!p.size) return null;
   const c = chartFor(bmp.charts, n);
   if (!c) return null;
-  return sizeRange((await textItems(pdf, page)).items, c, p.size);
+  const items = (await textItems(pdf, page)).items;
+  const col = labelColor(bmp, items, c, p.size);
+  const want = p.size.toUpperCase();
+  const others = sizeLabelColors(bmp, items, c).filter((x) => !x.sizes.includes(want) && !x.sizes.includes(want.replace(/^XXL$/, "2XL"))).map((x) => x.rgb);
+  const row = col ? sizeLineRange(bmp, c, n, col, others) : null;
+  const fixed = sizeRange(items, c, p.size);
+  // 사이즈 선은 차트 아래 표시에서 안쪽으로만 들어온다 (모양 내기). 더 넓게 잡혔으면 잘못 찾은 것
+  const tol = rowH(c) * 0.7;
+  if (row && fixed && (row[0] < fixed[0] - tol || row[1] > fixed[1] + tol)) return fixed;
+  return row || fixed;
+}
+
+/** 이 차트 쪽을 쓰는 모든 파트에서 실제로 뜬 단 번호 */
+function doneOnPage(p: Pattern, page: number): Set<number> {
+  const out = new Set<number>();
+  for (const r of p.rows) if ((r.ch || p.secs[r.s]?.ch) === page && p.done[key(r.s, r.n)]) out.add(r.n);
+  return out;
+}
+
+/** 한 쪽에 사이즈별 차트가 여럿이면 내 사이즈 차트만 남긴 그림 정보 */
+async function bmpForSize(p: Pattern, pdf: any, page: number, bmp: any) {
+  if (!p.size || bmp.charts.length < 2) return bmp;
+  const charts = chartsForSize((await textItems(pdf, page)).items, bmp.charts, p.size);
+  return charts.length === bmp.charts.length ? bmp : { ...bmp, charts };
 }
 
 function scrollStart(cv: HTMLElement, right: boolean, startPx: number | null = null) {
@@ -735,9 +767,10 @@ function chartRowText(p: Pattern, r: Row): Promise<string | null> {
       const pdf = await pdfOf(p);
       if (!pdf) return null;
       if (!p.legend || staleLegend(p)) await detectLegend(p);
-      const bmp = await chartBitmap(pdf, p.id, page);
+      const bmp = await bmpForSize(p, pdf, page, await chartBitmap(pdf, p.id, page));
       const { readRow, rowText } = await import("./symbolid");
-      const st = await readRow(p, pdf, page, bmp, r.n, ws, await sizeRangeOf(p, pdf, page, bmp, r.n));
+      const key = p.colors.length >= 2 ? chartKey(bmp, (await textItems(pdf, page)).items) : [];
+      const st = await readRow(p, pdf, page, bmp, r.n, ws, await sizeRangeOf(p, pdf, page, bmp, r.n), key);
       return st && st.length ? rowText(st, ws) : null;
     })();
     chartTextCache.set(ck, c);

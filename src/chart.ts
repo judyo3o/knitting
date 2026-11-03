@@ -1,5 +1,5 @@
 /** 차트 표시 (§1-4 ③, §3-1) — PDF 차트 비트맵 / 직접 그린 배색 격자 */
-import { chartFor, findCharts, rowH, rowY, type Chart } from "./pdfgeom";
+import { chartFor, findCharts, rowH, rowY, sizeList, type Chart } from "./pdfgeom";
 import { MAX_PIXELS, renderPage, renderRegion, textItems, pageSize, type Pdf } from "./pdf";
 import { cellAspect, dominantColors, getCell, hasRow, rowIndex } from "./drawing";
 import type { Drawing, Side, Yarn } from "./types";
@@ -34,7 +34,7 @@ export function chartBitmap(pdf: Pdf, pdfKey: string, page: number): Promise<Bit
 }
 export const clearBitmaps = () => bmpCache.clear();
 
-export type ViewOpts = { n: number; side: Side; round: boolean; rowPx: number; below?: number; above?: number; range?: [number, number] | null }; // range: 내 사이즈 차트 범위 (pt)
+export type ViewOpts = { n: number; side: Side; round: boolean; rowPx: number; below?: number; above?: number; range?: [number, number] | null; done?: Set<number> }; // done: 실제로 뜬 단(없으면 지금 단 아래 전부) // range: 내 사이즈 차트 범위 (pt)
 
 /** 화살표가 단 번호를 가리지 않게: 바깥 경계에서 축 숫자 너머까지 (pt) */
 /** 왼쪽·오른쪽 축 숫자 너머 (축이 그쪽에 없으면 작게) */
@@ -101,6 +101,7 @@ function overlay(ctx: CanvasRenderingContext2D, w: number, band: (n: number) => 
   // 내 사이즈 범위가 있으면 띠·음영은 그 안에만, 바깥은 흐리게
   const L = xr ? Math.max(0, xr[0]) : 0, R = xr ? Math.min(w, xr[1]) : w;
   for (let n = Math.max(1, fromN); n < o.n; n++) {
+    if (o.done && !o.done.has(n)) continue; // 다른 파트 단(예: 앞·뒤판 연결 73단)은 뜬 것만 음영
     const [y0, y1] = band(n);
     ctx.fillStyle = DONE;
     ctx.fillRect(L, y0, R - L, y1 - y0);
@@ -370,4 +371,100 @@ export async function sharpRows(pdf: Pdf, page: number, bmp: Bitmap, o: ViewOpts
   if (want <= bmp.scale * 1.05) return null; // 이미 충분히 선명
   const canvas = await renderRegion(pdf, page, want, yTop, yBot);
   return { canvas, scale: canvas.width / bmp.w, y0: yTop };
+}
+
+type RGB = [number, number, number];
+const px = (bmp: Bitmap, x0: number, y0: number, w: number, h: number) =>
+  bmp.canvas.getContext("2d", { willReadFrequently: true })!.getImageData(Math.max(0, Math.round(x0)), Math.max(0, Math.round(y0)), Math.max(1, Math.round(w)), Math.max(1, Math.round(h)));
+
+/** 차트 아래 내 사이즈 이름("2/3XL")의 글자 색 — 그 사이즈 선도 같은 색으로 그려져 있다 */
+type TI = { str: string; x: number; y: number; w: number; h: number };
+/** 차트 아래 사이즈 이름 글자들 */
+function sizeLabels(items: TI[], c: Chart): TI[] {
+  const h = rowH(c), yBot = rowY(c, c.nMin) + h / 2;
+  return items.filter((i) => i.y > yBot && i.y < yBot + h * 5 && i.x >= c.x0 - h * 2 && i.x <= c.x1 + h * 2 && /^\s*[\dA-Z/]+\s*$/i.test(i.str) && sizeList(i.str.replace(/\s+/g, "")).length > 0);
+}
+/** 사이즈 이름마다 글자 색 (같은 색 선이 그 사이즈 경계) */
+export function sizeLabelColors(bmp: Bitmap, items: TI[], c: Chart): { sizes: string[]; rgb: RGB }[] {
+  const out: { sizes: string[]; rgb: RGB }[] = [];
+  for (const lab of sizeLabels(items, c)) { const rgb = textColor(bmp, lab); if (rgb) out.push({ sizes: sizeList(lab.str.replace(/\s+/g, "")), rgb }); }
+  return out;
+}
+export function labelColor(bmp: Bitmap, items: TI[], c: Chart, size: string): RGB | null {
+  const want = sizeList(size)[0];
+  if (!want) return null;
+  const lab = sizeLabels(items, c).find((i) => sizeList(i.str.replace(/\s+/g, "")).includes(want));
+  return lab ? textColor(bmp, lab) : null;
+}
+function textColor(bmp: Bitmap, lab: TI): RGB | null {
+  const S = bmp.scale;
+  const d = px(bmp, lab.x * S, (lab.y - lab.h) * S, lab.w * S, lab.h * S).data;
+  let r = 0, g = 0, b = 0, n = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const sat = Math.max(d[i], d[i + 1], d[i + 2]) - Math.min(d[i], d[i + 1], d[i + 2]);
+    if (sat > 50) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
+  }
+  return n >= 3 ? [r / n, g / n, b / n] : null;
+}
+
+/** 이 단에서 그 색 세로선들의 위치 → [왼쪽, 오른쪽] (pt). 사이즈 선이 단마다 계단처럼 바뀌는 차트용 */
+export function sizeLineRange(bmp: Bitmap, c: Chart, n: number, col: RGB, others: RGB[] = []): [number, number] | null {
+  const S = bmp.scale, h = rowH(c), cy = rowY(c, n);
+  const x0 = Math.max(0, (c.x0 - h * 2) * S), x1 = Math.min(bmp.canvas.width, (c.x1 + h * 2) * S);
+  const ys = [-0.22, 0, 0.22].map((f) => Math.round((cy + h * f) * S));
+  const rows = ys.map((y) => px(bmp, x0, y, x1 - x0, 1).data);
+  const dist = (d: Uint8ClampedArray, i: number, c2: RGB) => (d[i] - c2[0]) ** 2 + (d[i + 1] - c2[1]) ** 2 + (d[i + 2] - c2[2]) ** 2;
+  // 내 사이즈 색에 가깝고, 다른 사이즈 색보다 내 색에 더 가까운 점만 (보라 2/3XL과 분홍 4/5XL처럼 비슷한 색 구분)
+  // 선 가장자리가 바탕색과 섞인 점(분홍+진회색 → 보랏빛)은 빼려고 아주 가까운 색만
+  const near = (d: Uint8ClampedArray, i: number) => { const m = dist(d, i, col); return m < 45 * 45 && others.every((o) => dist(d, i, o) > m * 2); };
+  const hits: number[] = [];
+  // 다른 사이즈 선의 가장자리(바탕과 섞여 보랏빛이 된 점)는 빼려고: 바로 옆에 다른 사이즈 색이 있으면 아님
+  const besideOther = (d: Uint8ClampedArray, x: number) => { for (let dx = -2; dx <= 2; dx++) { const i = (x + dx) * 4; if (i >= 0 && i < d.length && others.some((o) => dist(d, i, o) < 40 * 40)) return true; } return false; };
+  for (let x = 0; x < x1 - x0; x++) if (rows.filter((d) => near(d, x * 4) && !besideOther(d, x)).length >= 2) hits.push(x);
+  const cl: number[][] = [];
+  for (const x of hits) { const l = cl[cl.length - 1]; if (l && x - l[l.length - 1] <= 2) l.push(x); else cl.push([x]); }
+  if (cl.length < 2) return null;
+  const cx = cl.map((l) => (x0 + (l[0] + l[l.length - 1]) / 2) / S);
+  return [Math.min(...cx), Math.max(...cx)];
+}
+
+/** 색 KEY("■ = Contrast A", "■ = MC"): 글자 왼쪽 색 칸의 실제 색 → 기호 */
+export function chartKey(bmp: Bitmap, items: TI[]): { code: string; rgb: RGB }[] {
+  const S = bmp.scale;
+  const out: { code: string; rgb: RGB }[] = [];
+  const eqs = items.filter((i) => /^\s*=/.test(i.str));
+  for (const eq of eqs) {
+    const line = items.filter((i) => Math.abs(i.y - eq.y) < eq.h * 0.5 && i.x >= eq.x - 1 && i.x < eq.x + 120).sort((a, b) => a.x - b.x).map((i) => i.str).join(" ");
+    const m = line.match(/^\s*=\s*(?:contrast|colou?r|col\.?|shade|yarn)?\s*(MC|CC\d?|[A-Z]\d?)\b/i);
+    if (!m) continue;
+    // 같은 줄 왼쪽의 색 칸: 흰색이 아닌 구간의 가운데 색
+    const y = Math.round((eq.y - eq.h * 0.4) * S);
+    const xa = Math.round((eq.x - eq.h * 2.2) * S), xb = Math.round((eq.x - 0.5) * S);
+    const d = px(bmp, xa, y, xb - xa, 1).data;
+    const ink: number[] = [];
+    for (let x = 0; x < xb - xa; x++) if (d[x * 4] + d[x * 4 + 1] + d[x * 4 + 2] < 735) ink.push(x);
+    if (ink.length < 2) { if (ink.length === 0) out.push({ code: m[1].toUpperCase(), rgb: [255, 255, 255] }); continue; }
+    // 색 칸 테두리 사이 가운데 (흰 칸은 안쪽이 흰색이라 테두리만 잉크로 잡힌다)
+    const mid = Math.round((ink[0] + ink[ink.length - 1]) / 2);
+    const a = Math.max(ink[0] + 1, mid - 1), b = Math.min(ink[ink.length - 1] - 1, mid + 1);
+    let r = 0, g = 0, bb = 0, n = 0;
+    for (let x = a; x <= b; x++) { r += d[x * 4]; g += d[x * 4 + 1]; bb += d[x * 4 + 2]; n++; }
+    out.push({ code: m[1].toUpperCase(), rgb: n ? [r / n, g / n, bb / n] : [d[mid * 4], d[mid * 4 + 1], d[mid * 4 + 2]] });
+  }
+  return out.length >= 2 ? out : [];
+}
+
+/** 칸 가운데 색 → 가장 가까운 KEY 기호 */
+export function cellKeyColor(bmp: Bitmap, r: { x0: number; x1: number; y0: number; y1: number }, key: { code: string; rgb: RGB }[]): string | null {
+  const S = bmp.scale, w = r.x1 - r.x0, hh = r.y1 - r.y0;
+  const d = px(bmp, (r.x0 + w * 0.25) * S, (r.y0 + hh * 0.25) * S, w * 0.5 * S, hh * 0.5 * S).data;
+  // 가운데 점들의 밝기 중앙값 색 (격자선·번진 가장자리에 덜 흔들리게)
+  const pts: [number, number, number][] = [];
+  for (let i = 0; i < d.length; i += 4) pts.push([d[i], d[i + 1], d[i + 2]]);
+  if (!pts.length) return null;
+  pts.sort((a, b) => a[0] + a[1] + a[2] - (b[0] + b[1] + b[2]));
+  const [R, G, B] = pts[Math.floor(pts.length / 2)];
+  let best: string | null = null, bd = Infinity;
+  for (const k of key) { const dd = (R - k.rgb[0]) ** 2 + (G - k.rgb[1]) ** 2 + (B - k.rgb[2]) ** 2; if (dd < bd) { bd = dd; best = k.code; } }
+  return best;
 }

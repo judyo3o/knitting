@@ -341,3 +341,32 @@ export function sizeRange(items: TItem[], c: Chart, size: string): [number, numb
   const gr = right.length ? Math.min(...right) - rowH(c) * 0.8 : c.x1;
   return mine[0] > mid ? [gl, mine[0]] : [mine[0], gr];
 }
+
+/** 사이즈 이름 목록 풀기: "XL/2/3XL/4/5XL" → XL, 2XL, 3XL, 4XL, 5XL · "XS/S/M/L" → XS, S, M, L */
+export function sizeList(text: string): string[] {
+  const toks = text.toUpperCase().replace(/\s+/g, "").split("/").filter(Boolean);
+  const out: string[] = [];
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i];
+    if (/^\d$/.test(t) && /^\d?X+L$/.test(toks[i + 1] || "")) out.push(t + "XL");
+    else if (/^(?:\d?XL|XXXL|XXL|XS|S|M|L)$/.test(t)) out.push(t.replace(/^XXXL$/, "3XL").replace(/^XXL$/, "2XL"));
+  }
+  return out;
+}
+
+/** 차트 제목("CHART II BACK - XL/2/3XL/4/5XL")에 적힌 사이즈: 차트 위쪽, 가로로 겹치는 글자에서 */
+export function chartSizes(items: TItem[], c: Chart): string[] {
+  const top = rowY(c, c.nMax) - rowH(c) / 2;
+  const near = items.filter((i) => i.y < top + 2 && i.y > top - 140 && i.x + i.w > c.x0 - 40 && i.x < c.x1);
+  const best = near.filter((i) => /(?:^|[\s/])(?:\d?XL|XS|S|M|L)(?:$|[\s/])/i.test(i.str) && /\//.test(i.str)).sort((a, b) => b.y - a.y)[0];
+  return best ? sizeList(best.str.replace(/^.*?([\dA-Z/]*\/[\dA-Z/]*).*$/i, "$1")) : [];
+}
+
+/** 한 쪽에 사이즈별 차트가 여럿이면 내 사이즈 차트만 (제목에 사이즈가 없는 차트는 그대로) */
+export function chartsForSize(items: TItem[], charts: Chart[], size: string): Chart[] {
+  if (!size || charts.length < 2) return charts;
+  const want = sizeList(size)[0] || size.toUpperCase();
+  const tagged = charts.map((c) => ({ c, s: chartSizes(items, c) }));
+  if (!tagged.some((t) => t.s.includes(want))) return charts;
+  return tagged.filter((t) => !t.s.length || t.s.includes(want)).map((t) => t.c);
+}

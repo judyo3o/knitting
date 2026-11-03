@@ -1,5 +1,5 @@
 /** 차트에서 누른 칸의 기호 → 기법 이름 (기기에서) */
-import type { Bitmap } from "./chart";
+import { cellKeyColor, type Bitmap } from "./chart";
 import { renderPage, renderRegion, textItems, type Pdf } from "./pdf";
 import { rowH, rowY, stitchAxis, type Chart } from "./pdfgeom";
 import { rowText, type RowStitch } from "./symbols";
@@ -251,7 +251,11 @@ function rowCtx(pdf: Pdf, page: number, bmp: Bitmap, c: Chart, n: number): Promi
     // 격자: 이 단 위아래 몇 단에 걸쳐 찾는다
     const yA = Math.max(rowY(c, Math.min(c.nMax, n + 6)) - h / 2, rowY(c, c.nMax) - h / 2) * S;
     const yB = Math.min(rowY(c, Math.max(c.nMin, n - 6)) + h / 2, rowY(c, c.nMin) + h / 2) * S;
-    const lat = gridLattice(dark, c.x0 * S, c.x1 * S, yA, yB);
+    // 격자선은 가는 선: 좌우 몇 점보다 확실히 진해야 한다 (배색 차트의 넓은 진한 칸 바탕을 선으로 보지 않게)
+    const lum = (px: number, py: number) => { const i = (Math.round(py - OY) * img.width + Math.round(px)) * 4; return img.data[i] + img.data[i + 1] + img.data[i + 2]; };
+    const gap = Math.max(2, Math.round(S * 0.9));
+    const thinLine = (px: number, py: number) => dark(px, py) && lum(px, py) < Math.min(lum(px - gap, py), lum(px + gap, py)) - 20;
+    const lat = gridLattice(thinLine, c.x0 * S, c.x1 * S, yA, yB);
     // 칸 경계는 실제로 찾은 격자선 위치로 (너비×번호로 계산하면 칸이 많을 때 오차가 쌓인다)
     const B = lat ? boundaries(lat.xs, lat.w) : [];
     return { h, yTop, S, OY, img, dark, lat, B, M: B.length - 1 };
@@ -285,9 +289,21 @@ function cellExists(R: RowCtx, k: number): boolean {
  * 이 단에 없는 칸(모양 낸 가장자리·경사뜨기로 안 뜨는 곳 — 위아래 격자선이 없음)은 건너뛴다.
  * 결과는 차트(겉면) 기호 그대로. 안면 뜨기 변환은 rowText에서.
  */
-export async function readRow(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, n: number, fromLeft: boolean, range: [number, number] | null = null): Promise<RowStitch[] | null> {
+export async function readRow(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, n: number, fromLeft: boolean, range: [number, number] | null = null, key: { code: string; rgb: [number, number, number] }[] = []): Promise<RowStitch[] | null> {
   const c = bmp.charts.find((ch) => n >= ch.nMin - 1 && n <= ch.nMax + 1);
   if (!c) return null;
+  // 배색 차트 + 내 사이즈 범위: 칸은 정사각형이라(단 높이 = 칸 너비) 범위를 단 높이로 나눠 칸을 정한다
+  // (진한 색 칸 바탕 때문에 격자선 찾기가 흔들려서)
+  if (key.length && range) {
+    const hh = rowH(c), yT = rowY(c, n) - hh / 2;
+    const cnt = Math.round((range[1] - range[0]) / hh);
+    if (cnt >= 1) {
+      const cw = (range[1] - range[0]) / cnt;
+      const order = [...Array(cnt).keys()];
+      if (!fromLeft) order.reverse();
+      return order.map((i) => ({ name: cellKeyColor(bmp, { x0: range[0] + i * cw, x1: range[0] + (i + 1) * cw, y0: yT, y1: yT + hh }, key) || "?", sym: "", cells: 1, yarn: true }));
+    }
+  }
   const R = await rowCtx(pdf, page, bmp, c, n);
   if (!R.lat || R.M < 2) return null;
   const { B, M, S, h, yTop, dark } = R;
@@ -313,6 +329,12 @@ export async function readRow(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, n
   for (const k of order) {
     if (seen.has(k)) continue;
     if ((!inSpan(k) && (range || !cellHasMark(R, k, items, c.axes))) || arrowIn(k) || !exists(k)) { seen.add(k); continue; } // 코 번호 밖이라도 감아코처럼 표시가 있으면 읽는다
+    // 배색 차트(색 KEY가 있음): 칸 색 → 실 기호
+    if (key.length) {
+      seen.add(k);
+      const code = cellKeyColor(bmp, { x0: B[k] / S, x1: B[k + 1] / S, y0: yTop, y1: yTop + h }, key);
+      if (code) { out.push({ name: code, sym: code, cells: 1, yarn: true }); continue; }
+    }
     const hit = await identify(p, pdf, page, bmp, (B[k] + B[k + 1]) / 2 / S, yMid, range);
     let cells = 1;
     if (hit?.rect) {

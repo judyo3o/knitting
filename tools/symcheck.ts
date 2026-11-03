@@ -126,3 +126,24 @@ import { newPattern } from "../src/model";
   for (const v of vs) show(`코 ${v}`, await identify(p, pdf, page, bmp, ax.a + ax.b * v, rowY(c, n)));
   return out;
 };
+
+/** 사이즈 선 점검: 라벨 색, 단마다 범위, 칸 수 */
+(window as any).sizedbg = async (b64: string, page: number, size: string, rows: number[]) => {
+  const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  const pdf = await openPdf(new Blob([u]));
+  const bmp = await chartBitmap(pdf, "sz", page);
+  const items = (await textItems(pdf, page)).items;
+  const { chartsForSize, sizeRange } = await import("../src/pdfgeom");
+  const { labelColor, sizeLabelColors, sizeLineRange, chartKey } = await import("../src/chart");
+  const charts = chartsForSize(items, bmp.charts, size);
+  const out: string[] = [`charts ${bmp.charts.length} → ${charts.length}`, "key " + JSON.stringify(chartKey(bmp, items).map((k) => [k.code, k.rgb.map(Math.round)]))];
+  for (const n of rows) {
+    const c = chartFor(charts, n)!;
+    const col = labelColor(bmp, items, c, size);
+    const all = sizeLabelColors(bmp, items, c);
+    const others = all.filter((x) => !x.sizes.includes(size)).map((x) => x.rgb);
+    const rr = col ? sizeLineRange(bmp, c, n, col, others) : null;
+    out.push(`${n}: col ${col?.map(Math.round)} all ${JSON.stringify(all.map((x) => [x.sizes.join("/"), x.rgb.map(Math.round)]))} row ${rr?.map((v) => v.toFixed(1))} static ${sizeRange(items, c, size)?.map((v) => v.toFixed(1))} chart x ${c.x0.toFixed(1)}-${c.x1.toFixed(1)}`);
+  }
+  return out;
+};
