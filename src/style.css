@@ -448,8 +448,8 @@ select,input[type=text],input[type=number],input[type=password],textarea{border-
 .ed-tools .btn{max-width:none;border:0;background:transparent;border-radius:11px;padding:11px 4px}
 .ed-tools .btn[aria-pressed=true]{background:var(--lav-2);font-weight:600}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .tabs,:root:not([data-theme="light"]) .ed-tools{background:#24222A}}
-/* 태블릿 가로 (1j): 왼쪽 차트 크게, 오른쪽 지금 단 */
-@media (min-width:1000px){
+/* 태블릿 가로 (1j): 왼쪽 차트 크게, 오른쪽 지금 단 — 손가락으로 쓰는 태블릿에서만 (PC는 위아래 배치가 보기 편함) */
+@media (min-width:1000px) and (pointer:coarse){
   .now{display:grid;grid-template-columns:minmax(0,1fr) 380px;column-gap:22px;row-gap:12px;align-items:start}
   .now > *{grid-column:2;min-width:0}
   .now > .chart-col{grid-column:1;grid-row:1 / span 40}
