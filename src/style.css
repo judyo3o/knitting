@@ -267,3 +267,5 @@ details.sheet>summary::after{content:" ▾";color:var(--ink-2)}
 .work{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}
 .work-clock{font-family:var(--mono);font-size:.82rem;color:var(--ink-2)}
 .btn.work-on{background:#E83E8C;color:#fff;border-color:#E83E8C}
+.prog-col{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.prog-col .work{justify-content:flex-end}

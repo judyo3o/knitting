@@ -636,3 +636,36 @@ describe("원하는 만큼 뜨는 단 늘리고 줄이기", () => {
     expect(p.done["a#5"]).toBe(9);
   });
 });
+
+describe("타이머로 쉬지 않고 뜬 시간", () => {
+  it("10분 안에 다시 시작한 구간은 이어서, 그보다 길게 쉬면 끊는다", async () => {
+    const { newPattern, continuousKnitMs, workStart, workStop } = await import("../src/model");
+    const p = newPattern({ id: "x", name: "x" });
+    const M = 60000, t0 = 100 * M;
+    workStart(p, t0); workStop(p, t0 + 30 * M);            // 30분 → 스트레칭 알림에서 멈춤
+    workStart(p, t0 + 33 * M);                              // 3분 쉬고 다시
+    expect(continuousKnitMs(p, t0 + 63 * M) / M).toBe(60);  // 이어서 60분
+    workStop(p, t0 + 63 * M);
+    workStart(p, t0 + 90 * M);                              // 27분 쉼 → 새로
+    expect(continuousKnitMs(p, t0 + 100 * M) / M).toBe(10);
+    workStop(p, t0 + 100 * M);
+    expect(continuousKnitMs(p, t0 + 125 * M)).toBe(0);      // 멈추고 25분 지남
+  });
+});
+
+describe("약어표 기호표", () => {
+  it("여러 단의 '약어 = 뜻'을 항목마다, 이어지는 줄은 같은 단 앞 항목에", async () => {
+    const { legendEntries, matchToken } = await import("../src/symbols");
+    const I = (str: string, x: number, y: number, w = 60) => ({ str, x, y, w, h: 9 });
+    const items = [
+      I("Alt = Alternate(ing)", 40, 112, 90), I("P = Purl", 200, 112, 40), I("Ssk = Slip next", 360, 112, 70),
+      I("Beg = Begin(ning)", 40, 123, 80), I("P2tog = Purl next", 200, 123, 80), I("2 stitches knitwise", 360, 123, 90),
+      I("K2tog = Knit next", 40, 134, 80), I("2 stitches together", 200, 134, 90), I("one at a time.", 360, 134, 70),
+    ];
+    const e = legendEntries(items as any, { x0: 0, y0: 100, x1: 500, y1: 140 });
+    expect(e.map((x) => x.sym)).toEqual(["Alt", "P", "Ssk", "Beg", "P2tog", "K2tog"]);
+    expect(e.find((x) => x.sym === "Ssk")!.name).toBe("Slip next 2 stitches knitwise one at a time.");
+    expect(e.find((x) => x.sym === "P2tog")!.name).toBe("Purl next 2 stitches together");
+    expect(matchToken("k2tog", e)!.sym).toBe("K2tog");
+  });
+});

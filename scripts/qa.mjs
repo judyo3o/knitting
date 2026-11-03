@@ -464,14 +464,31 @@ await step("단 안 적고 이동 → 그 파트 첫 단", async () => {
   return `${target} ${now}단`;
 });
 await step("뜨개 시작·중지", async () => {
-  await T("#meta button:has-text('시작')").click();
-  await T("#meta .work-clock").waitFor();
+  await T(".now .work button:has-text('시작')").click();
+  await T(".now .work-clock").waitFor();
   await page.waitForTimeout(1200);
-  const t = await txt("#meta .work-clock");
+  const t = await txt(".now .work-clock");
   ok(/뜨는 중 0:00:0[1-9]/.test(t), "시계가 안 감: " + t);
-  await T("#meta button:has-text('중지')").click();
-  ok(await T("#meta button:has-text('시작')").count(), "중지 안 됨");
+  await T(".now .work button:has-text('중지')").click();
+  ok(await T(".now .work button:has-text('시작')").count(), "중지 안 됨");
   return t;
+});
+await step("스트레칭 알림 → 타이머 자동 정지 → 다시 시작", async () => {
+  await page.evaluate(async () => {
+    const store = await import("/src/store.ts");
+    const p = store.active();
+    p.work = { on: Date.now() - 31 * 60000, spans: [] };
+    store.commit(p, false);
+    window.__app.render();
+  });
+  await T(".bar-next, #nextBtn, button:has-text('다음 단')").first().click();
+  await T(".stretch").waitFor({ timeout: 5000 });
+  ok(await T(".now .work button:has-text('시작')").count(), "타이머가 안 멈춤");
+  await T(".stretch button:has-text('다시 시작')").click();
+  ok(await T(".now .work button:has-text('중지')").count(), "다시 시작 안 됨");
+  await T(".now .work button:has-text('중지')").click();
+  await T("button:has-text('이전 단')").first().click();
+  return "멈춤 → 다시 시작 ✓";
 });
 await step("진행 기록 지우기", async () => {
   await T("summary:has-text('진행 기록')").click();

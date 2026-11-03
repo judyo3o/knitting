@@ -105,9 +105,10 @@ function renderMeta(p: Pattern) {
     m.append(
       h("span", { text: state.lastSaved ? `마지막 저장 ${fmtSmart(state.lastSaved)} · 10분마다 자동` : "기기에 바로 저장돼요 · 10분마다 백업" }),
       h("button", { class: "btn ghost", type: "button", text: "지금 저장", on: { click: async () => { await saveNow(); renderMeta(p); toast("저장했어요."); } } }),
-      workButtons(p),
     );
 }
+
+const refreshWork = (p: Pattern) => document.querySelector(".work")?.replaceWith(workButtons(p));
 
 /** 뜨개 시작·중지: 켜 둔 동안만 뜬 시간으로 센다 (페이스·스트레칭 알림) */
 let workTick: number | undefined;
@@ -121,10 +122,10 @@ function workButtons(p: Pattern) {
   tick();
   if (on) workTick = window.setInterval(() => { if (!clock.isConnected) return clearInterval(workTick); tick(); if (Date.now() % 30000 < 1000) stretchReminder(p); }, 1000);
   const b = h("button", { class: "btn " + (on ? "work-on" : "primary"), type: "button", text: on ? "⏸ 중지" : "▶ 시작", "aria-pressed": String(on), on: { click: () => {
-    if (on) { workStop(p); stretchShown = 0; toast("중지했어요. 쉰 시간은 페이스에서 빠져요."); }
+    if (on) { workStop(p); toast("중지했어요. 쉰 시간은 페이스에서 빠져요."); }
     else { workStart(p); toast("시작! 켜 둔 동안만 뜬 시간으로 셀게요."); }
     commit(p);
-    renderMeta(p);
+    refreshWork(p);
   } } });
   return h("span", { class: "work" }, b, clock);
 }
@@ -158,7 +159,7 @@ function nowCard(p: Pattern, r: Row) {
         r.castOn ? null : h("span", { class: "chip dir", text: directionText(p, r) }),
         fin && h("span", { class: "chip fin", text: "이 파트 완료 ✓" }),
       ),
-      h("span", { class: "prog", text: `파트 ${k + 1}/${list.length}` }),
+      h("div", { class: "prog-col" }, h("span", { class: "prog", text: `파트 ${k + 1}/${list.length}` }), p.example ? null : workButtons(p)),
     ),
     h("div", { class: "rowno" }, h("b", { text: String(r.n) }), h("span", { class: "unit", text: "단" }), h("span", { class: "st", text: r.st || "" })),
   );
@@ -369,6 +370,17 @@ function symbolTap(p: Pattern, pdf: any, page: number, bmp: any, cv: HTMLElement
       where2 = `${where} · 차트 기호는 ${hit.name.trim()}(안면이라 반대로)`;
       title = real;
     }
+    // 배색 도안: 칸 색으로 어느 실인지 (그림 기호 추정은 빼고, 글자 기호가 확실하면 같이)
+    if (p.colors.length >= 2 && hit.rect) {
+      const cy = cellYarn(bmp, hit.rect, p.colors);
+      // 그림 기호표가 있는 흑백 차트의 흰 칸은 기호로 (배색 칸은 색이 칠해져 있다)
+      const y = cy && (!hit.entry || hit.entry.abbr || !cy.white) ? cy.yarn : null;
+      if (y) {
+        const sym = !hit.guess && hit.name && !hit.entry?.abbr ? hit.name + abbr : !hit.guess && hit.entry?.abbr ? `${hit.entry.sym} (${hit.entry.name})` : "";
+        title = `${y.code}${y.name ? " · " + y.name : ""}`;
+        where2 = where + (sym ? ` · 기호: ${sym}` : "");
+      }
+    }
     // 코잡기 단(예: "코잡기가 1단")의 칸은 기호가 아니라 코잡기
     if (rowObj.castOn) { const cl = castLabel(rowObj as Row); title = cl; where2 = `${hit.n}단 · ${cl === "코줍기" ? "코를 줍는" : "코를 잡는"} 것 자체가 이 단이에요`; }
     showPop(cv, e.clientX, e.clientY, title, where2, box, null, { x: cx, y: cy }, hit.name ? null : hit.img);
@@ -420,6 +432,27 @@ function highlightLegend(entry: { area: { x0: number; y0: number; x1: number; y1
     const k = r.height / lv.canvas.height;
     pane.scrollTop += r.top - pr.top + y0 * k - pane.clientHeight / 3;
   }
+}
+
+/** 차트 칸의 색 → 가장 가까운 실 (칸 안쪽 가운데만 평균, 격자선 빼고) */
+function cellYarn(bmp: any, r: { x0: number; x1: number; y0: number; y1: number }, colors: Pattern["colors"]) {
+  const S = bmp.scale, w = r.x1 - r.x0, hh = r.y1 - r.y0;
+  const x = Math.round((r.x0 + w * 0.3) * S), y = Math.round((r.y0 + hh * 0.3) * S);
+  const W = Math.max(1, Math.round(w * 0.4 * S)), H = Math.max(1, Math.round(hh * 0.4 * S));
+  const d = bmp.canvas.getContext("2d", { willReadFrequently: true }).getImageData(x, y, W, H).data;
+  let R = 0, G = 0, B = 0, n = 0;
+  for (let i = 0; i < d.length; i += 4) { R += d[i]; G += d[i + 1]; B += d[i + 2]; n++; }
+  if (!n) return null;
+  R /= n; G /= n; B /= n;
+  const white = R > 238 && G > 238 && B > 238;
+  let best: Pattern["colors"][number] | null = null, bd = Infinity;
+  colors.forEach((c, i) => {
+    const hx = yarnHex(c, i).replace("#", "");
+    const cr = parseInt(hx.slice(0, 2), 16), cg = parseInt(hx.slice(2, 4), 16), cb = parseInt(hx.slice(4, 6), 16);
+    const dd = (R - cr) ** 2 * 0.3 + (G - cg) ** 2 * 0.59 + (B - cb) ** 2 * 0.11;
+    if (dd < bd) { bd = dd; best = c; }
+  });
+  return best ? { yarn: best as Pattern["colors"][number], white } : null;
 }
 
 /** 내 사이즈 차트 범위 (차트 아래 사이즈별 시작·끝 선) */
@@ -918,15 +951,23 @@ function stretchReminder(p: Pattern) {
   stretchShown = step;
   const min = Math.round(ms / 60000);
   const long = ms >= 2 * 3600000; // 2시간 넘으면 스트레칭이 아니라 쉬기
+  // 알림이 뜨면 타이머는 멈춘다 (쉬는 시간은 뜬 시간에서 빠지게)
+  const wasOn = !!p.work?.on;
+  if (wasOn) { workStop(p); commit(p); refreshWork(p); }
+  const resume = () => { box.remove(); if (wasOn && !p.work?.on) { workStart(p); commit(p); refreshWork(p); toast("다시 시작했어요."); } };
   const box = h("div", { class: "stretch" + (long ? " rest" : ""), role: "status" },
     h("b", { text: long ? `${Math.floor(min / 60)}시간 ${min % 60}분째 뜨고 있어요. 이제 쉬다 오세요` : `${min}분째 뜨고 있어요` }),
     h("span", { text: long
       ? "손과 눈이 많이 지쳤을 거예요. 일어나서 물 한 잔 마시고 15분쯤 쉬었다 와요. 지금 단은 그대로 저장돼 있어요 ☕"
       : "손목을 돌리고 손가락을 쫙 펴고, 어깨·목을 천천히 늘려 주세요. 눈도 잠깐 먼 곳을 봐요 🙆" }),
-    h("button", { class: "btn", type: "button", text: long ? "쉬고 올게요" : "스트레칭했어요", on: { click: () => box.remove() } }));
+    wasOn ? h("span", { class: "gen", text: long ? "타이머를 멈췄어요. 돌아와서 ▶ 시작을 눌러 주세요." : "타이머를 잠깐 멈췄어요." }) : null,
+    h("div", { class: "actions", style: "justify-content:flex-end" },
+      long
+        ? h("button", { class: "btn", type: "button", text: "쉬고 올게요", on: { click: () => box.remove() } })
+        : h("button", { class: "btn", type: "button", text: wasOn ? "스트레칭했어요 · 다시 시작" : "스트레칭했어요", on: { click: resume } })));
   document.querySelector(".stretch")?.remove();
   document.body.append(box);
-  setTimeout(() => box.remove(), 60000);
+  if (!wasOn) setTimeout(() => box.remove(), 60000); // 타이머를 멈췄으면 누를 때까지 둔다
 }
 
 function next() {

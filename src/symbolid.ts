@@ -40,7 +40,7 @@ function legendData(p: Pattern, pdf: Pdf): Promise<LegendData> {
       const page = await renderPage(pdf, lg.page, T_SCALE); // 크면 renderPage가 알아서 줄임
       const ctx = page.getContext("2d", { willReadFrequently: true })!;
       const sc = page.width / (await pdf.getPage(lg.page)).getViewport({ scale: 1 }).width;
-      const tmpls = entries.map((entry) => ({ entry, canvas: tightCrop(ctx, entry.area, sc) }));
+      const tmpls = entries.map((entry) => ({ entry, canvas: entry.abbr ? null : tightCrop(ctx, entry.area, sc) })); // 약어표 항목은 그림 기호가 아님
       return { entries, tmpls, page, lg, sc };
     })();
     legendCache.set(key, c);

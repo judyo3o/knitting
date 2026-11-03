@@ -6,7 +6,7 @@
 import { LEGEND_RE, type TItem } from "./pdfgeom";
 
 export type Box = { x0: number; y0: number; x1: number; y1: number };
-export type LegendEntry = { sym: string; name: string; cy: number; area: Box };
+export type LegendEntry = { sym: string; name: string; cy: number; area: Box; abbr?: boolean }; // abbr: '약어 = 뜻' 목록(그림 기호 아님)
 
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, "").replace(/[‐-―−]/g, "-");
 
@@ -22,6 +22,9 @@ export function legendEntries(items: TItem[], lg: Box): LegendEntry[] {
     if (l && Math.abs(l.y - it.y) < Math.max(2, Math.min(l.h, it.h) * 0.5)) l.items.push(it);
     else lines.push({ y: it.y, h: it.h, items: [it] });
   }
+  // 약어표("K2tog = Knit next 2 stitches together"가 여러 단으로)면 따로 읽는다
+  const eqLines = lines.filter((l) => l.items.some((i) => /=/.test(i.str))).length;
+  if (lines.length >= 3 && eqLines / lines.length >= 0.4) return abbrEntries(lines);
   // 이름 열의 x: 줄마다 가장 큰 간격 뒤 (또는 줄 시작이 오른쪽이면 그 자리)의 최빈값
   const w = lg.x1 - lg.x0;
   const votes = new Map<number, number>();
@@ -230,3 +233,29 @@ export function rowText(st: RowStitch[], ws: boolean): string {
   return out.join(", ");
 }
 
+
+/** 약어표: 줄마다 큰 간격에서 단을 나누고 "약어 = 뜻"으로. '='가 없는 조각은 같은 단 앞 항목의 이어지는 설명 */
+function abbrEntries(lines: { y: number; h: number; items: TItem[] }[]): LegendEntry[] {
+  const out: (LegendEntry & { col: number })[] = [];
+  const cols: number[] = [];
+  const colOf = (x: number) => { let k = cols.findIndex((c) => Math.abs(c - x) < 30); if (k < 0) { cols.push(x); k = cols.length - 1; } return k; };
+  for (const l of lines) {
+    const its = [...l.items].sort((a, b) => a.x - b.x);
+    const segs: { x: number; t: string }[] = [];
+    let end = -Infinity;
+    for (const it of its) {
+      if (segs.length && it.x - end < Math.max(8, l.h * 1.2)) segs[segs.length - 1].t += (/\s$/.test(segs[segs.length - 1].t) ? "" : " ") + it.str;
+      else segs.push({ x: it.x, t: it.str });
+      end = it.x + it.w;
+    }
+    for (const sg of segs) {
+      const t = sg.t.replace(/\s+/g, " ").trim();
+      if (!t) continue;
+      const m = t.match(/^(.{1,16}?)\s*=\s*(.+)$/);
+      const col = colOf(sg.x);
+      if (m) out.push({ sym: m[1].trim(), name: m[2].trim(), cy: l.y, area: { x0: sg.x, x1: sg.x, y0: l.y, y1: l.y }, abbr: true, col });
+      else { const prev = [...out].reverse().find((e) => e.col === col); if (prev) prev.name += " " + t; }
+    }
+  }
+  return out.map(({ col: _c, ...e }) => e);
+}

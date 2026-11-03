@@ -4,7 +4,7 @@ import { yarnHex } from "./chart";
 import { h, toast } from "./ui";
 import type { Drawing, Yarn } from "./types";
 
-type Result = { drawing: Drawing; colors: Yarn[] };
+type Result = { drawing: Drawing; colors: Yarn[]; photo?: HTMLCanvasElement }; // photo: 자른 사진 (편집기 밑그림용)
 type View = "image" | "overlay" | "grid";
 const CODES = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
@@ -243,7 +243,11 @@ export function openImageImport(o: { w?: number; h?: number; start?: number; gau
 
     function save() {
       if (!img || !preview) return toast("이미지를 먼저 골라주세요.");
-      close({ drawing: preview, colors });
+      // 자른 부분 사진을 밑그림으로 넘긴다 (격자 위에 반투명하게 겹쳐 보기)
+      const photo = document.createElement("canvas");
+      photo.width = Math.max(1, Math.round(crop.w)); photo.height = Math.max(1, Math.round(crop.h));
+      photo.getContext("2d")!.drawImage(img, crop.x, crop.y, crop.w, crop.h, 0, 0, photo.width, photo.height);
+      close({ drawing: preview, colors, photo });
     }
     function close(r: Result | null) {
       window.removeEventListener("resize", draw);

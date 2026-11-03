@@ -495,8 +495,18 @@ export function finishText(p: Pattern, s: string): string | null {
 
 /** 쉬지 않고 뜬 시간: 모든 파트의 단 완료 시각을 거꾸로 따라가며 10분 넘게 빈 곳에서 끊는다 */
 export function continuousKnitMs(p: Pattern, now = Date.now(), gap = 10 * 60000): number {
-  if (p.work?.on) return now - p.work.on; // 시작 버튼을 눌러 둔 동안
-  if (workUsed(p)) return 0;
+  if (workUsed(p)) {
+    // 타이머를 쓰면: 켜 둔 구간들을 거꾸로 이어 붙인다. 구간 사이가 gap(10분) 넘게 비면 쉰 것으로 보고 끊는다
+    const spans = [...(p.work!.spans || []), ...(p.work!.on ? [[p.work!.on, now] as [number, number]] : [])].sort((a, b) => b[1] - a[1]);
+    if (!spans.length || now - spans[0][1] > gap) return 0;
+    let total = 0, start = spans[0][0];
+    for (const [a, b] of spans) {
+      if (start - b > gap) break;
+      total += b - a;
+      start = Math.min(start, a);
+    }
+    return total;
+  }
   const ts = Object.values(p.done).filter((t) => t <= now).sort((a, b) => b - a);
   if (!ts.length || now - ts[0] > gap) return 0;
   let start = ts[0];

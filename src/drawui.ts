@@ -35,6 +35,8 @@ export function openEditor(p: Pattern, part: string, o: { onSave: () => void; st
   let focus: { c: number; r: number } | null = null;
   const undo: Drawing[] = [], redo: Drawing[] = [];
   let geom: GridGeom;
+  // 사진 밑그림: 격자 위에 반투명하게 겹쳐 보며 칠한다 (이 편집 동안만)
+  let under: { img: CanvasImageSource; alpha: number; on: boolean } | null = null;
   let dirty = false;
 
   const canvas = h("canvas", { "aria-label": "배색 격자. 칸을 눌러 칠해요." });
@@ -51,6 +53,13 @@ export function openEditor(p: Pattern, part: string, o: { onSave: () => void; st
     erase: h("button", { class: "btn", type: "button", text: "⌫ 지우개" }),
   };
   (Object.keys(toolBtns) as (keyof typeof toolBtns)[]).forEach((t) => (toolBtns[t].onclick = () => setTool(t)));
+  const alphaIn = h("input", { type: "range", min: 0, max: 90, step: 5, value: "45", "aria-label": "사진 진하기", style: "width:140px" });
+  alphaIn.oninput = () => { if (under) { under.alpha = +alphaIn.value / 100; draw(); } };
+  const underToggle = h("button", { class: "btn", type: "button", text: "사진 숨기기" });
+  underToggle.onclick = () => { if (!under) return; under.on = !under.on; underToggle.textContent = under.on ? "사진 숨기기" : "사진 보이기"; draw(); };
+  const underBar = h("div", { class: "ed-bar", hidden: true },
+    h("span", { class: "gen", text: "사진 밑그림" }), h("span", { class: "gen", text: "흐리게" }), alphaIn, h("span", { class: "gen", text: "진하게" }), underToggle,
+    h("button", { class: "btn ghost", type: "button", text: "밑그림 빼기", on: { click: () => { under = null; draw(); } } }));
   const selBar = h("div", { class: "ed-bar", hidden: true },
     h("span", { class: "gen", text: "선택 영역:" }),
     btn("복사", () => { if (sel) { clip = copyRect(d, sel); setTool("paste"); toast("붙일 자리(왼쪽 위 칸)를 누르세요."); } }),
@@ -79,6 +88,7 @@ export function openEditor(p: Pattern, part: string, o: { onSave: () => void; st
       btn("닫기", closeAsk),
     ),
     selBar,
+    underBar,
     sizeBar(),
     body,
     h("div", { class: "ed-foot", style: "flex-direction:column;align-items:stretch" },
@@ -144,6 +154,16 @@ export function openEditor(p: Pattern, part: string, o: { onSave: () => void; st
     drawPalette();
     selBar.hidden = !(tool === "select" || tool === "paste") || !sel;
     geom = drawGrid(canvas, d, colors, cell, { sel, n: focusRow, side: sideFor(focusRow), round: !!p.secs[part]?.round });
+    if (under?.on) {
+      const ctx = canvas.getContext("2d")!;
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      ctx.save();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.globalAlpha = under.alpha;
+      ctx.drawImage(under.img, geom.ox, geom.oy, d.w * geom.cell, (geom.rows[1] - geom.rows[0] + 1) * geom.ch);
+      ctx.restore();
+    }
+    underBar.hidden = !under;
     const s = sideFor(focusRow);
     const line = describeRow(d, focusRow, s, colors);
     const fl = longestFloat(d, focusRow);
@@ -313,8 +333,9 @@ export function openEditor(p: Pattern, part: string, o: { onSave: () => void; st
     if (!res) return;
     colors = res.colors;
     cur = Math.min(cur, colors.length - 1);
+    if (res.photo) { under = { img: res.photo, alpha: +alphaIn.value / 100, on: true }; underToggle.textContent = "사진 숨기기"; }
     edit({ ...res.drawing, opt: d.opt });
-    toast(`이미지를 ${d.w}×${d.h}칸으로 바꿨어요. 틀린 칸은 직접 고쳐 주세요.`, 3600);
+    toast(`이미지를 ${d.w}×${d.h}칸으로 바꿨어요. 사진을 반투명하게 겹쳐 뒀으니 보면서 틀린 칸을 고쳐 주세요.`, 4200);
   }
 
   async function importFromPdf() {
