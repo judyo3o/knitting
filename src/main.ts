@@ -471,16 +471,19 @@ function narrative(p: Pattern, r: Row) {
   }
   // 서술 없이 '차트를 따라 진행'뿐인 단: 기기에서 차트를 읽어 그 단의 서술을 만들어 보여 준다
   if (wantsChartText(p, r)) {
-    if (r.t) wrap.append(h("p", { class: "gen", text: "도안: " + r.t.split("\n")[0].slice(0, 80) }));
+    if (r.t) wrap.append(h("p", { class: "gen", text: "도안 원문: " + r.t.split("\n")[0].slice(0, 80) }));
     const slot = h("div", { class: "gen", text: "차트에서 이 단을 읽는 중…" });
     wrap.append(slot);
     chartRowText(p, r).then((txt) => {
       if (!slot.isConnected) return;
       if (!txt) { slot.textContent = "차트에서 이 단을 읽지 못했어요. '이 단 차트를 글로 풀기'를 써 보세요."; if (chunks.length) slot.after(chunkBox(p, r, chunks)); return; }
-      const sideNote = sideOf(p, r) === "WS" && !p.secs[r.s]?.round ? "안면이라 왼쪽부터, 겉↔안 바꿔 읽음" : "오른쪽부터 읽음";
+      const ws = sideOf(p, r) === "WS" && !p.secs[r.s]?.round;
       slot.replaceWith(
-        h("span", { class: "gen", text: `차트를 기기에서 읽은 이 단 서술 · ${sideNote} · 교차 방향은 차트와 대조해 주세요` }),
+        h("p", { class: "gen", style: "margin:0", text: ws
+          ? "▼ 차트를 읽어 만든 이 단 서술 (안면 단): 왼쪽부터 떠요. 차트는 겉면에서 본 그림이라, 안면에서는 차트의 겉뜨기를 안뜨기로·안뜨기를 겉뜨기로 떠야 해요. 아래는 그렇게 바꿔 둔 거예요."
+          : "▼ 차트를 읽어 만든 이 단 서술 (겉면 단): 오른쪽부터 차트 그대로 떠요." }),
         chunkBox(p, r, chunksOf(txt)),
+        h("span", { class: "gen", text: "기기가 차트 그림을 읽은 거라 교차뜨기 방향(LC/RC)은 차트와 한 번 대조해 주세요." }),
         h("div", { class: "actions" }, h("button", { class: "btn ghost", type: "button", text: "이 서술을 이 단에 저장", on: { click: () => {
           r.t = txt; r.span = null; p.rev++; commit(p); render(); toast("이 단 서술로 저장했어요.");
         } } })),
