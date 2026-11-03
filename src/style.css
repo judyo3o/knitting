@@ -232,3 +232,15 @@ details.sheet>summary::after{content:" ▾";color:var(--ink-2)}
 .start-btn.blank{background:#3BB7AE}
 .start-btn.image{background:#9475F5}
 @media (max-width:420px){.starts{grid-template-columns:1fr}}
+
+/* 기호 이름 말풍선 */
+.chartview{position:relative}
+.chartview canvas{cursor:pointer}
+.symbox{position:absolute;border:2.5px solid #1D4ED8;border-radius:2px;pointer-events:none;box-shadow:0 0 0 2px rgba(255,255,255,.8)}
+.sympop{position:fixed;display:flex;flex-direction:column;gap:4px;background:var(--ink);color:var(--sheet);border-radius:8px;padding:6px 10px;font-size:.88rem;line-height:1.35;max-width:min(320px,calc(100vw - 16px));width:max-content;z-index:30;box-shadow:0 4px 14px rgba(0,0,0,.25);cursor:pointer}
+.sympop::after{content:"";position:absolute;left:var(--tip,50%);bottom:-6px;transform:translateX(-50%);border:6px solid transparent;border-bottom:0;border-top-color:var(--ink)}
+.sympop.below::after{bottom:auto;top:-6px;border:6px solid transparent;border-top:0;border-bottom-color:var(--ink)}
+.sympop b{display:flex;gap:6px;align-items:center;font-weight:600}
+.sympop small{display:block;opacity:.8;font-size:.76rem}
+.sympop .sw{width:14px;height:14px;border-radius:50%;border:1px solid rgba(255,255,255,.6);display:inline-block}
+.sympop .symimg{display:block;max-width:min(300px,calc(100vw - 40px));max-height:64px;width:auto;height:auto;background:#fff;border-radius:4px}

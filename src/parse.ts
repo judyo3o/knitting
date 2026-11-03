@@ -157,6 +157,7 @@ export function localParseLines(lines: Line[], size = ""): AiSection[] {
     } else if (isHeader(l)) {
       skipping = false;
       pendingName = l.replace(/^[\[【<〈#*★☆◆◇◈■□●○▶►\s]+|[\]】>〉:*\s]+$/g, "").replace(/^\d+\.\s*/, "").replace(/\s*[—-]\s*.*사이즈.*$/, "").replace(/\s*\(.*$/, "").trim() || l;
+      if (/스와치|swatch|게이지\s*(?:샘플|편물)/i.test(pendingName)) pendingName = "스와치"; // 서술 스와치는 스와치 탭으로
       lastRow = null;
       if (ch) pendingChart = ch;
     } else {

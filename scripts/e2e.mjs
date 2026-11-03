@@ -61,6 +61,16 @@ console.log("  ", chunkText.join(" | "));
 assert.ok(chunkText[0].startsWith("A "));
 await shot("2-colorwork-row");
 
+step("그린 배색 칸 누르기 → 색 이름");
+{
+  const bb = await page.locator(".chartview canvas").boundingBox();
+  await page.mouse.click(bb.x + bb.width / 2, bb.y + bb.height / 2);
+  await page.waitForSelector(".sympop");
+  const pop = await page.textContent(".sympop");
+  console.log("   말풍선:", pop.replace(/\s+/g, " "));
+  assert.match(pop, /(아이보리|버건디).*단 · (오른|왼)쪽부터 \d+번째 코/);
+}
+
 step("배색 편집기: 칠하고 저장");
 await page.click("text=배색 고치기");
 await page.waitForSelector(".editor canvas");
@@ -172,8 +182,10 @@ await page.waitForSelector(".legend canvas", { timeout: 30000 });
 assert.match(await page.textContent(".chip.dir"), /왼쪽에서 오른쪽/);
 await shot("6-back-row60");
 
-step("게이지: PDF에서 미리 채움 + 세탁 후 입력 → 비교");
-assert.match(await page.textContent(".gauge-line"), /도안 게이지\(메리야스\) 20코 26단/);
+step("게이지: 스와치 탭에서만 · PDF에서 미리 채움 + 세탁 후 입력 → 비교");
+assert.equal(await page.locator(".gauge-line").count(), 0); // 뒷판 탭엔 없음
+await page.click(".ptab:has-text('스와치')");
+assert.match(await page.textContent(".gauge-line"), /메리야스: 도안 20코 26단/);
 await page.click(".gauge-line");
 await page.fill(".gauge-set >> nth=0 >> input[aria-label='세탁 후 콧수']", "20");
 await page.fill(".gauge-set >> nth=0 >> input[aria-label='세탁 후 단수']", "23");
@@ -185,6 +197,23 @@ assert.match(gout, /122코/);
 await shot("11-gauge");
 await page.click(".dlg >> text=저장");
 assert.match(await page.textContent(".gauge-line"), /내 20코 23단/);
+await page.click(".ptab:has-text('뒷판')");
+
+step("차트 기호 누르기 → 기법 이름 말풍선 + 기호표 줄");
+{
+  const bb = await page.locator(".chartview").boundingBox(); // 보이는 부분 가운데
+  await page.mouse.click(bb.x + bb.width * 0.5, bb.y + bb.height * 0.5);
+  await page.waitForSelector(".sympop", { timeout: 30000 });
+  const pop = await page.textContent(".sympop");
+  console.log("   말풍선:", pop.replace(/\s+/g, " ").slice(0, 80));
+  assert.match(pop, /\d+단/);
+  assert.match(pop, /겉뜨기|안뜨기/); // 기법 이름이 글자로
+  assert.doesNotMatch(pop, /추정/);
+  assert.match(pop, /(오른|왼)쪽부터 \d+번째 코/);
+  await shot("12-symbol-pop");
+  await page.click(".sympop");
+  assert.equal(await page.locator(".sympop").count(), 0);
+}
 
 step("스와치: 배색 차트 색 뽑기");
 await page.click(".ptab:has-text('스와치')");

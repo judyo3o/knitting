@@ -91,17 +91,20 @@ export function openGauge(p: Pattern, onSaved: () => void) {
 
 const sign = (v: number) => (v > 0 ? "+" : "") + v;
 
-/** 진행 화면 한 줄 요약 */
+/** 스와치 탭 요약 (무늬마다 한 줄) */
 export function gaugeSummary(p: Pattern): string | null {
-  const s = p.gauges[0];
-  if (!s) return null;
-  const mine = myGauge(s);
   const fmt = (g: Gauge) => `${g.st}코 ${g.rows}단`;
-  if (s.pattern && mine) {
-    const c = compare(s.pattern, mine);
-    return `게이지(${s.label}) 도안 ${fmt(s.pattern)} · 내 ${fmt(mine)} ${c.stOk && c.rowOk ? "✓ 맞음" : `· 콧수 ${sign(c.stPct)}%`}`;
-  }
-  if (s.pattern) return `도안 게이지(${s.label}) ${fmt(s.pattern)} · 스와치를 재면 비교해 드려요`;
-  if (mine) return `내 게이지(${s.label}) ${fmt(mine)}`;
-  return null;
+  const lines = p.gauges.map((s) => {
+    const mine = myGauge(s);
+    const name = s.label.replace(/\s*\(원문.*$/, "");
+    if (s.pattern && mine) {
+      const c = compare(s.pattern, mine);
+      return `${name}: 도안 ${fmt(s.pattern)} · 내 ${fmt(mine)} ${c.stOk && c.rowOk ? "✓ 맞음" : `· 콧수 ${sign(c.stPct)}%`}`;
+    }
+    if (s.pattern) return `${name}: 도안 ${fmt(s.pattern)}${s.needle ? " · " + s.needle : ""}`;
+    if (mine) return `${name}: 내 ${fmt(mine)}`;
+    return "";
+  }).filter(Boolean);
+  if (!lines.length) return "게이지 적기 (도안 · 세탁 전 · 세탁 후)";
+  return "게이지 — " + lines.join(" / ") + (p.gauges.some((s) => myGauge(s)) ? "" : " · 스와치를 재면 비교해 드려요");
 }

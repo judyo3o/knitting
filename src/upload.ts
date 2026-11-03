@@ -372,6 +372,7 @@ async function readLocally(pdf: Pdf, pages: number[], size: string, info: PageIn
     if (ch) {
       const castOn = g.lines.find((l) => /코잡기|기초코|cast on/i.test(l)) || "게이지 콧수로 기초코";
       const first = ch.nMin <= 2 ? 1 : ch.nMin;
+      // 도안에 스와치 서술이 없을 때만 게이지 쪽 차트로 스와치를 만든다
       sections = [{ name: "스와치", chart: g.n, round: false, rows: [
         { from: first, to: first, text: castOn, page: g.n },
         { from: first + 1, to: ch.nMax, text: "차트대로 무늬뜨기", page: g.n },
