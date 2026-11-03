@@ -1,7 +1,7 @@
 /** 차트에서 누른 칸의 기호 → 기법 이름 (기기에서) */
 import type { Bitmap } from "./chart";
 import { renderPage, renderRegion, textItems, type Pdf } from "./pdf";
-import { rowH, rowY, type Chart } from "./pdfgeom";
+import { rowH, rowY, type Chart, type TItem } from "./pdfgeom";
 import { rowText, type RowStitch } from "./symbols";
 export { rowText };
 import { boundaries, gridLattice, symbolScore, legendEntries, matchToken, textAt, unreadable, type Box, type LegendEntry } from "./symbols";
@@ -277,13 +277,23 @@ export async function readRow(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, n
     return xs.filter((x) => edge(top, Math.round(x)) && edge(bot, Math.round(x))).length >= 2; // 그려진 칸은 위·아래 선이 다 있다
   };
   const yMid = rowY(c, n);
+  const items = (await textItems(pdf, page)).items;
+  // 코 번호 축(차트 아래·위의 "38 … 5 1")이 있으면 그 사이 칸만 코다 — 바깥 칸은 시작 화살표(→ ←) 같은 표시용
+  const span = stitchSpan(items, c, h);
+  const cw = (B[M] - B[0]) / M / S;
+  const inSpan = (k: number) => {
+    if (!span) return true;
+    const cx = (B[k] + B[k + 1]) / 2 / S;
+    return cx >= span[0] - cw * 0.6 && cx <= span[1] + cw * 0.6;
+  };
+  const arrowIn = (k: number) => items.some((i) => /^\s*[→←⟵⟶➜➔▶◀]\s*$/.test(i.str) && i.x + i.w / 2 > B[k] / S && i.x + i.w / 2 < B[k + 1] / S && i.y - i.h / 2 > yTop - 1 && i.y - i.h / 2 < yTop + h + 1);
   const out: RowStitch[] = [];
   const order = [...Array(M).keys()];
   if (!fromLeft) order.reverse();
   const seen = new Set<number>();
   for (const k of order) {
     if (seen.has(k)) continue;
-    if (!exists(k)) { seen.add(k); continue; }
+    if (!inSpan(k) || arrowIn(k) || !exists(k)) { seen.add(k); continue; }
     const hit = await identify(p, pdf, page, bmp, (B[k] + B[k + 1]) / 2 / S, yMid);
     let cells = 1;
     if (hit?.rect) {
@@ -294,6 +304,22 @@ export async function readRow(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, n
     out.push({ name: hit?.name || "", sym: hit?.sym || "", cells });
   }
   return out;
+}
+
+/** 코 번호 축: 차트 아래(또는 위)의 숫자 줄 → [가장 왼쪽 숫자 가운데 x, 가장 오른쪽 숫자 가운데 x] (pt) */
+function stitchSpan(items: TItem[], c: Chart, h: number): [number, number] | null {
+  const yBot = rowY(c, c.nMin) + h / 2, yTopC = rowY(c, c.nMax) - h / 2;
+  const nearAxis = (x: number) => c.axes.some((a) => Math.abs(a - x) < h * 1.5);
+  const pick = (lo: number, hi: number) => items.filter((i) => /^\s*\d{1,3}\s*$/.test(i.str) && i.y > lo && i.y < hi && i.x >= c.x0 - 2 && i.x + i.w <= c.x1 + 2 && !nearAxis(i.x + i.w / 2));
+  for (const nums of [pick(yBot, yBot + h * 3.5), pick(yTopC - h * 3, yTopC)]) {
+    if (nums.length < 3) continue;
+    const pts = nums.map((i) => ({ x: i.x + i.w / 2, v: +i.str.trim() })).sort((a, b) => a.x - b.x);
+    // 숫자가 한 방향으로만 늘거나 줄어야 코 번호 축
+    const up = pts.every((q, j) => j === 0 || q.v > pts[j - 1].v), down = pts.every((q, j) => j === 0 || q.v < pts[j - 1].v);
+    if (!up && !down) continue;
+    return [pts[0].x, pts[pts.length - 1].x];
+  }
+  return null;
 }
 
 /** 누른 점 (차트 쪽 pt 좌표) → 기호 */
