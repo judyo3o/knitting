@@ -334,3 +334,61 @@ describe("real-world fixes", () => {
     expect(secs.map((s) => s.name)).toEqual(["HEAD"]);
   });
 });
+
+import { legendEntries, matchToken, gridLattice, textAt } from "../src/symbols";
+describe("symbol names", () => {
+  const lgItems = [
+    t("기법 설명", 30, 318, 50), t("안뜨기", 280, 336, 30), t("|", 200, 368, 3), t("겉뜨기", 280, 368, 30),
+    t("R", 200, 400, 6), t("오른코 늘림 (M1R)", 280, 400, 70), t("SSK", 195, 432, 16), t("오른코 2코 모아 겉뜨기", 280, 432, 90),
+    t("K2tog tbl", 180, 464, 40), t("2코 한 번에 뒷쪽 실에 찔러", 280, 464, 120), t("겉뜨기 (꼬아뜨기)", 280, 476, 60),
+    t("오른코 위 2코와 1코(겉뜨기) 교차뜨기 - 2/1 LC", 280, 508, 180),
+  ];
+  const entries = legendEntries(lgItems, { x0: 30, y0: 300, x1: 470, y1: 520 });
+  it("reads legend rows (symbol text / name, wrapped names, graphic symbols)", () => {
+    expect(entries.map((e) => [e.sym, e.name])).toEqual([
+      ["", "안뜨기"], ["|", "겉뜨기"], ["R", "오른코 늘림 (M1R)"], ["SSK", "오른코 2코 모아 겉뜨기"],
+      ["K2tog tbl", "2코 한 번에 뒷쪽 실에 찔러 겉뜨기 (꼬아뜨기)"], ["", "오른코 위 2코와 1코(겉뜨기) 교차뜨기 - 2/1 LC"]]);
+  });
+  it("matches chart text to entries", () => {
+    expect(matchToken("ssk", entries)?.name).toBe("오른코 2코 모아 겉뜨기");
+    expect(matchToken("|", entries)?.name).toBe("겉뜨기");
+    expect(matchToken("M1R", entries)?.sym).toBe("R");
+    expect(matchToken("cut", entries)).toBeNull();
+    expect(textAt([t("SSK", 100, 50, 16, 6), t("12", 90, 50)], 108, 47)?.str).toBe("SSK");
+  });
+  it("finds grid lattice and ignores knit bars at cell centers", () => {
+    // 칸 너비 10, 격자선 x=5,15,25…; 칸 가운데(10, 30)에 '|' 획
+    const dark = (x: number) => x % 10 === 5 || x === 10 || x === 30;
+    const lat = gridLattice((x) => dark(x), 0, 100, 0, 40)!;
+    expect(lat.w).toBeCloseTo(10, 0);
+    expect(lat.off).toBeCloseTo(5, 0);
+  });
+});
+
+import { parseToUnicode, makeDecoder } from "../src/fontfix";
+import { unreadable } from "../src/symbols";
+describe("font rescue", () => {
+  it("reads ToUnicode and fills gaps in unicode-ordered runs", () => {
+    const m = parseToUnicode("beginbfchar\n<31B0> <C548>\n<238F> <B728>\n<1A98> <AE30>\nendbfchar\nbeginbfrange\n<0030> <0032> <0041>\nendbfrange");
+    expect(m.get(0x31b0)).toBe("안");
+    expect(m.get(0x31)).toBe("B");
+    m.set(0x18f1, "겉");
+    const dec = makeDecoder(m);
+    // 겉(6385=0x18F1)…기(6808=0x1A98) 사이가 유니코드와 같은 간격 → 그 사이 글자 번호도 읽힌다
+    expect(dec(6385 + 10)).toBe(String.fromCharCode("겉".charCodeAt(0) + 10));
+    expect(unreadable("ㆰ⎐᪘")).toBe(true);
+    expect(unreadable("안뜨기")).toBe(false);
+  });
+});
+
+describe("written swatch", () => {
+  it("swatch instructions become the 스와치 tab, first", () => {
+    const secs = localParseLines([
+      { t: "뒷판", pg: 3 }, { t: "1단: 겉뜨기", pg: 3 }, { t: "2단: 안뜨기", pg: 3 },
+      { t: "[게이지 스와치]", pg: 2 }, { t: "1단: 30코 기초코, 겉뜨기", pg: 2 }, { t: "2~30단: 메리야스뜨기 (30코)", pg: 2 },
+    ]);
+    const merged = mergeSections([], secs);
+    expect(merged[0].name).toBe("스와치");
+    expect(merged[0].rows[1]).toMatchObject({ from: 2, to: 30, stitches: "30코" });
+  });
+});

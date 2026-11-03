@@ -3,15 +3,33 @@ import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { TItem } from "./pdfgeom";
+import { buildRescue, type Rescue } from "./fontfix";
+import { unreadable } from "./symbols";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 const BASE = import.meta.env.BASE_URL + "pdfjs/";
 
 export type Pdf = PDFDocumentProxy;
 
+const blobOf = new WeakMap<Pdf, Blob>();
+const rescueOf = new WeakMap<Pdf, Promise<Rescue | null>>();
+
 export async function openPdf(blob: Blob): Promise<Pdf> {
   const data = new Uint8Array(await blob.arrayBuffer());
-  return pdfjs.getDocument({ data, cMapUrl: BASE + "cmaps/", cMapPacked: true, standardFontDataUrl: BASE + "standard_fonts/", wasmUrl: BASE + "wasm/" } as any).promise;
+  const pdf = await pdfjs.getDocument({ data, cMapUrl: BASE + "cmaps/", cMapPacked: true, standardFontDataUrl: BASE + "standard_fonts/", wasmUrl: BASE + "wasm/" } as any).promise;
+  blobOf.set(pdf, blob);
+  return pdf;
+}
+
+/** 대응표 없는 글꼴 글자 살리기 (필요할 때 한 번만 만든다) */
+function rescue(pdf: Pdf): Promise<Rescue | null> {
+  let r = rescueOf.get(pdf);
+  if (!r) {
+    const blob = blobOf.get(pdf);
+    r = blob ? blob.arrayBuffer().then(buildRescue).catch(() => null) : Promise.resolve(null);
+    rescueOf.set(pdf, r);
+  }
+  return r;
 }
 
 const itemCache = new WeakMap<Pdf, Map<number, { items: TItem[]; w: number; h: number }>>();
@@ -31,6 +49,16 @@ export async function textItems(pdf: Pdf, n: number) {
     const [x, y] = vp.convertToViewportPoint(it.transform[4], it.transform[5]);
     const h = it.height || Math.hypot(it.transform[2], it.transform[3]) || 8;
     items.push({ str: it.str, x, y, w: it.width || 0, h });
+  }
+  // 깨진 글자(대응표 없는 글꼴)는 같은 글꼴의 대응표로 다시 읽는다
+  if (items.some((i) => unreadable(i.str))) {
+    const rs = await rescue(pdf);
+    if (rs)
+      for (const i of items) {
+        if (!unreadable(i.str)) continue;
+        const fixed = rs.decode(i.str);
+        if (!unreadable(fixed)) i.str = fixed;
+      }
   }
   const out = { items, w: vp.width, h: vp.height };
   m.set(n, out);

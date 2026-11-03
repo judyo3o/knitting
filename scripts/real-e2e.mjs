@@ -80,6 +80,20 @@ for (const arg of process.argv.slice(2)) {
       await shot(`5-part${++k}`);
     }
     console.log(`   - ${name}: ${await page.textContent(".rowno b")}단 ${st || ""} | ${hasChart ? "차트 띠 ✓" : "차트 없음 " + note} | ${chunks}`);
+    if (hasChart) {
+      // 기호 몇 개 눌러 보기 (보이는 차트의 여러 자리)
+      const bb = await page.locator(".chartview").boundingBox();
+      const pops = [];
+      for (const fx of [0.3, 0.5, 0.7, 0.9]) {
+        await page.evaluate(() => document.querySelectorAll(".sympop").forEach((e) => e.remove()));
+        await page.mouse.click(bb.x + bb.width * fx, bb.y + bb.height * 0.5);
+        const txt = await page.waitForFunction(() => document.querySelector(".sympop")?.textContent, null, { timeout: 15000 }).then((h) => h.jsonValue()).catch(() => null);
+        const ok = !!txt;
+        if (ok) pops.push(String(txt).replace(/\s+/g, " ").trim());
+        if (ok && fx === 0.5) await shot(`6-symbol-${k}`);
+      }
+      console.log("       기호:", pops.join(" / ") || "말풍선 없음");
+    }
   }
   if (errors.length) console.log("  오류:", errors);
   await ctx.close();

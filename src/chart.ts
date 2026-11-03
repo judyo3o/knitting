@@ -44,12 +44,13 @@ const axisInset = (c: Chart): [number, number] => {
 };
 
 /** 현재 단 주변(아래 3단 ~ 위 6단)을 잘라 크게, 띠·음영·화살표 */
-export function drawPdfRows(out: HTMLCanvasElement, bmp: Bitmap, o: ViewOpts): { chart: Chart | null; startX: "left" | "right" } {
+export type PdfView = { chart: Chart | null; startX: "left" | "right"; x0: number; yTop: number; k: number };
+export function drawPdfRows(out: HTMLCanvasElement, bmp: Bitmap, o: ViewOpts): PdfView {
   const c = chartFor(bmp.charts, o.n);
   const ctx = out.getContext("2d")!;
   if (!c) {
     out.width = out.height = 0;
-    return { chart: null, startX: "right" };
+    return { chart: null, startX: "right", x0: 0, yTop: 0, k: 1 };
   }
   const below = o.below ?? 3, above = o.above ?? 6;
   const h = rowH(c);
@@ -66,7 +67,7 @@ export function drawPdfRows(out: HTMLCanvasElement, bmp: Bitmap, o: ViewOpts): {
   ctx.drawImage(bmp.canvas, sx, sy, sw, sh, 0, 0, out.width, out.height);
   const toY = (y: number) => (y - yTop) * k * dpr;
   overlay(ctx, out.width, (n) => [toY(rowY(c, n) - h / 2), toY(rowY(c, n) + h / 2)], o, Math.max(o.n - below, c.nMin - 1), dpr, axisInset(c).map((v) => v * k * dpr) as [number, number]);
-  return { chart: c, startX: o.side === "RS" || o.round ? "right" : "left" };
+  return { chart: c, startX: o.side === "RS" || o.round ? "right" : "left", x0: c.x0, yTop, k };
 }
 
 /** 차트 전체(페이지 전체)에 같은 표시 */

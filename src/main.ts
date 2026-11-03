@@ -2,9 +2,9 @@ import "./style.css";
 import { chunksOf, stitchesThrough } from "./chunks";
 import { MAX_TOKENS } from "./config";
 import { callAi, errCopy, hasKey } from "./ai";
-import { chartBitmap, drawGrid, drawPdfFull, drawPdfRows, explainStrip, legendCanvas, sampleRowColors, yarnHex } from "./chart";
+import { chartBitmap, drawGrid, drawPdfFull, drawPdfRows, explainStrip, hitCell, legendCanvas, sampleRowColors, yarnHex } from "./chart";
 import { getFile, putFile } from "./db";
-import { longestFloat, rowColors } from "./drawing";
+import { getCell, longestFloat, rowColors } from "./drawing";
 import {
   applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, sideOf, stepNext, stepPrev,
 } from "./model";
@@ -63,6 +63,7 @@ app.append(
 let renderSeq = 0;
 
 export function render() {
+  closePop();
   const p = active();
   renderSelect(p);
   renderMeta(p);
@@ -139,7 +140,8 @@ function nowCard(p: Pattern, r: Row) {
     ),
     h("div", { class: "rowno" }, h("b", { text: String(r.n) }), h("span", { class: "unit", text: "단" }), h("span", { class: "st", text: r.st || "" })),
   );
-  const gs = gaugeSummary(p);
+  // 게이지는 스와치 탭에서만
+  const gs = /스와치|swatch|게이지|gauge/i.test(s) ? gaugeSummary(p) : null;
   if (gs) card.append(h("button", { class: "link gauge-line", type: "button", text: gs, on: { click: () => openGauge(p, render) } }));
   const yarnBox = h("div", { class: "yarns" });
   card.append(yarnBox);
@@ -203,8 +205,23 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
     cv.append(c);
     const idx = r.n - d.start;
     const rows: [number, number] = view.full ? [0, d.h - 1] : [Math.max(0, idx - 3), Math.min(d.h - 1, idx + 6)];
-    drawGrid(c, d, p.colors, Math.max(10, view.rowPx), { n: r.n, side, round, rows });
+    const geom = drawGrid(c, d, p.colors, Math.max(10, view.rowPx), { n: r.n, side, round, rows });
     scrollStart(cv, side === "RS" || round);
+    // 칸을 누르면 색 이름 (다시 누르면 닫힘)
+    c.addEventListener("click", (e) => {
+      const b = c.getBoundingClientRect();
+      const hc = hitCell(geom, e.clientX - b.left, e.clientY - b.top);
+      if (!hc) return closePop(cv);
+      const v = getCell(d, hc.c, hc.r);
+      const y = p.colors[v];
+      const label = v < 0 ? "빈칸" : `${y?.code || "색" + (v + 1)}${y?.name ? " · " + y.name : ""}`;
+      const nTap = hc.r + d.start;
+      const rowObj = partRows(p, r.s).find((x) => x.n === nTap) || { ...r, n: nTap, side: null };
+      const fromLeft = sideOf(p, rowObj) === "WS" && !round;
+      const st = fromLeft ? hc.c + 1 : d.w - hc.c;
+      showPop(cv, e.clientX, e.clientY, label, `${nTap}단 · ${fromLeft ? "왼쪽" : "오른쪽"}부터 ${st}번째 코`,
+        { x: c.offsetLeft + geom.ox + hc.c * geom.cell, y: c.offsetTop + geom.oy + (geom.rows[1] - hc.r) * geom.ch, w: geom.cell, h: geom.ch }, v >= 0 ? yarnHex(y, v) : null);
+    });
     return wrap;
   }
   if (!page) {
@@ -228,8 +245,10 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
     cv.innerHTML = "";
     const c = h("canvas", { "aria-label": `차트 p${page}, ${r.n}단 표시` });
     if (view.full) {
-      drawPdfFull(c, bmp, { n: r.n, side, round, rowPx: view.rowPx }, Math.max(cv.clientWidth, 320) * (view.rowPx / 22));
+      const width = Math.max(cv.clientWidth, 320) * (view.rowPx / 22);
+      drawPdfFull(c, bmp, { n: r.n, side, round, rowPx: view.rowPx }, width);
       cv.append(c);
+      symbolTap(p, pdf, page, bmp, cv, c, { x0: 0, yTop: 0, k: width / bmp.w });
     } else {
       const res = drawPdfRows(c, bmp, { n: r.n, side, round, rowPx: view.rowPx });
       if (!res.chart) {
@@ -238,6 +257,7 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
       }
       cv.append(c);
       scrollStart(cv, res.startX === "right");
+      symbolTap(p, pdf, page, bmp, cv, c, res);
     }
     // 배색 차트면 띠에서 실제 색을 뽑아 보여준다
     // 회색·검정(격자선·기호)은 빼고 채도 있는 색만 → 흑백 차트에선 안 보인다
@@ -259,6 +279,80 @@ function chroma(hex: string) {
   const v = parseInt(hex.slice(1), 16);
   const r = v >> 16, g = (v >> 8) & 255, b = v & 255;
   return Math.max(r, g, b) - Math.min(r, g, b);
+}
+
+/* ---------- 기호를 누르면 기법 이름 ---------- */
+type View = { x0: number; yTop: number; k: number };
+function symbolTap(p: Pattern, pdf: any, page: number, bmp: any, cv: HTMLElement, c: HTMLCanvasElement, v: View) {
+  c.title = "기호를 누르면 기법 이름이 보여요";
+  c.addEventListener("click", async (e) => {
+    const b = c.getBoundingClientRect();
+    const cx = e.clientX - b.left, cy = e.clientY - b.top;
+    const open = document.querySelector<HTMLElement>(".sympop");
+    if (open && Math.hypot(+open.dataset.x! - cx, +open.dataset.y! - cy) < 10) return closePop(cv); // 같은 자리 다시 누르면 닫기
+    const x = v.x0 + cx / v.k, y = v.yTop + cy / v.k;
+    const { identify } = await import("./symbolid");
+    if (!p.legend) await detectLegend(p);
+    const hit = await identify(p, pdf, page, bmp, x, y).catch(() => null);
+    if (!hit) return closePop(cv);
+    // 그 단을 뜨기 시작하는 쪽에서 센다: 겉면(RS)·원통은 오른쪽부터, 안면(WS)은 왼쪽부터
+    const rowObj = partRows(p, p.tab).find((x) => x.n === hit.n) || { s: p.tab, n: hit.n, t: "", st: null, side: null, pg: null, ch: null, span: null };
+    const fromLeft = sideOf(p, rowObj) === "WS" && !p.secs[p.tab]?.round;
+    const cnt = fromLeft ? hit.fromLeft : hit.fromRight;
+    const where = `${hit.n}단` + (cnt ? ` · ${fromLeft ? "왼쪽" : "오른쪽"}부터 ${cnt}번째 코` : "");
+    const box = hit.rect ? { x: c.offsetLeft + (hit.rect.x0 - v.x0) * v.k, y: c.offsetTop + (hit.rect.y0 - v.yTop) * v.k, w: (hit.rect.x1 - hit.rect.x0) * v.k, h: (hit.rect.y1 - hit.rect.y0) * v.k } : null;
+    // 기법 이름을 글자로. 약어(SSK 등)가 이름에 없으면 괄호로 덧붙임
+    const abbr = hit.sym && hit.sym.length <= 12 && !hit.name.toLowerCase().includes(hit.sym.toLowerCase()) && !/^[|ㅣ]$/.test(hit.sym) ? ` (${hit.sym})` : "";
+    const title = hit.name ? hit.name + abbr : hit.sym || (hit.img ? "" : "기호표에서 찾지 못했어요");
+    showPop(cv, e.clientX, e.clientY, title, where, box, null, { x: cx, y: cy }, hit.name ? null : hit.img);
+    highlightLegend(hit.entry);
+  });
+}
+
+function closePop(cv?: HTMLElement) {
+  document.querySelectorAll(".sympop").forEach((el) => el.remove());
+  (cv || document).querySelectorAll(".symbox").forEach((el) => el.remove());
+  highlightLegend(null);
+}
+/** 말풍선은 화면 위에 띄운다 (차트 스크롤 상자에 잘리지 않게), 화면 안으로 맞춤 */
+function showPop(cv: HTMLElement, clientX: number, clientY: number, title: string, sub: string, box: { x: number; y: number; w: number; h: number } | null, swatch: string | null, at = { x: clientX, y: clientY }, img: HTMLCanvasElement | null = null) {
+  closePop(cv);
+  if (box) cv.append(h("div", { class: "symbox", style: { left: box.x + "px", top: box.y + "px", width: box.w + "px", height: box.h + "px" } }));
+  const pop = h("div", { class: "sympop", role: "status", "data-x": String(at.x), "data-y": String(at.y) },
+    img ? h("img", { class: "symimg", src: img.toDataURL("image/png"), alt: title || "기호표의 이 기호" }) : null,
+    title ? h("b", {}, swatch ? h("i", { class: "sw", style: { background: swatch } }) : null, title) : null, h("small", { text: sub }));
+  pop.onclick = () => closePop(cv);
+  document.body.append(pop);
+  const w = pop.offsetWidth, hgt = pop.offsetHeight, vw = window.innerWidth;
+  const left = Math.max(8, Math.min(vw - w - 8, clientX - w / 2));
+  const below = clientY - hgt - 16 < 8;
+  pop.style.left = left + "px";
+  pop.style.top = (below ? clientY + 16 : clientY - hgt - 16) + "px";
+  pop.classList.toggle("below", below);
+  pop.style.setProperty("--tip", Math.max(12, Math.min(w - 12, clientX - left)) + "px");
+}
+window.addEventListener("scroll", () => document.querySelectorAll(".sympop").length && closePop(), { passive: true });
+
+/** 기호표 그림에서 그 항목을 표시 */
+let legendView: { canvas: HTMLCanvasElement; base: ImageData; lg: { x0: number; y0: number; x1: number }; scale: number } | null = null;
+function highlightLegend(entry: { area: { x0: number; y0: number; x1: number; y1: number } } | null) {
+  const lv = legendView;
+  if (!lv || !lv.canvas.isConnected) return;
+  const ctx = lv.canvas.getContext("2d")!;
+  ctx.putImageData(lv.base, 0, 0);
+  if (!entry) return;
+  const y0 = (entry.area.y0 - lv.lg.y0) * lv.scale, y1 = (entry.area.y1 - lv.lg.y0) * lv.scale;
+  ctx.fillStyle = "rgba(232, 62, 140, 0.18)";
+  ctx.fillRect(0, y0, lv.canvas.width, y1 - y0);
+  ctx.strokeStyle = "#E83E8C";
+  ctx.lineWidth = 3;
+  ctx.strokeRect(1.5, y0, lv.canvas.width - 3, y1 - y0);
+  const pane = lv.canvas.closest(".legend");
+  if (pane) {
+    const r = lv.canvas.getBoundingClientRect(), pr = pane.getBoundingClientRect();
+    const k = r.height / lv.canvas.height;
+    pane.scrollTop += r.top - pr.top + y0 * k - pane.clientHeight / 3;
+  }
 }
 
 function scrollStart(cv: HTMLElement, right: boolean) {
@@ -293,6 +387,7 @@ function legendPane(p: Pattern) {
     const c = await legendCanvas(pdf, p.legend, 2);
     c.setAttribute("aria-label", "기호표");
     body.append(c);
+    legendView = { canvas: c, base: c.getContext("2d")!.getImageData(0, 0, c.width, c.height), lg: p.legend, scale: 2 };
   })().catch(() => {});
   return pane;
 }
