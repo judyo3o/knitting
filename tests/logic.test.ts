@@ -515,3 +515,25 @@ describe("여러 단 공통 지시", () => {
     expect(spanParts("차트를 따라 진행", [59, 116]).each).toBe("차트를 따라 진행");
   });
 });
+
+describe("사이즈별 치수 표", () => {
+  it("사이즈 수만큼 숫자가 있는 치수 줄을 모은다", async () => {
+    const { sizeTable } = await import("../src/parse");
+    const t = ["사이즈 : S (M) L (XL) 2XL (3XL)", "가슴둘레 : 96 (104) 110 (1 0) 126 (136) cm", "(실제 가슴둘레보다 +20cm 정도 여유를 권장합니다.)", "총 기장 : 55 (57) 59 (61) 63 (66) cm *카라포함", "게이지 : 20코 26단"].join("\n");
+    const r = sizeTable(t)!;
+    expect(r.order).toEqual(["S", "M", "L", "XL", "2XL", "3XL"]);
+    expect(r.rows.map((x) => x.label)).toEqual(["가슴둘레", "총 기장"]);
+    expect(r.rows[0].values.map(String)).toEqual(["96", "104", "110", "NaN", "126", "136"]);
+    expect(r.rows[1].unit).toBe("cm");
+  });
+});
+
+describe("스와치로 사이즈 다시 고르기", () => {
+  it("내 콧수가 적으면(헐렁) 작은 사이즈를 권한다", async () => {
+    const { sizeAdvice } = await import("../src/gauge");
+    const r = sizeAdvice(["S", "M", "L", "XL"], [96, 104, 110, NaN], "L", { st: 18, rows: 23 }, { st: 17, rows: 23 });
+    expect(r.list.map((x) => x.mine).slice(0, 3)).toEqual([101.6, 110.1, 116.5]);
+    expect(r.best).toBe("M");
+    expect(sizeAdvice(["S", "M", "L"], [96, 104, 110], "L", { st: 18, rows: 23 }, { st: 18, rows: 23 }).best).toBe("L");
+  });
+});

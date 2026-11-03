@@ -143,7 +143,7 @@ function nowCard(p: Pattern, r: Row) {
   );
   // 게이지는 스와치 탭에서만
   const gs = /스와치|swatch|게이지|gauge/i.test(s) ? gaugeSummary(p) : null;
-  if (gs) card.append(h("button", { class: "link gauge-line", type: "button", text: gs, on: { click: () => openGauge(p, render) } }));
+  if (gs) card.append(h("button", { class: "link gauge-line", type: "button", text: gs, on: { click: () => openGauge(p, render, (sz) => openUpload({ appendTo: p.id, resize: sz, onDone: render })) } }));
   const yarnBox = h("div", { class: "yarns" });
   card.append(yarnBox);
   fillYarns(p, r, yarnBox);
@@ -691,7 +691,7 @@ function tools(p: Pattern, s: string) {
     window.scrollTo({ top: 0, behavior: "smooth" });
     if (!num.value.trim()) toast(`${sel.value} ${n}단(첫 단)으로 이동했어요.`);
   };
-  const gauge = h("button", { class: "btn ghost", type: "button", text: "게이지", on: { click: () => openGauge(p, render) } });
+  const gauge = h("button", { class: "btn ghost", type: "button", text: "게이지", on: { click: () => openGauge(p, render, (sz) => openUpload({ appendTo: p.id, resize: sz, onDone: render })) } });
   const wake = h("button", { class: "btn ghost", type: "button", "aria-pressed": String(wantWake), text: wantWake ? "화면 켜두는 중" : "화면 켜두기", on: { click: () => setWake(!wantWake) } });
   return h("div", { class: "tools" }, form, p.example ? null : gauge, wake);
 }

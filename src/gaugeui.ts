@@ -1,7 +1,10 @@
 /** 게이지 입력 화면: 무늬별로 도안 · 세탁 전 · 세탁 후 */
-import { compare, convertRows, convertSt, myGauge, rowsToCm, stToCm, washChange } from "./gauge";
-import { commit } from "./store";
-import { dialog, fmtShort, h } from "./ui";
+import { compare, convertRows, convertSt, myGauge, rowsToCm, sizeAdvice, stToCm, washChange } from "./gauge";
+import { sizeTable, type SizeRow } from "./parse";
+import { toLines } from "./pdfgeom";
+import { textItems } from "./pdf";
+import { commit, pdfOf } from "./store";
+import { ask, dialog, fmtShort, h } from "./ui";
 import type { Gauge, GaugeSet, Pattern } from "./types";
 
 const num = (v: string) => {
@@ -9,7 +12,7 @@ const num = (v: string) => {
   return Number.isFinite(n) && n > 0 ? n : 0;
 };
 
-export function openGauge(p: Pattern, onSaved: () => void) {
+export function openGauge(p: Pattern, onSaved: () => void, onResize?: (size: string) => void) {
   const sets: GaugeSet[] = p.gauges.length ? p.gauges.map((s) => ({ ...s })) : [{ label: "메리야스", pattern: null, before: null, after: null }];
   const list = h("div", { style: "display:flex;flex-direction:column;gap:14px" });
 
@@ -20,6 +23,45 @@ export function openGauge(p: Pattern, onSaved: () => void) {
     st.oninput = upd; rows.oninput = upd;
     return h("div", { class: "gauge-row" }, h("span", { class: "gauge-lab", text: label }), st, h("span", { text: "코" }), rows, h("span", { text: "단" }));
   };
+
+  // 스와치로 사이즈 다시 고르기: 도안의 사이즈별 치수를 내 게이지로 환산
+  const sizeBox = h("section", { class: "gauge-set", hidden: true });
+  let table: { order: string[]; rows: SizeRow[] } | null = null;
+  const updateSize = () => {
+    sizeBox.innerHTML = "";
+    const set = sets.find((x) => x.pattern && myGauge(x));
+    const row = table?.rows.find((r) => /가슴|둘레|품|chest|bust|width|너비/i.test(r.label)) || table?.rows[0];
+    if (!table || !row || !set) { sizeBox.hidden = true; return; }
+    sizeBox.hidden = false;
+    const a = sizeAdvice(table.order, row.values, p.size, set.pattern!, myGauge(set)!);
+    const u = row.unit || "";
+    sizeBox.append(
+      h("b", { text: "사이즈 다시 고르기" }),
+      h("p", { class: "gen", style: "margin:0", text: `'${set.label}' 내 게이지로 도안 콧수대로 뜨면 ${row.label}가 이렇게 돼요${p.size ? ` (지금 ${p.size}: 도안 ${a.target}${u})` : ""}.` }),
+      h("ul", { class: "info-list", style: "padding-left:18px" }, ...a.list.map((x) => h("li", { style: x.sz === a.best ? { fontWeight: "700" } : {} },
+        `${x.sz}: 도안 ${Number.isFinite(x.pat) ? x.pat + u : "?"} → 내 게이지 ${Number.isFinite(x.mine) ? x.mine + u : "?"}`,
+        x.sz.toUpperCase() === (p.size || "").toUpperCase() ? " · 지금 사이즈" : "",
+        x.sz === a.best && x.sz.toUpperCase() !== (p.size || "").toUpperCase() ? " · 원하던 크기에 가장 가까움" : ""))),
+      a.best && a.best.toUpperCase() !== (p.size || "").toUpperCase() && onResize
+        ? h("div", { class: "actions" }, h("button", { class: "btn", type: "button", text: `${a.best} 사이즈로 바꿔서 다시 읽기`, on: { click: async () => {
+            if (!(await ask("사이즈 바꾸기", `${p.size || "지금"} → ${a.best}로 바꾸고 도안을 그 사이즈로 다시 읽어요. 단 목록이 새 사이즈로 바뀌고, 게이지·진행 기록은 그대로 둬요.`, "바꾸기"))) return;
+            p.gauges = sets.filter((x) => x.pattern || x.before || x.after || x.label.trim());
+            commit(p);
+            dl.close();
+            onResize(a.best!);
+          } } }))
+        : h("p", { class: "gen", style: "margin:0", text: a.best ? "지금 사이즈 그대로 떠도 돼요." : "" }),
+    );
+  };
+  // 사이즈별 치수는 PDF 앞쪽(사이즈·게이지 쪽)에서 찾는다
+  (async () => {
+    const pdf = await pdfOf(p);
+    if (!pdf) return;
+    const lines: string[] = [];
+    for (let n = 1; n <= Math.min(6, pdf.numPages); n++) { const t = await textItems(pdf, n); lines.push(...toLines(t.items, t.w)); }
+    table = sizeTable(lines.join("\n"));
+    updateSize();
+  })().catch(() => {});
 
   const render = () => {
     list.innerHTML = "";
@@ -44,6 +86,7 @@ export function openGauge(p: Pattern, onSaved: () => void) {
         } else if (s.before && !s.after) lines.push("세탁·건조 후 다시 재서 '세탁 후'에 적으면 더 정확해요.");
         if (!lines.length) lines.push("10cm 안의 콧수·단수를 적어 주세요. 소수점도 돼요 (예: 18.5).");
         for (const l of lines) out.append(h("div", {}, l));
+        updateSize();
         const n = parseInt(calcIn.value, 10);
         calcOut.textContent = "";
         if (n && s.pattern && mine)
@@ -76,6 +119,7 @@ export function openGauge(p: Pattern, onSaved: () => void) {
   const dl = dialog("게이지 (10cm 기준)", [
     h("p", { class: "hint", text: "무늬마다 도안 게이지와 내 스와치(세탁 전·후)를 적으면 차이와 바늘 조정, 콧수·단수 환산을 보여줘요." }),
     list,
+    sizeBox,
     h("div", { class: "actions" },
       h("button", { class: "btn", type: "button", text: "+ 무늬 게이지 추가", on: { click: () => { sets.push({ label: "무늬", pattern: null, before: null, after: null }); render(); } } })),
     h("div", { class: "actions" },

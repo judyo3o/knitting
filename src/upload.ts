@@ -3,7 +3,7 @@ import { AiError, callAi, canCallDirect, errCopy, hasKey, parseJson } from "./ai
 import { inArtifact, sampleLimits } from "./artifact";
 import type { Part } from "./anthropicCall";
 import { MAX_BODY_BYTES, MAX_TOKENS, PAGES_PER_BATCH, PROMPT_VERSION } from "./config";
-import { cacheGet, cacheSet, putFile } from "./db";
+import { cacheGet, cacheSet, getFile, putFile } from "./db";
 import { manualHandler } from "./dialogs";
 import { openEditor } from "./drawui";
 import { newDrawing } from "./drawing";
@@ -18,7 +18,7 @@ import type { AiResult, AiSection, Pattern, Yarn } from "./types";
 import { clearBitmaps } from "./chart";
 import { findGauges } from "./gauge";
 
-type Opts = { appendTo?: string; relink?: boolean; onDone: () => void };
+type Opts = { appendTo?: string; relink?: boolean; resize?: string; onDone: () => void };
 
 export function openUpload(o: Opts) {
   const target = o.appendTo ? state.patterns[o.appendTo] : null;
@@ -26,7 +26,7 @@ export function openUpload(o: Opts) {
   let ctl: AbortController | null = null;
 
   const nameIn = h("input", { type: "text", placeholder: "예: 리본 케이블 가디건", value: target?.name || "", disabled: !!target });
-  const sizeIn = h("input", { type: "text", placeholder: "예: L", value: target?.size || "" });
+  const sizeIn = h("input", { type: "text", placeholder: "예: L", value: o.resize || target?.size || "" });
   const fileIn = h("input", { class: "sr", type: "file", multiple: true, accept: "application/pdf,image/*", id: "fileIn" });
   const drop = h("label", { class: "drop", for: "fileIn" }, h("strong", { text: o.relink ? "이 도안의 원본 PDF를 고르세요" : "도안 PDF나 사진을 고르세요" }), h("span", { text: "사진은 여러 장 한 번에 · 끌어다 놓아도 돼요" }));
   const fileList = h("ul", { class: "files" });
@@ -79,7 +79,7 @@ export function openUpload(o: Opts) {
 
   const panel = h("main", { id: "uploadView" },
     h("section", { class: "panel" },
-      h("h2", { text: o.relink ? `'${target?.name}' PDF 다시 연결` : target ? `'${target.name}'에 페이지 더 붙이기` : "도안 올리기" }),
+      h("h2", { text: o.relink ? `'${target?.name}' PDF 다시 연결` : o.resize && target ? `'${target.name}' 사이즈 바꾸기 (${target.size || "?"} → ${o.resize})` : target ? `'${target.name}'에 페이지 더 붙이기` : "도안 올리기" }),
       h("div", { class: "grid2" },
         h("label", { class: "field" }, "도안 이름", nameIn),
         h("label", { class: "field" }, h("span", {}, "뜨는 사이즈 ", h("small", { text: "S (M) L…처럼 나뉜 도안이면 꼭 적어주세요" })), sizeIn)),
@@ -169,7 +169,7 @@ export function openUpload(o: Opts) {
   function auto() {
     if (!up.pdf || !analyzed) return;
     const size = normSize(sizeIn.value);
-    const { pages: pick, scanned } = autoPick(up.info, sizeIn.value, target?.readPages || []);
+    const { pages: pick, scanned } = autoPick(up.info, sizeIn.value, o.resize ? [] : target?.readPages || []); // 사이즈 바꾸기는 처음부터 다시
     up.selected = new Set(pick); syncThumbs();
     pgRange.value = toRanges(pick);
     if (scanned) autoNote.textContent = "글자를 인식할 수 없는 PDF라 모든 페이지를 골랐어요. 차트만 있는 페이지는 눌러서 빼면 더 빨리 읽어요.";
@@ -178,6 +178,10 @@ export function openUpload(o: Opts) {
   }
   let sizeT: number | undefined;
   sizeIn.addEventListener("input", () => { clearTimeout(sizeT); sizeT = window.setTimeout(auto, 400); });
+
+  // 사이즈 바꾸기: 이 기기에 저장된 원본 PDF를 바로 불러와 새 사이즈로 쪽을 고른다
+  if (o.resize && target && target.src === "pdf")
+    getFile(target.id).then((f) => { if (f && f.type === "pdf") take([new File([f.blob], "pattern.pdf", { type: "application/pdf" })] as unknown as FileList); }).catch(() => {});
 
   /* ----- 읽기 ----- */
   readBtn.onclick = run;
@@ -293,6 +297,20 @@ export function openUpload(o: Opts) {
     }
     if (!sections.length) return say("단 정보를 찾지 못했어요. 서술이 있는 페이지를 골랐는지 확인해 주세요.");
 
+    if (target && o.resize) {
+      // 사이즈 바꾸기: 단 목록·도안 정보를 새 사이즈로 바꾼다 (게이지·진행 기록·배색은 그대로)
+      const { rows, secs } = expand(sections);
+      for (const [k, v] of Object.entries(target.secs)) if (secs[k]) secs[k] = { ...secs[k], round: secs[k].round || v.round };
+      Object.assign(target, { rows, secs, colors: mergeYarns(target.colors, colors), rev: target.rev + 1, size, readPages: readNow, info: mergeInfo("", notes) });
+      if (appNote) target.notes = appNote;
+      if (!rows.some((r) => r.s === target.tab)) target.tab = rows[0]?.s || target.tab;
+      fillColors(target);
+      for (const s2 of Object.keys(target.draw)) if (rows.some((r) => r.s === s2)) applyDrawing(target, s2);
+      clearBitmaps();
+      commit(target);
+      toast(`${size} 사이즈로 다시 읽었어요.`);
+      return close();
+    }
     if (target) {
       const merged = mergeSections(toSections(target.rows, target.secs), sections);
       const { rows, secs } = expand(merged);

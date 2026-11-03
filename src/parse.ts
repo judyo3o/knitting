@@ -173,6 +173,30 @@ export function localParseLines(lines: Line[], size = ""): AiSection[] {
   return secs.filter((s) => s.rows.length);
 }
 
+/**
+ * 사이즈별 치수 표: "가슴둘레 : 96 (104) 110 (120) 126 (136) cm" 처럼 사이즈 수만큼 숫자가 있는 치수 줄.
+ * 글자가 깨져 "(1 8)"처럼 갈라진 숫자는 NaN (모름)
+ */
+export type SizeRow = { label: string; values: number[]; unit: string };
+export function sizeTable(text: string): { order: string[]; rows: SizeRow[] } | null {
+  const order = sizeOrder(text);
+  if (order === DEFAULT_SIZES) return null;
+  const LABEL = /가슴|기장|품|어깨|소매|길이|둘레|너비|암홀|진동|chest|bust|length|width|sleeve|shoulder/i;
+  const rows: SizeRow[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const m = raw.match(/^\s*([^:：\d]{1,16}?)\s*[:：]\s*(.+)$/);
+    if (!m || !LABEL.test(m[1])) continue;
+    const um = m[2].match(/^([\d.\s()]+?)\s*(cm|mm|m|g|inch|in|")(?![a-z])/i);
+    const body = um ? um[1] : m[2].match(/^[\d.\s()]+/)?.[0] || "";
+    const toks = body.match(/\(\s*[\d.\s]+?\s*\)|\d+(?:\.\d+)?/g) || [];
+    if (toks.length !== order.length) continue;
+    const values = toks.map((t) => { const v = t.replace(/[()]/g, "").trim(); return /\s/.test(v) ? NaN : +v; });
+    if (rows.some((r) => r.label === m[1].trim())) continue;
+    rows.push({ label: m[1].trim(), values, unit: um ? um[2] : "" });
+  }
+  return rows.length ? { order, rows } : null;
+}
+
 /** 도안 정보 줄 (사이즈별 치수·여유분, 실·바늘, 게이지, 재료) — 단 목록이 아니라 '도안 정보'로 따로 */
 const INFO_RE = /사이즈|가슴\s*둘레|품|총\s*장|기장|어깨\s*(?:너비|폭)|소매\s*(?:길이|기장)|진동|암홀|완성\s*(?:치수|크기)|실제\s*치수|여유|권장|실\s*[:：]|사용\s*실|바늘|게이지|부자재|단추|\b(?:finished|measurements?|chest|bust|ease|yarns?|needles?|hooks?|gauge|tension|notions)\b/i;
 export function extractInfo(text: string, size = "", max = 900): string {

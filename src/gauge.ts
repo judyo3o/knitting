@@ -87,3 +87,20 @@ export function primaryGauge(sets: GaugeSet[]): Gauge | null {
   }
   return null;
 }
+
+/**
+ * 스와치로 사이즈 다시 고르기: 내 게이지로 도안 콧수를 뜨면 치수가 (도안 콧수 ÷ 내 콧수) 배가 된다.
+ * 지금 사이즈의 도안 치수(원하던 크기)에 가장 가까운 사이즈를 고른다.
+ */
+export function sizeAdvice(order: string[], values: number[], current: string, pattern: Gauge, mine: Gauge) {
+  const f = pattern.st / mine.st;
+  const list = order.map((sz, i) => ({ sz, pat: values[i], mine: Number.isFinite(values[i]) ? Math.round(values[i] * f * 10) / 10 : NaN }));
+  const ci = order.findIndex((x) => x.toUpperCase() === (current || "").toUpperCase());
+  const target = ci >= 0 ? values[ci] : NaN;
+  let best: string | null = null;
+  if (Number.isFinite(target)) {
+    let d = Infinity;
+    for (const x of list) if (Number.isFinite(x.mine) && Math.abs(x.mine - target) < d) { d = Math.abs(x.mine - target); best = x.sz; }
+  }
+  return { factor: f, list, target, best };
+}
