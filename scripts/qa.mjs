@@ -438,6 +438,20 @@ await step("다크 모드 화면", async () => {
   ok(bg !== "rgb(243, 245, 242)", "다크에서도 밝은 배경");
   return bg;
 });
+await step("단 안 적고 이동 → 그 파트 첫 단", async () => {
+  const opts = await T(".tools select option").allTextContents();
+  const target = opts[opts.length > 1 ? 1 : 0];
+  await T(".tools select").selectOption(target);
+  await T(".tools input[type=number]").fill("");
+  await T(".tools button[type=submit]").click();
+  await page.waitForTimeout(300);
+  const chip = await txt(".now .chip");
+  const first = (await T(".rows2 li .n").first().textContent()).match(/\d+/)[0];
+  const now = await txt(".rowno b");
+  ok(chip === target, `파트가 안 바뀜: ${chip}`);
+  ok(now === first, `첫 단이 아님: ${now} (첫 단 ${first})`);
+  return `${target} ${now}단`;
+});
 await step("새로고침 후 유지 (도안·탭·단)", async () => {
   const sel = await T("#patSel").inputValue();
   const row = await txt(".rowno b");

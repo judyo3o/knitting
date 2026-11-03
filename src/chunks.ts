@@ -48,6 +48,26 @@ export function chunksOf(text: string): string[] {
   return out;
 }
 
+/**
+ * 단 서술 → 안내 문장 + 뜨는 묶음. 서술이 여러 줄이면 코 지시 줄(겉2, 안3, 2/1 LC…)만 묶음으로 나누고,
+ * 나머지 문장("…마커를 걸어줍니다", "차트를 따라 진행")은 안내로 따로 보여 준다.
+ * 코 지시 사이의 " / "는 마커 자리라 "마커" 묶음으로 남긴다.
+ */
+export function splitNarrative(text: string): { notes: string[]; chunks: string[] } {
+  const lines = (text || "").split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  const isStitchLine = (l: string) => {
+    const parts = splitTop(l.replace(/\s\/\s/g, ", "));
+    const ok = parts.filter((x) => countChunk(x) != null || ST_MARK.test(x)).length;
+    return parts.length >= 2 && ok / parts.length >= 0.6;
+  };
+  const stitch = lines.filter(isStitchLine);
+  if (!stitch.length) return { notes: [], chunks: chunksOf(text) };
+  return {
+    notes: lines.filter((l) => !stitch.includes(l)),
+    chunks: chunksOf(stitch.map((l) => l.replace(/\s\/\s/g, ", 마커, ")).join(", ")),
+  };
+}
+
 type Tok = { re: RegExp; n: (m: RegExpMatchArray) => number };
 const TOKENS: Tok[] = [
   { re: /^(\d+)\s*\/\s*(\d+)\s*(?:LPC|RPC|LC|RC)/i, n: (m) => +m[1] + +m[2] },

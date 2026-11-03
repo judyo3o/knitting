@@ -226,6 +226,7 @@ await page.click(".ptab:has-text('뒷판')");
 
 step("차트 기호 누르기 → 기법 이름 말풍선 + 기호표 줄");
 {
+  await page.locator(".chartview").evaluate((el) => { el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2; }); // 차트 가운데 (끝은 단 번호 칸)
   const bb = await page.locator(".chartview").boundingBox(); // 보이는 부분 가운데
   await page.mouse.click(bb.x + bb.width * 0.5, bb.y + bb.height * 0.5);
   await page.waitForSelector(".sympop", { timeout: 30000 });

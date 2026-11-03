@@ -109,3 +109,20 @@ import { newPattern } from "../src/model";
   }
   return out;
 };
+
+/** 누르기 점검: 단 n에서 코 번호 v 자리, 그리고 단 번호 칸(차트 왼쪽 끝) */
+(window as any).taps = async (b64: string, page: number, n: number, vs: number[]) => {
+  const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  const pdf = await openPdf(new Blob([u]));
+  const p = newPattern({ id: "tp", name: "tp" });
+  for (let k = 1; k <= Math.min(14, pdf.numPages); k++) { const t = await textItems(pdf, k); if (!t.items.some((i) => LEGEND_RE.test(i.str))) continue; const lg = findLegend(t.items); if (lg) { p.legend = { page: k, ...lg }; break; } }
+  const bmp = await chartBitmap(pdf, "tp", page);
+  const c = chartFor(bmp.charts, n)!;
+  const { stitchAxis } = await import("../src/pdfgeom");
+  const ax = stitchAxis((await textItems(pdf, page)).items, c)!;
+  const out: string[] = [];
+  const show = (lbl: string, hit: any) => out.push(`${lbl}: ${hit ? `${hit.name} · 오른쪽부터 ${hit.fromRight} · 왼쪽부터 ${hit.fromLeft}` : "null(코 아님)"}`);
+  show("단 번호 칸", await identify(p, pdf, page, bmp, c.x0 + 3, rowY(c, n)));
+  for (const v of vs) show(`코 ${v}`, await identify(p, pdf, page, bmp, ax.a + ax.b * v, rowY(c, n)));
+  return out;
+};

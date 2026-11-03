@@ -154,7 +154,7 @@ function splitByGap(col: Pt[]): Pt[][] {
 /**
  * 코 번호 축: 차트 아래(또는 위)의 숫자 줄("38 34 … 5 1") → 가장 왼쪽·오른쪽 숫자의 가운데 x(pt)와 가장 큰 번호(= 콧수)
  */
-export function stitchAxis(items: TItem[], c: Chart): { x0: number; x1: number; max: number } | null {
+export function stitchAxis(items: TItem[], c: Chart): { x0: number; x1: number; max: number; a: number; b: number } | null {
   const h = rowH(c);
   const yBot = rowY(c, c.nMin) + h / 2, yTopC = rowY(c, c.nMax) - h / 2;
   const nearAxis = (x: number) => c.axes.some((a) => Math.abs(a - x) < h * 1.5);
@@ -171,7 +171,7 @@ export function stitchAxis(items: TItem[], c: Chart): { x0: number; x1: number; 
     const cell = Math.abs(b);
     if (cell < h * 0.4 || cell > h * 2.5) continue;
     if (pts.some((q) => Math.abs(mx + b * (q.v - mv) - q.x) > cell * 0.4)) continue;
-    return { x0: pts[0].x, x1: pts[pts.length - 1].x, max: Math.max(...pts.map((q) => q.v)) };
+    return { x0: pts[0].x, x1: pts[pts.length - 1].x, max: Math.max(...pts.map((q) => q.v)), a: mx - b * mv, b }; // x = a + b × 코 번호
   }
   return null;
 }
@@ -264,4 +264,28 @@ export function toLines(items: TItem[], pageW = 0): string[] {
   }
   const left = segs.filter((s) => s.x <= W * 0.38), right = segs.filter((s) => s.x > W * 0.38);
   return [...left, ...right].map(clean);
+}
+
+/**
+ * 원본 쪽에서 이 단 서술이 있는 자리 (내 사이즈 구역 안에서). 한 쪽에 여러 사이즈가 섞여 있어도 내 사이즈 줄을 찾는다.
+ * 반환: 강조할 세로 범위 (pt, 위에서부터)
+ */
+export function findRowSpot(items: TItem[], n: number, span: [number, number] | null, size: string): { y0: number; y1: number } | null {
+  const SZ = /^\s*(\d?XL|XXXL|XXL|XS|S|M|L)\s*사이즈/i;
+  const norm = (x: string) => x.toUpperCase().replace(/^XXL$/, "2XL").replace(/^XXXL$/, "3XL");
+  const heads = items.filter((i) => SZ.test(i.str)).map((i) => ({ sz: norm(i.str.match(SZ)![1]), y: i.y })).sort((a, b) => a.y - b.y);
+  let lo = -Infinity, hi = Infinity;
+  if (size && heads.length) {
+    const mine = heads.find((x) => x.sz === norm(size));
+    if (mine) { lo = mine.y - 1; hi = heads.find((x) => x.y > mine.y + 1)?.y ?? Infinity; }
+    else hi = heads[0].y; // 내 사이즈 제목이 없으면 앞쪽에서 이어지는 부분만 (첫 사이즈 제목 전까지)
+  }
+  const ROW = /^\s*\(?\s*(\d{1,3})\s*단?\s*(?:[~\-–]\s*(\d{1,3})\s*)?단/;
+  const labels = items.filter((i) => i.y > lo && i.y < hi && ROW.test(i.str)).sort((a, b) => a.y - b.y);
+  const want = span ? span[0] : n;
+  const hit = labels.find((i) => { const m = i.str.match(ROW)!; const a = +m[1], b = m[2] ? +m[2] : a; return (want >= a && want <= b) || (n >= a && n <= b); });
+  if (!hit) return null;
+  const next = labels.find((i) => i.y > hit.y + hit.h * 0.8);
+  const y1 = Math.min(next ? next.y - next.h : hit.y + hit.h * 3, hi === Infinity ? Infinity : hi - hit.h);
+  return { y0: hit.y - hit.h - 2, y1: Math.max(hit.y + 3, y1) };
 }

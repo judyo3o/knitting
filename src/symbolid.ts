@@ -258,6 +258,15 @@ function rowCtx(pdf: Pdf, page: number, bmp: Bitmap, c: Chart, n: number): Promi
   return pr;
 }
 
+/** 칸이 있나: 위·아래 테두리에 모두 선이 있으면 (경사뜨기로 안 뜨는 곳·모양 낸 가장자리 바깥은 아래 단의 윗선만 있다) */
+function cellExists(R: RowCtx, k: number): boolean {
+  const { B, S, h, yTop, dark } = R;
+  const edge = (yy: number, x: number) => { for (let d = -2; d <= 2; d++) if (dark(x, yy + d)) return true; return false; };
+  const xs = [0.3, 0.5, 0.7].map((f) => B[k] + (B[k + 1] - B[k]) * f);
+  const top = Math.round(yTop * S), bot = Math.round((yTop + h) * S);
+  return xs.filter((x) => edge(top, Math.round(x)) && edge(bot, Math.round(x))).length >= 2;
+}
+
 /**
  * 한 단 전체를 기기에서 읽는다: 뜨기 시작하는 쪽부터 칸마다 기호 → 이름.
  * 이 단에 없는 칸(모양 낸 가장자리·경사뜨기로 안 뜨는 곳 — 위아래 격자선이 없음)은 건너뛴다.
@@ -270,12 +279,7 @@ export async function readRow(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, n
   if (!R.lat || R.M < 2) return null;
   const { B, M, S, h, yTop, dark } = R;
   // 칸이 있나: 위·아래 테두리에 모두 선이 있으면 (안 뜨는 곳은 아래 단의 윗선만 있다)
-  const edge = (yy: number, x: number) => { for (let d = -2; d <= 2; d++) if (dark(x, yy + d)) return true; return false; };
-  const exists = (k: number) => {
-    const xs = [0.3, 0.5, 0.7].map((f) => B[k] + (B[k + 1] - B[k]) * f);
-    const top = Math.round(yTop * S), bot = Math.round((yTop + h) * S);
-    return xs.filter((x) => edge(top, Math.round(x)) && edge(bot, Math.round(x))).length >= 2; // 그려진 칸은 위·아래 선이 다 있다
-  };
+  const exists = (k: number) => cellExists(R, k);
   const yMid = rowY(c, n);
   const items = (await textItems(pdf, page)).items;
   // 코 번호 축(차트 아래·위의 "38 … 5 1")이 있으면 그 사이 칸만 코다 — 바깥 칸은 시작 화살표(→ ←) 같은 표시용
@@ -298,7 +302,8 @@ export async function readRow(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, n
     const hit = await identify(p, pdf, page, bmp, (B[k] + B[k + 1]) / 2 / S, yMid);
     let cells = 1;
     if (hit?.rect) {
-      const a = (hit.fromLeft || k + 1) - 1, b = M - (hit.fromRight || M - k);
+      const near = (v: number) => B.reduce((bi, bv, i) => (Math.abs(bv - v * S) < Math.abs(B[bi] - v * S) ? i : bi), 0);
+      const a = Math.min(k, near(hit.rect.x0)), b = Math.max(k, near(hit.rect.x1) - 1);
       for (let j = a; j <= b; j++) seen.add(j);
       cells = Math.max(1, b - a + 1);
     } else seen.add(k);
@@ -333,11 +338,25 @@ export async function identify(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, 
     rect = { x0: B[k] / S, x1: B[k + 1] / S, y0: yTop, y1: yTop + h };
     st = M - k;
   }
+  const items = (await textItems(pdf, page)).items;
+  // 코 번호 축이 있으면 그 번호로 센다. 번호 밖 칸(단 번호 상자·시작 화살표 칸)은 코가 아님
+  const ax = stitchAxis(items, c);
+  const vAt = (px: number) => (ax ? Math.round((px - ax.a) / ax.b) : 0);
+  if (ax && rect) {
+    const v = vAt((rect.x0 + rect.x1) / 2);
+    if (v < 1 || v > ax.max) return null;
+  }
+  if (lat && rect && !cellExists(R, k)) return null; // 이 단에 없는 칸 (경사뜨기로 안 뜨는 곳 등)
   const L = await legendData(p, pdf);
   const { entries, tmpls } = L;
   // 기호 칸 범위 → 오른쪽/왼쪽에서 몇 번째 (뜨기 시작하는 쪽에서 세려고 둘 다)
   const idx = (r: Box | null) => {
     if (!lat || !r) return { fromRight: st, fromLeft: null };
+    if (ax) {
+      const cw = Math.abs(ax.b);
+      const vl = vAt(r.x0 + cw / 2), vr = vAt(r.x1 - cw / 2); // 기호의 왼쪽 끝 칸, 오른쪽 끝 칸 번호
+      return ax.b < 0 ? { fromRight: vr, fromLeft: ax.max - vl + 1 } : { fromLeft: vl, fromRight: ax.max - vr + 1 };
+    }
     const near = (v: number) => B.reduce((bi, bv, i) => (Math.abs(bv - v * S) < Math.abs(B[bi] - v * S) ? i : bi), 0);
     const a = near(r.x0), b = near(r.x1) - 1;
     return { fromRight: M - b, fromLeft: a + 1 };
@@ -346,7 +365,7 @@ export async function identify(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, 
     sym, name: e ? (unreadable(e.name) ? "" : e.name) : "", guess, rect: r, n, st, ...idx(r), entry: e, img: e && unreadable(e.name) ? lineImage(L, e) : null,
   });
   // 1) 글자 기호
-  const t = textAt((await textItems(pdf, page)).items, x, y);
+  const t = textAt(items, x, y);
   const token = t ? t.str.trim() : "";
   if (t) {
     const e = matchToken(token, entries);

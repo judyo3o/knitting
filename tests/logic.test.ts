@@ -482,3 +482,25 @@ describe("배색 격자 크기", () => {
     expect(partStitches([R(1, "겉뜨기")])).toBe(null);
   });
 });
+
+describe("서술 줄 나누기", () => {
+  it("안내 문장은 따로, 코 지시만 묶음, ' / '는 마커", async () => {
+    const { splitNarrative } = await import("../src/chunks");
+    const t = "2단에서 표시한 칸 위에 마커를 양쪽에 하나씩 겁니다. (나중에 코 줍는 위치)\n안4, 겉2, 안2 / 안2, 겉9 / 안1, 턴\n차트를 따라 진행 (양쪽 가장자리 'T' 표시 위치 차트대로)";
+    const r = splitNarrative(t);
+    expect(r.notes.length).toBe(2);
+    expect(r.chunks).toEqual(["안4", "겉2", "안2", "마커", "안2", "겉9", "마커", "안1", "턴"]);
+    expect(splitNarrative("겉뜨기 2, 안뜨기 2").chunks).toEqual(["겉뜨기 2", "안뜨기 2"]);
+  });
+});
+
+describe("원본 쪽에서 이 단 자리", () => {
+  it("한 쪽에 다른 사이즈가 섞여 있어도 내 사이즈 구역의 그 단", async () => {
+    const { findRowSpot } = await import("../src/pdfgeom");
+    const I = (str: string, y: number) => ({ str, x: 40, y, w: 60, h: 10 });
+    const items = [I("15단(RS)", 60), I("16단~58단까지 차트를 따라 진행합니다.", 100), I("L사이즈", 160), I("2단(WS)", 200), I("3단(RS)", 230), I("16단~58단까지 차트를 따라 진행합니다.", 400), I("XL사이즈", 500), I("2단(WS)", 540)];
+    expect(findRowSpot(items as any, 2, null, "L")).toEqual({ y0: 188, y1: 220 });
+    expect(findRowSpot(items as any, 20, [16, 58], "L")!.y0).toBe(388);
+    expect(findRowSpot(items as any, 2, null, "M")).toBe(null);
+  });
+});

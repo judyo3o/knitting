@@ -1,5 +1,5 @@
 import "./style.css";
-import { chunksOf, stitchesThrough } from "./chunks";
+import { chunksOf, splitNarrative, stitchesThrough } from "./chunks";
 import { MAX_TOKENS } from "./config";
 import { callAi, canCallDirect, errCopy } from "./ai";
 import { inArtifact } from "./artifact";
@@ -312,8 +312,15 @@ function symbolTap(p: Pattern, pdf: any, page: number, bmp: any, cv: HTMLElement
     const box = hit.rect ? { x: c.offsetLeft + (hit.rect.x0 - v.x0) * v.k, y: c.offsetTop + (hit.rect.y0 - v.yTop) * v.k, w: (hit.rect.x1 - hit.rect.x0) * v.k, h: (hit.rect.y1 - hit.rect.y0) * v.k } : null;
     // 기법 이름을 글자로. 약어(SSK 등)가 이름에 없으면 괄호로 덧붙임
     const abbr = hit.sym && hit.sym.length <= 12 && !hit.name.toLowerCase().includes(hit.sym.toLowerCase()) && !/^[|ㅣ]$/.test(hit.sym) ? ` (${hit.sym})` : "";
-    const title = hit.name ? hit.name + abbr : hit.sym || (hit.img ? "" : "기호표에서 찾지 못했어요");
-    showPop(cv, e.clientX, e.clientY, title, where, box, null, { x: cx, y: cy }, hit.name ? null : hit.img);
+    let title = hit.name ? hit.name + abbr : hit.sym || (hit.img ? "" : "기호표에서 찾지 못했어요");
+    let where2 = where;
+    // 안면 단: 차트는 겉면 그림이라 겉뜨기 기호는 안뜨기로, 안뜨기 기호는 겉뜨기로 뜬다
+    if (fromLeft && /^(겉뜨기|안뜨기)$/.test(hit.name.trim())) {
+      const real = hit.name.trim() === "겉뜨기" ? "안뜨기" : "겉뜨기";
+      where2 = `${where} · 차트 기호는 ${hit.name.trim()}(안면이라 반대로)`;
+      title = real;
+    }
+    showPop(cv, e.clientX, e.clientY, title, where2, box, null, { x: cx, y: cy }, hit.name ? null : hit.img);
     highlightLegend(hit.entry);
   });
 }
@@ -455,7 +462,7 @@ function chartPicker(p: Pattern, r: Row) {
 /* ---------------- 서술 (묶음 단위 진행) ---------------- */
 function narrative(p: Pattern, r: Row) {
   const k = key(r.s, r.n);
-  const chunks = chunksOf(r.t || "");
+  const chunks = splitNarrative(r.t || "").chunks;
   const wrap = h("div", { style: "display:flex;flex-direction:column;gap:6px" });
   if (r.auto) wrap.append(h("span", { class: "gen", text: "그린 배색에서 만든 서술 · " + (sideOf(p, r) === "RS" || p.secs[r.s]?.round ? "오른쪽부터 읽음" : "왼쪽부터 읽음") }));
   if (view.editing) {
@@ -491,11 +498,14 @@ function narrative(p: Pattern, r: Row) {
     }).catch(() => { slot.textContent = "차트에서 이 단을 읽지 못했어요."; });
     return wrap;
   }
-  if (!chunks.length) {
-    wrap.append(h("p", { class: "instr", text: "(서술 없음)" }));
+  // 안내 문장은 위에 따로, 코 지시만 묶음으로
+  const nar = splitNarrative(r.t || "");
+  for (const n of nar.notes) wrap.append(h("p", { class: "instr note", text: n }));
+  if (!nar.chunks.length) {
+    if (!nar.notes.length) wrap.append(h("p", { class: "instr", text: "(서술 없음)" }));
     return wrap;
   }
-  wrap.append(chunkBox(p, r, chunks));
+  wrap.append(chunkBox(p, r, nar.chunks));
   return wrap;
 }
 
@@ -590,7 +600,7 @@ function rowActions(p: Pattern, r: Row, side: "RS" | "WS", round: boolean) {
     b.onclick = () => explainRow(p, r, side, round, b);
     box.append(b);
   }
-  if (r.pg && p.src && p.src !== "text") box.append(h("button", { class: "btn ghost", type: "button", text: p.src === "pdf" ? `원본 p${r.pg} 보기` : `원본 사진 ${r.pg} 보기`, on: { click: () => openViewer(p, r.pg!) } }));
+  if (r.pg && p.src && p.src !== "text") box.append(h("button", { class: "btn ghost", type: "button", text: p.src === "pdf" ? `원본 p${r.pg} 보기` : `원본 사진 ${r.pg} 보기`, on: { click: () => openViewer(p, r.pg!, { n: r.n, span: r.span }) } }));
   if (page && p.src === "pdf") box.append(h("button", { class: "btn ghost", type: "button", text: `차트 p${page} 원본`, on: { click: () => openViewer(p, page) } }));
   if (inArtifact && state.ai.provider === "artifact") box.append(h("button", { class: "btn", type: "button", text: "이 단 물어보기", on: { click: async () => (await import("./chat")).openChat(p, r) } }));
   box.append(h("button", { class: "btn ghost", type: "button", text: "이 단 서술 수정", on: { click: () => { view.editing = true; render(); } } }));
@@ -642,10 +652,13 @@ function tools(p: Pattern, s: string) {
   const form = h("form", {}, sel, num, h("button", { class: "btn", type: "submit", text: "이동" }));
   form.onsubmit = (e) => {
     e.preventDefault();
-    const n = parseInt(num.value, 10);
-    if (!jumpTo(p, sel.value, n)) return toast(`${sel.value}에 ${n}단이 없어요.`);
+    // 단을 안 적고 누르면 그 파트의 첫 단으로
+    const n = num.value.trim() ? parseInt(num.value, 10) : partRows(p, sel.value)[0]?.n;
+    if (n == null || !jumpTo(p, sel.value, n)) return toast(num.value.trim() ? `${sel.value}에 ${num.value}단이 없어요.` : `${sel.value}에 단이 없어요.`);
     commit(p, false);
     render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    if (!num.value.trim()) toast(`${sel.value} ${n}단(첫 단)으로 이동했어요.`);
   };
   const gauge = h("button", { class: "btn ghost", type: "button", text: "게이지", on: { click: () => openGauge(p, render) } });
   const wake = h("button", { class: "btn ghost", type: "button", "aria-pressed": String(wantWake), text: wantWake ? "화면 켜두는 중" : "화면 켜두기", on: { click: () => setWake(!wantWake) } });
@@ -813,6 +826,17 @@ document.addEventListener("visibilitychange", () => { if (wantWake && document.v
   // 아티팩트: 다른 기기에서 뜬 기록까지 불러온다
   syncRemote().then((changed) => changed && render());
   startAutosave(() => renderMeta(active()));
+  // 화면 폭이 바뀌면(가로·세로 돌리기, 창 크기) 차트·내용을 새 폭에 맞춰 다시 그린다. 높이만 바뀌는 건(키보드·주소창) 무시
+  let lastW = window.innerWidth, rT: number | undefined;
+  window.addEventListener("resize", () => {
+    if (Math.abs(window.innerWidth - lastW) < 24) return;
+    clearTimeout(rT);
+    rT = window.setTimeout(() => {
+      lastW = window.innerWidth;
+      const typing = document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+      if (!typing && !view.editing && !document.querySelector(".editor")) render();
+    }, 250);
+  });
   // 저장 공간을 브라우저가 함부로 비우지 않게
   (navigator.storage as any)?.persist?.().catch(() => {});
 })();

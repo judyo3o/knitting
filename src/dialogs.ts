@@ -3,7 +3,8 @@ import { AiError, providerLabel, type Provider } from "./ai";
 import { inArtifact } from "./artifact";
 import type { CallReq } from "./anthropicCall";
 import { getFile } from "./db";
-import { openPdf, renderWidth } from "./pdf";
+import { openPdf, renderWidth, textItems } from "./pdf";
+import { findRowSpot } from "./pdfgeom";
 import { saveAi, state } from "./store";
 import { dialog, download, h, toast } from "./ui";
 import type { Pattern } from "./types";
@@ -88,7 +89,7 @@ function b64Blob(b64: string, type: string) {
 }
 
 /** 원본 보기 */
-export async function openViewer(p: Pattern, page: number) {
+export async function openViewer(p: Pattern, page: number, focus?: { n: number; span: [number, number] | null }) {
   const rec = await getFile(p.id);
   if (!rec) return toast("원본은 도안을 올린 기기에만 저장돼요. 'PDF 다시 연결'로 골라주세요.", 4200);
   const pdf = rec.type === "pdf" ? await openPdf(rec.blob).catch(() => null) : null;
@@ -108,7 +109,22 @@ export async function openViewer(p: Pattern, page: number) {
     prevB.disabled = cur <= 1;
     nextB.disabled = cur >= count;
     body.innerHTML = "";
-    if (pdf) body.append(await renderWidth(pdf, cur, Math.min(2400, Math.max(1200, body.clientWidth * 2))));
+    if (pdf) {
+      const cv = await renderWidth(pdf, cur, Math.min(2400, Math.max(1200, body.clientWidth * 2)));
+      const box = h("div", { class: "vpage" }, cv);
+      body.append(box);
+      // 이 단 서술 자리 강조 (한 쪽에 다른 사이즈가 섞여 있어도 내 사이즈 구역에서)
+      if (focus && cur === page) {
+        const t = await textItems(pdf, cur);
+        const spot = findRowSpot(t.items, focus.n, focus.span, p.size);
+        if (spot) {
+          const mark = h("div", { class: "vmark", style: { top: (spot.y0 / t.h) * 100 + "%", height: ((spot.y1 - spot.y0) / t.h) * 100 + "%" } });
+          box.append(mark);
+          requestAnimationFrame(() => body.scrollTo({ top: Math.max(0, mark.offsetTop - 60) }));
+          label.textContent = `${cur} / ${count} · ${p.size ? p.size + "사이즈 " : ""}${focus.n}단 위치`;
+        }
+      }
+    }
     else if (rec.type === "images") {
       const img = h("img", { alt: `${cur}번째 도안 사진` });
       const url = URL.createObjectURL(rec.blobs[cur - 1]);
