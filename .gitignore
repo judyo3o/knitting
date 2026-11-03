@@ -1,0 +1,10 @@
+node_modules/
+dist/
+dev-dist/
+*.pdf
+fixtures/
+check-out/
+public/pdfjs/
+.env
+.env.*
+.vercel
