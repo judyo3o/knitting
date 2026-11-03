@@ -301,7 +301,7 @@ export async function readRow(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, n
       const cw = (range[1] - range[0]) / cnt;
       const order = [...Array(cnt).keys()];
       if (!fromLeft) order.reverse();
-      return order.map((i) => ({ name: cellKeyColor(bmp, { x0: range[0] + i * cw, x1: range[0] + (i + 1) * cw, y0: yT, y1: yT + hh }, key) || "?", sym: "", cells: 1, yarn: true }));
+      return order.map((i) => ({ name: cellKeyColor(bmp, { x0: range[0] + i * cw, x1: range[0] + (i + 1) * cw, y0: yT, y1: yT + hh }, key) || "?", sym: "", cells: 1, yarn: true, x0: range[0] + i * cw, x1: range[0] + (i + 1) * cw }));
     }
   }
   const R = await rowCtx(pdf, page, bmp, c, n);
@@ -333,17 +333,18 @@ export async function readRow(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, n
     if (key.length) {
       seen.add(k);
       const code = cellKeyColor(bmp, { x0: B[k] / S, x1: B[k + 1] / S, y0: yTop, y1: yTop + h }, key);
-      if (code) { out.push({ name: code, sym: code, cells: 1, yarn: true }); continue; }
+      if (code) { out.push({ name: code, sym: code, cells: 1, yarn: true, x0: B[k] / S, x1: B[k + 1] / S }); continue; }
     }
     const hit = await identify(p, pdf, page, bmp, (B[k] + B[k + 1]) / 2 / S, yMid, range);
-    let cells = 1;
+    let cells = 1, xa = B[k] / S, xb = B[k + 1] / S;
     if (hit?.rect) {
       const near = (v: number) => B.reduce((bi, bv, i) => (Math.abs(bv - v * S) < Math.abs(B[bi] - v * S) ? i : bi), 0);
       const a = Math.min(k, near(hit.rect.x0)), b = Math.max(k, near(hit.rect.x1) - 1);
       for (let j = a; j <= b; j++) seen.add(j);
       cells = Math.max(1, b - a + 1);
+      xa = B[a] / S; xb = B[b + 1] / S;
     } else seen.add(k);
-    out.push({ name: hit?.name || "", sym: hit?.sym || "", cells });
+    out.push({ name: hit?.name || "", sym: hit?.sym || "", cells, x0: xa, x1: xb });
   }
   return out;
 }
@@ -485,3 +486,4 @@ export async function identify(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, 
   const r2 = { x0: B[best.start] / S, x1: B[best.start + best.cells] / S, y0: yTop, y1: yTop + h };
   return out(token || best.e.sym, best.e, true, r2);
 }
+

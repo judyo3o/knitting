@@ -196,7 +196,7 @@ export function boundaries(xs: number[], w: number): number[] {
   return out;
 }
 
-export type RowStitch = { name: string; sym: string; cells: number; yarn?: boolean }; // yarn: 배색 칸 (name = 색 기호)
+export type RowStitch = { name: string; sym: string; cells: number; yarn?: boolean; x0?: number; x1?: number }; // yarn: 배색 칸 (name = 색 기호) · x0/x1: 차트 위 칸 범위(pt)
 /** 읽은 칸 → 서술 ("겉2, 안2, 2/2 LC, …"). 안면에서 뜨면 겉↔안을 바꾼다 */
 export function rowText(st: RowStitch[], ws: boolean): string {
   const label = (x: RowStitch) => {
@@ -259,4 +259,19 @@ function abbrEntries(lines: { y: number; h: number; items: TItem[] }[]): LegendE
     }
   }
   return out.map(({ col: _c, ...e }) => e);
+}
+
+/**
+ * 뜨기 시작하는 쪽에서 count코를 뜬 자리의 x (pt): 읽은 칸들을 순서대로 세어 그 칸의 끝 경계.
+ * 모아뜨기처럼 한 칸이 여러 코를 쓰는 기호는 칸 하나로 센다 (대략).
+ */
+export function stitchEdgeX(st: RowStitch[], count: number, fromLeft: boolean): number | null {
+  let acc = 0;
+  for (const x of st) {
+    if (x.x0 == null || x.x1 == null) continue;
+    acc += x.cells;
+    if (acc >= count) return fromLeft ? x.x1 : x.x0;
+  }
+  const last = [...st].reverse().find((x) => x.x0 != null);
+  return last ? (fromLeft ? last.x1! : last.x0!) : null;
 }

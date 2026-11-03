@@ -10,7 +10,7 @@ import {
   applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, spanParts, finishText, continuousKnitMs, castLabel, flexibleRow, addRowAfter, removeRow, workIn, workStart, workStop, sideOf, stepNext, stepPrev,
 } from "./model";
 import { blobB64, canvasBlob, textItems } from "./pdf";
-import { chartFor, chartsForSize, findCharts, findLegend, LEGEND_RE, rowH, sizeRange, stitchAxis } from "./pdfgeom";
+import { chartFor, chartsForSize, findCharts, findLegend, LEGEND_RE, rowH, rowY, sizeRange, stitchAxis } from "./pdfgeom";
 import { explainCheck, explainDraft, explainHead } from "./prompts";
 import { active, commit, exportJson, importJson, load, pdfOf, removePattern, saveNow, setActive, startAutosave, state, syncRemote } from "./store";
 import { openSettings, manualHandler, openViewer } from "./dialogs";
@@ -19,6 +19,7 @@ import { openEditor, type DrawSize } from "./drawui";
 import { gaugeSummary, openGauge } from "./gaugeui";
 import { $, ask, dialog, download, fmtFull, fmtShort, fmtSmart, fmtTime, h, toast } from "./ui";
 import type { Pattern, Row } from "./types";
+import { rowText, stitchEdgeX, type RowStitch } from "./symbols";
 
 const app = $("#app");
 const view = {
@@ -27,6 +28,7 @@ const view = {
   legendOpen: true,
   useDrawing: {} as Record<string, boolean>, // 파트별: 그린 배색 보기 (기본: 그린 게 있으면 그것)
   editing: false,
+  home: false, // 도안 목록 화면
 };
 try {
   Object.assign(view, JSON.parse(localStorage.getItem("view") || "{}"));
@@ -41,6 +43,7 @@ const saveView = () => {
 app.append(
   h("div", { class: "wrap" },
     h("header", { class: "top" },
+      h("button", { id: "homeBtn", class: "round-btn", type: "button", "aria-label": "도안 목록", text: "‹" }),
       h("h1", { text: "도안 단수 카운터" }),
       h("div", { class: "top-actions" },
         h("label", { for: "patSel", class: "sr", text: "도안 선택" }),
@@ -60,11 +63,77 @@ app.append(
   ),
 );
 
+/* ---------------- 도안 목록 (첫 화면) ---------------- */
+const KNIT_V = (c: string, a: number) => `url('data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="12" height="14"><path d="M2.5 2 L6 12 M9.5 2 L6 12" stroke="${c}" stroke-opacity="${a}" stroke-width="3.4" stroke-linecap="round"/></svg>`)}')`;
+function swatch(p: Pattern, size: number) {
+  const hex = p.colors[0]?.hex || (p.done && Object.keys(p.done).length ? "#F7CDD5" : "#C9D9EC");
+  const dark = (() => { const m = hex.match(/^#(..)(..)(..)$/); if (!m) return false; return parseInt(m[1], 16) * 0.3 + parseInt(m[2], 16) * 0.59 + parseInt(m[3], 16) * 0.11 < 120; })();
+  return h("div", { class: "swatch", style: { width: size + "px", height: size + "px", backgroundColor: hex, backgroundImage: KNIT_V(dark ? "#FFFFFF" : "#3A2A1E", dark ? 0.18 : 0.3), backgroundSize: `${size / 8}px ${size / 7}px` } });
+}
+function yarnBar(frac: number, done = false) {
+  return h("div", { class: "yarnbar" + (done ? " done" : "") }, h("i", { style: { width: Math.max(4, Math.min(100, frac * 100)) + "%" } }));
+}
+function patStats(p: Pattern) {
+  const names = partNames(p);
+  const fin = names.filter((n) => p.fin[n]).length;
+  const total = p.rows.length, done = p.rows.filter((r) => p.done[key(r.s, r.n)]).length;
+  return { names, fin, total, done, all: names.length > 0 && fin === names.length };
+}
+function showHome() {
+  closePop();
+  view.home = true;
+  $("#meta").hidden = true;
+  $("#thumb").hidden = true;
+  document.querySelector(".top")?.setAttribute("hidden", "");
+  const root = $("#trackView");
+  root.innerHTML = "";
+  const list = Object.values(state.patterns).sort((a, b) => (lastWorked(b) || b.updatedAt || 0) - (lastWorked(a) || a.updatedAt || 0));
+  const pats = list.length ? list : [active()];
+  const cont = pats.find((x) => !x.example && !patStats(x).all) || pats[0];
+  const open = (id: string) => { setActive(id); view.home = false; view.full = false; render(); window.scrollTo({ top: 0 }); };
+  const head = h("header", { class: "home-head" },
+    h("div", { class: "home-title" }, h("h1", { text: "도안 단수 카운터" }), h("div", { class: "dots" }, h("i", { style: { background: "var(--pink)" } }), h("i", { style: { background: "var(--sky)" } }), h("i", { style: { background: "var(--lav-2)" } }))),
+    h("button", { class: "round-btn", type: "button", "aria-label": "설정", text: "⚙", on: { click: () => openSettings(() => showHome()) } }));
+  root.append(head);
+  if (cont) {
+    const st = patStats(cont);
+    const s = currentTab(cont);
+    const r = currentRow(cont, s);
+    const pr = partProgress(cont, s);
+    root.append(h("section", { class: "home-cont" },
+      h("div", { class: "eyebrow", text: "이어서 뜨기" }),
+      h("div", { class: "hc-top" }, swatch(cont, 64), h("div", { class: "hc-name" }, h("b", { text: cont.name }), h("span", { text: `${cont.size ? cont.size + " 사이즈 · " : ""}${st.names.length}개 파트 중 ${st.fin}개 완료` }))),
+      r ? h("div", { class: "hc-row" }, h("span", { class: "hc-part", text: s }), h("b", { text: `${r.n}단` }), h("span", { class: "hc-frac", text: `${pr.done}/${pr.total}` })) : null,
+      yarnBar(pr.total ? pr.done / pr.total : 0),
+      h("button", { class: "btn primary big", type: "button", text: "이어서 뜨기 →", on: { click: () => open(cont.id) } }),
+      lastWorked(cont) ? h("span", { class: "hc-when", text: "마지막 작업 " + fmtFull(lastWorked(cont)) }) : null));
+  }
+  const others = pats.filter((x) => x !== cont);
+  if (others.length) {
+    root.append(h("div", { class: "home-sec", text: "내 도안" }));
+    for (const x of others) {
+      const st = patStats(x);
+      root.append(h("button", { class: "home-item", type: "button", on: { click: () => open(x.id) } },
+        swatch(x, 46),
+        h("div", { class: "hi-body" },
+          h("div", { class: "hi-top" }, h("b", { text: x.name }), st.all ? h("span", { class: "badge fin", text: "완료 ✓" }) : x.example ? h("span", { class: "badge ex", text: "예시" }) : null),
+          yarnBar(st.total ? st.done / st.total : 0, st.all),
+          h("span", { class: "hi-sub", text: `${st.fin}/${st.names.length} 파트` + (lastWorked(x) ? ` · ${fmtShort(lastWorked(x))}` : "") }))));
+    }
+  }
+  root.append(h("p", { class: "home-foot", text: "진행은 이 기기에만 저장돼요 · 10분마다 백업" }),
+    h("div", { class: "home-add" }, h("button", { class: "btn add", type: "button", text: "+ 도안 올리기", on: { click: () => { view.home = false; openUpload({ onDone: render }); } } })));
+}
+
 /* ---------------- 렌더 ---------------- */
 let renderSeq = 0;
 
 export function render() {
   closePop();
+  if (view.home) return showHome();
+  $("#meta").hidden = false;
+  $("#thumb").hidden = false;
+  document.querySelector(".top")?.removeAttribute("hidden");
   const p = active();
   renderSelect(p);
   renderMeta(p);
@@ -322,6 +391,7 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
       }
       cv.append(c);
       scrollStart(cv, res.startX === "right", range && res.chart ? ((res.startX === "right" ? range[1] : range[0]) - res.x0) * res.k : null);
+      scrollToProgress(p, r, cv, c, res).catch(() => {});
       symbolTap(p, pdf, page, bmp, cv, c, res, range);
       if (range) cv.append(h("div", { class: "size-note", text: `${p.size} 사이즈 범위만 표시 (점선 사이)` }));
     }
@@ -760,28 +830,53 @@ function wantsChartText(p: Pattern, r: Row) {
   return !!page && p.src === "pdf" && !r.castOn && !r.auto && !(p.draw[r.s] && (view.useDrawing[r.s] ?? true)) && !STITCH_INSTR.test(r.t || "");
 }
 const chartTextCache = new Map<string, Promise<string | null>>();
-function chartRowText(p: Pattern, r: Row): Promise<string | null> {
+/** 이 단 차트를 기기에서 읽은 칸들 (위치 포함, 같은 단은 다시 읽지 않음) */
+const rowStitchCache = new Map<string, Promise<RowStitch[] | null>>();
+function chartRowStitches(p: Pattern, r: Row): Promise<RowStitch[] | null> {
   const page = chartPage(p, r)!;
   const ws = sideOf(p, r) === "WS" && !p.secs[r.s]?.round;
   const lg = p.legend && "page" in p.legend ? [p.legend.page, p.legend.x0, p.legend.y0].join(",") : "";
   const ck = [p.id, page, r.n, ws, lg, p.size].join(":");
-  let c = chartTextCache.get(ck);
+  let c = rowStitchCache.get(ck);
   if (!c) {
-    if (chartTextCache.size > 40) chartTextCache.clear();
+    if (rowStitchCache.size > 40) rowStitchCache.clear();
     c = (async () => {
       const pdf = await pdfOf(p);
       if (!pdf) return null;
       if (!p.legend || staleLegend(p)) await detectLegend(p);
       const bmp = await bmpForSize(p, pdf, page, await chartBitmap(pdf, p.id, page));
-      const { readRow, rowText } = await import("./symbolid");
+      const { readRow } = await import("./symbolid");
       const key = p.colors.length >= 2 ? chartKey(bmp, (await textItems(pdf, page)).items) : [];
-      const st = await readRow(p, pdf, page, bmp, r.n, ws, await sizeRangeOf(p, pdf, page, bmp, r.n), key);
-      return st && st.length ? rowText(st, ws) : null;
+      return readRow(p, pdf, page, bmp, r.n, ws, await sizeRangeOf(p, pdf, page, bmp, r.n), key);
     })();
-    chartTextCache.set(ck, c);
-    c.catch(() => chartTextCache.delete(ck));
+    rowStitchCache.set(ck, c);
+    c.catch(() => rowStitchCache.delete(ck));
   }
   return c;
+}
+async function chartRowText(p: Pattern, r: Row): Promise<string | null> {
+  const st = await chartRowStitches(p, r);
+  const ws = sideOf(p, r) === "WS" && !p.secs[r.s]?.round;
+  return st && st.length ? rowText(st, ws) : null;
+}
+
+/** 묶음 진행을 저장했으면 차트를 그 코 자리로 스크롤하고 세로 표시 */
+async function scrollToProgress(p: Pattern, r: Row, cv: HTMLElement, c: HTMLCanvasElement, res: { chart: any; x0: number; yTop: number; k: number }) {
+  const prog = p.part[key(r.s, r.n)];
+  if (!prog || !res.chart) return;
+  const chunks = wantsChartText(p, r) ? chunksOf((await chartRowText(p, r)) || "") : splitNarrative(r.t || "").chunks;
+  const count = stitchesThrough(chunks, prog.i);
+  if (!count) return;
+  const st = await chartRowStitches(p, r);
+  if (!st || !c.isConnected) return;
+  const ws = sideOf(p, r) === "WS" && !p.secs[r.s]?.round;
+  const x = stitchEdgeX(st, count, ws);
+  if (x == null) return;
+  const hh = rowH(res.chart);
+  const xPx = (x - res.x0) * res.k, top = (rowY(res.chart, r.n) - hh / 2 - res.yTop) * res.k;
+  cv.querySelector(".prog-mark")?.remove();
+  cv.append(h("div", { class: "prog-mark", title: `${count}코 뜸`, style: { left: c.offsetLeft + xPx - 1.5 + "px", top: c.offsetTop + top - 4 + "px", height: hh * res.k + 8 + "px" } }, h("span", { text: `${count}코` })));
+  requestAnimationFrame(() => cv.scrollTo({ left: c.offsetLeft + xPx - cv.clientWidth / 2, behavior: "smooth" }));
 }
 
 function rowActions(p: Pattern, r: Row, side: "RS" | "WS", round: boolean) {
@@ -1035,6 +1130,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "ArrowLeft") { e.preventDefault(); prev(); }
 });
 $("#patSel").onchange = (e) => { setActive((e.target as HTMLSelectElement).value); view.full = false; render(); };
+$("#homeBtn").onclick = () => showHome();
 $("#addBtn").onclick = () => openUpload({ onDone: render });
 $("#setBtn").onclick = () => openSettings(render);
 
