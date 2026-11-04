@@ -3,14 +3,14 @@ import { chunksOf, splitNarrative, stitchesThrough } from "./chunks";
 import { MAX_TOKENS } from "./config";
 import { callAi, canCallDirect, errCopy } from "./ai";
 import { inArtifact } from "./artifact";
-import { cellKeyColor, chartBitmap, chartKey, clearBitmaps, labelColor, sharpRows, sizeLabelColors, sizeLineRange, drawGrid, drawPdfFull, drawPdfRows, explainStrip, hitCell, legendCanvas, sampleRowColors, yarnHex } from "./chart";
+import { cellKeyColor, chartBitmap, chartKey, clearBitmaps, splitChartByGap, labelColor, sharpRows, sizeLabelColors, sizeLineRange, drawGrid, drawPdfFull, drawPdfRows, explainStrip, hitCell, legendCanvas, sampleRowColors, yarnHex } from "./chart";
 import { getFile, putFile } from "./db";
 import { getCell, longestFloat, rowColors } from "./drawing";
 import {
   applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, spanParts, finishText, continuousKnitMs, castLabel, flexibleRow, addRowAfter, removeRow, workIn, workStart, workStop, sideOf, stepNext, stepPrev,
 } from "./model";
 import { blobB64, canvasBlob, textItems } from "./pdf";
-import { chartFor, chartsForSize, findCharts, findLegend, LEGEND_RE, rowH, rowY, sizeRange, stitchAxis } from "./pdfgeom";
+import { chartFor, chartsForSize, chartTitle, chartTitleCount, findCharts, findLegend, LEGEND_RE, partTitleScore, rowH, rowY, sizeRange, stitchAxis, type Chart } from "./pdfgeom";
 import { explainCheck, explainDraft, explainHead } from "./prompts";
 import { active, commit, exportJson, importJson, load, pdfOf, removePattern, saveNow, setActive, startAutosave, state, syncRemote } from "./store";
 import { openSettings, manualHandler, openViewer } from "./dialogs";
@@ -368,7 +368,7 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
       cv.append(h("p", { class: "empty", text: "이 기기에 원본 PDF가 없어요. 아래 '이 기기에 PDF 다시 연결'로 골라주세요." }));
       return;
     }
-    const bmp = await bmpForSize(p, pdf, page, await chartBitmap(pdf, p.id, page));
+    const bmp = await bmpForSize(p, pdf, page, await chartBitmap(pdf, p.id, page), r.s);
     if (seq !== renderSeq) return;
     // 이 단이 차트에 없으면(고무단처럼 차트 없이 서술로만 뜨는 파트) 그냥 '차트 없음'
     if (!chartFor(bmp.charts, r.n)) {
@@ -557,9 +557,17 @@ async function sizeRangeOf(p: Pattern, pdf: any, page: number, bmp: any, n: numb
   const row = col ? sizeLineRange(bmp, c, n, col, others) : null;
   const fixed = sizeRange(items, c, p.size);
   // 사이즈 선은 차트 아래 표시에서 안쪽으로만 들어온다 (모양 내기). 더 넓게 잡혔으면 잘못 찾은 것
-  const tol = rowH(c) * 0.7;
-  if (row && fixed && (row[0] < fixed[0] - tol || row[1] > fixed[1] + tol)) return fixed;
-  return row || fixed;
+  // 사이즈 이름 글자는 선 바로 위가 아니라 조금 비켜 있어서 한 칸까지는 봐준다
+  const tol = rowH(c) * 1.1;
+  let rr = row;
+  // 한쪽에만 선이 있으면(앞판처럼 다른 쪽은 차트 끝) 그 선 하나 + 표시 범위의 반대쪽 끝
+  if (rr && rr[1] - rr[0] < rowH(c) * 2) {
+    if (!fixed) return null;
+    const x = (rr[0] + rr[1]) / 2;
+    rr = Math.abs(x - fixed[1]) < Math.abs(x - fixed[0]) ? [fixed[0], x] : [x, fixed[1]];
+  }
+  if (rr && fixed && (rr[0] < fixed[0] - tol || rr[1] > fixed[1] + tol)) return fixed;
+  return rr || fixed;
 }
 
 /** 이 차트 쪽을 쓰는 모든 파트에서 실제로 뜬 단 번호 */
@@ -569,11 +577,18 @@ function doneOnPage(p: Pattern, page: number): Set<number> {
   return out;
 }
 
-/** 한 쪽에 사이즈별 차트가 여럿이면 내 사이즈 차트만 남긴 그림 정보 */
-async function bmpForSize(p: Pattern, pdf: any, page: number, bmp: any) {
-  if (!p.size || bmp.charts.length < 2) return bmp;
-  const charts = chartsForSize((await textItems(pdf, page)).items, bmp.charts, p.size);
-  return charts.length === bmp.charts.length ? bmp : { ...bmp, charts };
+/** 이 파트에 맞는 차트만 남긴 그림 정보: 붙어 있는 두 차트는 나누고, 사이즈·파트 이름이 맞는 차트로 */
+async function bmpForSize(p: Pattern, pdf: any, page: number, bmp: any, part = "") {
+  const items = (await textItems(pdf, page)).items;
+  let charts: Chart[] = [];
+  for (const c of bmp.charts) charts.push(...(chartTitleCount(items, c) >= 2 ? splitChartByGap(bmp, c) : [c]));
+  if (p.size && charts.length > 1) charts = chartsForSize(items, charts, p.size);
+  if (part && charts.length > 1) {
+    const sc = charts.map((c) => partTitleScore(part, chartTitle(items, c)));
+    const best = Math.max(...sc);
+    if (best > 0 && sc.filter((v) => v === best).length < charts.length) charts = charts.filter((_, i) => sc[i] === best);
+  }
+  return charts.length === bmp.charts.length && charts.every((c, i) => c === bmp.charts[i]) ? bmp : { ...bmp, charts };
 }
 
 function scrollStart(cv: HTMLElement, right: boolean, startPx: number | null = null) {
@@ -850,7 +865,7 @@ function chartRowStitches(p: Pattern, r: Row): Promise<RowStitch[] | null> {
       const pdf = await pdfOf(p);
       if (!pdf) return null;
       if (!p.legend || staleLegend(p)) await detectLegend(p);
-      const bmp = await bmpForSize(p, pdf, page, await chartBitmap(pdf, p.id, page));
+      const bmp = await bmpForSize(p, pdf, page, await chartBitmap(pdf, p.id, page), r.s);
       const { readRow } = await import("./symbolid");
       const key = p.colors.length >= 2 ? chartKey(bmp, (await textItems(pdf, page)).items) : [];
       return readRow(p, pdf, page, bmp, r.n, ws, await sizeRangeOf(p, pdf, page, bmp, r.n), key);

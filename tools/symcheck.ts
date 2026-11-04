@@ -147,3 +147,42 @@ import { newPattern } from "../src/model";
   }
   return out;
 };
+
+(window as any).splitdbg = async (b64: string, page: number) => {
+  const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  const pdf = await openPdf(new Blob([u]));
+  const bmp = await chartBitmap(pdf, "sp", page);
+  const items = (await textItems(pdf, page)).items;
+  const g = await import("../src/pdfgeom"); const ch = await import("../src/chart");
+  return bmp.charts.map((c) => {
+    const top = g.rowY(c, c.nMax) - g.rowH(c) / 2, bot = g.rowY(c, Math.min(c.nMax, c.nMin + 10));
+    const parts = ch.splitChartByGap(bmp, c);
+    const fs = g.chartsForSize(items, parts, "2XL");
+    const sc = parts.map((q) => `${g.chartSizes(items, q).join("/")}:${g.partTitleScore("LEFT FRONT", g.chartTitle(items, q))}`);
+    return `size→${fs.length} ${sc.join(" ; ")} chart x ${c.x0.toFixed(0)}-${c.x1.toFixed(0)} rows ${c.nMin}-${c.nMax} top ${top.toFixed(0)} bot ${bot.toFixed(0)} titles ${g.chartTitleCount(items, c)} | split → ${parts.map((q) => q.x0.toFixed(0) + "-" + q.x1.toFixed(0) + " [" + g.chartTitle(items, q).slice(0, 50) + "]").join(" / ")}`;
+  });
+};
+
+(window as any).frontdbg = async (b64: string, page: number, part: string, size: string, rows: number[]) => {
+  const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  const pdf = await openPdf(new Blob([u]));
+  const bmp0 = await chartBitmap(pdf, "fd", page);
+  const items = (await textItems(pdf, page)).items;
+  const g = await import("../src/pdfgeom"); const ch = await import("../src/chart");
+  let charts: any[] = [];
+  for (const c of bmp0.charts) charts.push(...(g.chartTitleCount(items, c) >= 2 ? ch.splitChartByGap(bmp0, c) : [c]));
+  charts = g.chartsForSize(items, charts, size);
+  const sc = charts.map((c) => g.partTitleScore(part, g.chartTitle(items, c)));
+  const best = Math.max(...sc); charts = charts.filter((_, i) => sc[i] === best);
+  const bmp = { ...bmp0, charts };
+  const out: string[] = [`charts ${charts.map((c) => c.x0.toFixed(0) + "-" + c.x1.toFixed(0) + " axes " + c.axes.map((a: number) => a.toFixed(0))).join(" / ")}`];
+  for (const n of rows) {
+    const c = g.chartFor(charts, n)!;
+    if (!c) { out.push(n + ": no chart"); continue; }
+    const col = ch.labelColor(bmp, items, c, size);
+    const others = ch.sizeLabelColors(bmp, items, c).filter((x) => !x.sizes.includes(size)).map((x) => x.rgb);
+    const row = col ? ch.sizeLineRange(bmp, c, n, col, others) : null;
+    out.push(`${n}: col ${col?.map(Math.round)} row ${row?.map((v) => v.toFixed(1))} fixed ${g.sizeRange(items, c, size)?.map((v) => v.toFixed(1))} marks ${JSON.stringify(g.sizeMarks(items, c).map((m) => [m.sizes.join("/"), Math.round(m.x)]))}`);
+  }
+  return out;
+};

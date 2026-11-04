@@ -410,7 +410,8 @@ function textColor(bmp: Bitmap, lab: TI): RGB | null {
 /** 이 단에서 그 색 세로선들의 위치 → [왼쪽, 오른쪽] (pt). 사이즈 선이 단마다 계단처럼 바뀌는 차트용 */
 export function sizeLineRange(bmp: Bitmap, c: Chart, n: number, col: RGB, others: RGB[] = []): [number, number] | null {
   const S = bmp.scale, h = rowH(c), cy = rowY(c, n);
-  const x0 = Math.max(0, (c.x0 - h * 2) * S), x1 = Math.min(bmp.canvas.width, (c.x1 + h * 2) * S);
+  const pad = c.split ? 0 : h * 2; // 나눈 차트는 옆 차트 선을 잡지 않게 안쪽만
+  const x0 = Math.max(0, (c.x0 - pad) * S), x1 = Math.min(bmp.canvas.width, (c.x1 + pad) * S);
   const ys = [-0.22, 0, 0.22].map((f) => Math.round((cy + h * f) * S));
   const rows = ys.map((y) => px(bmp, x0, y, x1 - x0, 1).data);
   const dist = (d: Uint8ClampedArray, i: number, c2: RGB) => (d[i] - c2[0]) ** 2 + (d[i + 1] - c2[1]) ** 2 + (d[i + 2] - c2[2]) ** 2;
@@ -423,8 +424,8 @@ export function sizeLineRange(bmp: Bitmap, c: Chart, n: number, col: RGB, others
   for (let x = 0; x < x1 - x0; x++) if (rows.filter((d) => near(d, x * 4) && !besideOther(d, x)).length >= 2) hits.push(x);
   const cl: number[][] = [];
   for (const x of hits) { const l = cl[cl.length - 1]; if (l && x - l[l.length - 1] <= 2) l.push(x); else cl.push([x]); }
-  if (cl.length < 2) return null;
-  const cx = cl.map((l) => (x0 + (l[0] + l[l.length - 1]) / 2) / S);
+  if (!cl.length) return null;
+  const cx = cl.map((l) => (x0 + (l[0] + l[l.length - 1]) / 2) / S); // 선이 하나면 [x, x] — 부르는 쪽이 반대 끝과 짝지음
   return [Math.min(...cx), Math.max(...cx)];
 }
 
@@ -467,4 +468,37 @@ export function cellKeyColor(bmp: Bitmap, r: { x0: number; x1: number; y0: numbe
   let best: string | null = null, bd = Infinity;
   for (const k of key) { const dd = (R - k.rgb[0]) ** 2 + (G - k.rgb[1]) ** 2 + (B - k.rgb[2]) ** 2; if (dd < bd) { bd = dd; best = k.code; } }
   return best;
+}
+
+/**
+ * 단 번호 축 하나에 차트 두 개가 붙어 있으면(오른쪽 앞판 | 왼쪽 앞판) 그 사이 빈 세로 틈에서 나눈다.
+ * 틈: 차트 아래쪽 여러 단에 걸쳐 잉크가 전혀 없는 세로 띠 (1.5pt 이상)
+ */
+export function splitChartByGap(bmp: Bitmap, c: Chart): Chart[] {
+  const S = bmp.scale, h = rowH(c);
+  const yA = rowY(c, Math.min(c.nMax, c.nMin + 40)) - h / 2, yB = rowY(c, c.nMin) + h / 2;
+  const X0 = Math.round(c.x0 * S), X1 = Math.round(c.x1 * S);
+  const d = px(bmp, X0, yA * S, X1 - X0, (yB - yA) * S);
+  const W = d.width, H = d.height;
+  const blank: boolean[] = [];
+  for (let x = 0; x < W; x++) {
+    let ink = 0;
+    for (let y = 0; y < H; y += 2) { const i = (y * W + x) * 4; if (d.data[i] + d.data[i + 1] + d.data[i + 2] < 705) ink++; }
+    blank.push(ink / Math.max(1, H / 2) < 0.02);
+  }
+  const runs: [number, number][] = [];
+  for (let x = 0; x < W; ) {
+    if (!blank[x]) { x++; continue; }
+    let e = x; while (e < W && blank[e]) e++;
+    if (e - x >= 1.5 * S && x > W * 0.1 && e < W * 0.9) runs.push([x, e]);
+    x = e;
+  }
+  if (!runs.length) return [c];
+  const [a, b] = runs.sort((p, q) => q[1] - q[0] - (p[1] - p[0]))[0];
+  const cut0 = c.x0 + a / S, cut1 = c.x0 + b / S;
+  const mid = (cut0 + cut1) / 2;
+  return [
+    { ...c, x1: cut0, axes: c.axes.filter((x) => x < mid), split: true },
+    { ...c, x0: cut1, axes: c.axes.filter((x) => x > mid), split: true },
+  ];
 }

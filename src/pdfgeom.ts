@@ -54,6 +54,7 @@ export type Chart = {
   axes: number[]; // 축 열의 x 중심들
   x0: number;
   x1: number;
+  split?: boolean; // 붙어 있는 두 차트를 빈 틈에서 나눈 것 (범위를 이 안으로만)
 };
 
 type Pt = { x: number; y: number; n: number; w: number };
@@ -319,7 +320,10 @@ export function sizeMarks(items: TItem[], c: Chart): { sizes: string[]; x: numbe
     const m = i.str.match(LBL);
     if (!m) continue;
     const sizes = m[3] ? [norm(m[1], "XL"), norm(m[2], "XL")] : [norm(m[4], m[5]), ...(m[7] ? [norm(m[6] || "", m[7])] : [])];
-    out.push({ sizes, x: i.x + i.w / 2 });
+    const x = i.x + i.w / 2;
+    // 굵게 보이려고 같은 글자를 겹쳐 찍은 PDF: 같은 이름이 3pt 안에 또 있으면 하나로
+    if (out.some((o) => o.sizes.join() === sizes.join() && Math.abs(o.x - x) < 3)) continue;
+    out.push({ sizes, x });
   }
   return out;
 }
@@ -339,7 +343,8 @@ export function sizeRange(items: TItem[], c: Chart, size: string): [number, numb
   const right = c.axes.filter((a) => a >= mid);
   const gl = left.length ? Math.max(...left) + rowH(c) * 0.8 : c.x0;
   const gr = right.length ? Math.min(...right) - rowH(c) * 0.8 : c.x1;
-  return mine[0] > mid ? [gl, mine[0]] : [mine[0], gr];
+  // 선이 격자 오른쪽 끝에 더 가까우면 그 선이 오른쪽 경계, 왼쪽 끝에 가까우면 왼쪽 경계
+  return mine[0] - gl > gr - mine[0] ? [gl, mine[0]] : [mine[0], gr];
 }
 
 /** 사이즈 이름 목록 풀기: "XL/2/3XL/4/5XL" → XL, 2XL, 3XL, 4XL, 5XL · "XS/S/M/L" → XS, S, M, L */
@@ -356,8 +361,8 @@ export function sizeList(text: string): string[] {
 
 /** 차트 제목("CHART II BACK - XL/2/3XL/4/5XL")에 적힌 사이즈: 차트 위쪽, 가로로 겹치는 글자에서 */
 export function chartSizes(items: TItem[], c: Chart): string[] {
-  const top = rowY(c, c.nMax) - rowH(c) / 2;
-  const near = items.filter((i) => i.y < top + 2 && i.y > top - 140 && i.x + i.w > c.x0 - 40 && i.x < c.x1);
+  const top = rowY(c, c.nMax) - rowH(c) / 2, bot = rowY(c, Math.min(c.nMax, c.nMin + 10));
+  const near = items.filter((i) => i.y > top - 280 && i.y < bot && i.x + i.w > c.x0 - 40 && i.x < c.x1 && !/^\s*\d{1,3}\s*$/.test(i.str));
   const best = near.filter((i) => /(?:^|[\s/])(?:\d?XL|XS|S|M|L)(?:$|[\s/])/i.test(i.str) && /\//.test(i.str)).sort((a, b) => b.y - a.y)[0];
   return best ? sizeList(best.str.replace(/^.*?([\dA-Z/]*\/[\dA-Z/]*).*$/i, "$1")) : [];
 }
@@ -368,5 +373,32 @@ export function chartsForSize(items: TItem[], charts: Chart[], size: string): Ch
   const want = sizeList(size)[0] || size.toUpperCase();
   const tagged = charts.map((c) => ({ c, s: chartSizes(items, c) }));
   if (!tagged.some((t) => t.s.includes(want))) return charts;
-  return tagged.filter((t) => !t.s.length || t.s.includes(want)).map((t) => t.c);
+  return tagged.filter((t) => t.s.includes(want)).map((t) => t.c); // 제목에 내 사이즈가 있는 차트만
+}
+
+/** 차트 위 제목 글자("CHART IV LEFT FRONT XL/2/3XL/4/5XL")를 한 줄로 */
+export function chartTitle(items: TItem[], c: Chart): string {
+  // 제목은 차트 위나, 모양 낸 차트(뾰족한 꼭대기)면 차트 높이 안 빈 곳에 있다 — 단 번호 숫자는 빼고
+  const top = rowY(c, c.nMax) - rowH(c) / 2, bot = rowY(c, Math.min(c.nMax, c.nMin + 10));
+  return items.filter((i) => i.y > top - 280 && i.y < bot && i.x + i.w > c.x0 && i.x < c.x1 && !/^\s*\d{1,3}\s*$/.test(i.str)).sort((a, b) => a.y - b.y || a.x - b.x).map((i) => i.str).join(" ");
+}
+/** 차트 제목 낱말이 몇 개 들어 있나 (CHART/차트) — 둘 이상이면 차트 두 개가 붙어 있다 */
+export function chartTitleCount(items: TItem[], c: Chart): number {
+  const top = rowY(c, c.nMax) - rowH(c) / 2, bot = rowY(c, Math.min(c.nMax, c.nMin + 10));
+  const xs = items.filter((i) => /^\s*(?:chart|차트)\b/i.test(i.str) && i.y > top - 280 && i.y < bot && i.x + i.w > c.x0 && i.x < c.x1).map((i) => i.x).sort((a, b) => a - b);
+  let n = 0, last = -1e9;
+  for (const x of xs) { if (x - last > 40) n++; last = x; }
+  return n;
+}
+
+/** 파트 이름과 차트 제목이 맞나: 왼쪽/left, 오른쪽/right, 앞/front, 뒤/back, 소매/sleeve */
+export function partTitleScore(part: string, title: string): number {
+  const P = part.toLowerCase(), T = title.toLowerCase();
+  const keys: [RegExp, RegExp][] = [
+    [/왼쪽|left/, /left|왼쪽/], [/오른쪽|right/, /right|오른쪽/],
+    [/앞|front/, /front|앞/], [/뒤|뒷|back/, /back|뒤|뒷/], [/소매|sleeve/, /sleeve|소매/],
+  ];
+  let sc = 0;
+  for (const [a, b] of keys) { const pa = a.test(P), tb = b.test(T); if (pa && tb) sc += 2; else if (!pa && tb) sc -= 1; }
+  return sc;
 }
