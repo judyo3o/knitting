@@ -462,3 +462,13 @@ select,input[type=text],input[type=number],input[type=password],textarea{border-
 .work{flex-direction:column;align-items:flex-end}
 .work .btn{order:2}
 .work-txt{order:1}
+
+/* 뒤로 갈 때 고르기: 도안만 보기 / 한 단 되돌리기 */
+.back-choice { display: flex; flex-direction: column; gap: 10px; margin: 6px 0 4px; }
+.back-choice .btn { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; text-align: left; padding: 12px 14px; min-height: 0; height: auto; white-space: normal; }
+.back-choice .btn b { font-size: 16px; }
+.back-choice .btn small { font-weight: 400; font-size: 13px; opacity: .8; }
+/* 도안만 보기 중 */
+.peek-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 10px 14px; border-radius: 14px; background: var(--lav-bg); color: var(--lav-ink); border: 1.5px dashed var(--lav); font-size: 14px; }
+.peek-banner b { font-weight: 700; }
+body.peeking #nextBtn { background: var(--lav-l); color: var(--lav-ink); border-color: var(--lav); }

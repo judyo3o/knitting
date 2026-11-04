@@ -49,6 +49,15 @@ step("다음 단 → 완료 시각 기록, 이전 단 → 취소");
 await page.click("#nextBtn");
 assert.equal(await page.textContent(".rowno b"), "13");
 await page.click("#prevBtn");
+// 뜬 단으로 갈 땐 고르기: 도안만 보기 → 12단이 보이고 진행은 13단 그대로
+await page.click(".back-choice button:has-text('도안만 보기')");
+assert.equal(await page.textContent(".rowno b"), "12");
+assert.ok((await page.textContent(".peek-banner")).includes("13단"));
+await page.click("#nextBtn"); // 지금 단으로
+assert.equal(await page.textContent(".rowno b"), "13");
+assert.equal(await page.locator(".peek-banner").count(), 0);
+await page.click("#prevBtn");
+await page.click(".back-choice button:has-text('한 단 되돌리기')");
 assert.equal(await page.textContent(".rowno b"), "12");
 
 step("묶음 누르기 → 진행 저장 + 콧수 추정");

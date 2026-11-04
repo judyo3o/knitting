@@ -31,6 +31,7 @@ const view = {
   editing: false,
   home: false, // 도안 목록 화면
   sub: null as null | "rows" | "log", // 진행 화면에서 연 단 목록 · 진행 기록 화면
+  peek: null as null | { id: string; s: string; n: number }, // 도안만 보기: 진행은 그대로 두고 보는 단
 };
 try {
   Object.assign(view, JSON.parse(localStorage.getItem("view") || "{}"));
@@ -149,17 +150,32 @@ export function render() {
   }
   const s = currentTab(p);
   if (p.tab !== s) p.tab = s;
-  const r = currentRow(p, s)!;
-  if (view.sub) return renderSub(p, s, r);
+  const cur = currentRow(p, s)!;
+  // 도안만 보기 중이면 그 단을 보여 준다 (진행 위치는 그대로)
+  const pk = view.peek && view.peek.id === p.id && view.peek.s === s ? partRows(p, s).find((x) => x.n === view.peek!.n) : null;
+  if (!pk || pk === cur) view.peek = null;
+  const r = view.peek && pk ? pk : cur;
+  if (view.sub) return renderSub(p, s, cur);
   // 진행 화면: 지금 단 카드 + 단 목록 · 진행 기록 화면으로 가는 버튼
   const links = h("div", { class: "sub-links" },
     h("button", { class: "sub-link", type: "button", on: { click: () => { view.sub = "rows"; render(); window.scrollTo({ top: 0 }); } } }, "단 목록", h("span", { text: "›" })),
     h("button", { class: "sub-link", type: "button", on: { click: () => { view.sub = "log"; render(); window.scrollTo({ top: 0 }); } } }, "진행 기록", h("span", { text: "›" })));
-  root.append(tabs(p, s), nowCard(p, r), links, tools(p, s));
+  root.append(tabs(p, s), ...(view.peek ? [peekBanner(p, r, cur)] : []), nowCard(p, r), links, tools(p, s));
   const prog = partProgress(p, s);
   const list = partRows(p, s);
   const isLast = list[list.length - 1] === r;
-  $<HTMLButtonElement>("#prevBtn").disabled = list[0] === r && !prog.finished;
+  const pb = $<HTMLButtonElement>("#prevBtn");
+  pb.disabled = list[0] === r && (!prog.finished || !!view.peek);
+  pb.textContent = view.peek ? "← 이전 단 보기" : "← 이전 단";
+  document.body.classList.toggle("peeking", !!view.peek);
+  if (view.peek) {
+    // 도안만 보기: 앞뒤로 넘겨 보기만 (진행은 바뀌지 않음)
+    const nb = $("#nextBtn");
+    nb.innerHTML = "";
+    const nxv = list[list.indexOf(r) + 1];
+    nb.append(h("span", { text: nxv === cur ? `지금 단(${cur.n}단)으로 →` : nxv ? "다음 단 보기 →" : "지금 단으로 돌아가기" }), h("small", { text: `진행은 ${cur.n}단 그대로` }));
+    return;
+  }
   // 다음 단 버튼 아래에 다음 단 미리보기 (예: "5단 · A 2코, B 3코…")
   const nb = $("#nextBtn");
   nb.innerHTML = "";
@@ -223,7 +239,7 @@ function tabs(p: Pattern, s: string) {
     const pr = partProgress(p, name);
     const b = h("button", { class: "ptab" + (pr.finished ? " fin" : ""), role: "tab", type: "button", "aria-selected": String(name === s) },
       (pr.finished ? "✓ " : "") + name, h("small", { text: `${pr.done}/${pr.total}` }));
-    b.onclick = () => { p.tab = name; commit(p, false); render(); };
+    b.onclick = () => { p.tab = name; view.peek = null; commit(p, false); render(); };
     box.append(b);
   }
   requestAnimationFrame(() => box.querySelector<HTMLElement>("[aria-selected=true]")?.scrollIntoView({ block: "nearest", inline: "center" }));
@@ -1108,6 +1124,7 @@ function tools(p: Pattern, s: string) {
     e.preventDefault();
     // 단을 안 적고 누르면 그 파트의 첫 단으로
     const n = num.value.trim() ? parseInt(num.value, 10) : partRows(p, sel.value)[0]?.n;
+    view.peek = null;
     if (n == null || !jumpTo(p, sel.value, n)) return toast(num.value.trim() ? `${sel.value}에 ${num.value}단이 없어요.` : `${sel.value}에 단이 없어요.`);
     commit(p, false);
     render();
@@ -1163,6 +1180,7 @@ function renderSub(p: Pattern, s: string, r: Row) {
     form.onsubmit = (e) => {
       e.preventDefault();
       const n = num.value.trim() ? parseInt(num.value, 10) : partRows(p, s)[0]?.n;
+      view.peek = null;
       if (n == null || !jumpTo(p, s, n)) return toast(`${s}에 ${num.value}단이 없어요.`);
       commit(p, false); back();
     };
@@ -1203,7 +1221,7 @@ function rowList(p: Pattern, s: string) {
       h("span", { class: "n", text: x.n + "단" + (x.side ? " " + x.side : "") }),
       h("span", { class: "t", text: rowText1(x) + (x.st ? `  (${x.st})` : "") }),
       h("span", { class: "when", text: t ? fmtShort(t) : "" }));
-    b.onclick = () => { jumpTo(p, s, x.n); commit(p, false); view.sub = null; render(); window.scrollTo({ top: 0, behavior: "smooth" }); };
+    b.onclick = () => { jumpTo(p, s, x.n); view.peek = null; commit(p, false); view.sub = null; render(); window.scrollTo({ top: 0, behavior: "smooth" }); };
     ol.append(h("li", {}, b));
   }
   requestAnimationFrame(() => {
@@ -1330,6 +1348,7 @@ function stretchReminder(p: Pattern) {
 
 function next() {
   const p = active();
+  if (view.peek) return peekStep(p, 1);
   const before = currentTab(p);
   const res = stepNext(p);
   if (res === "all-done") toast("모든 파트를 다 떴어요! 🎉");
@@ -1341,10 +1360,42 @@ function next() {
 }
 function prev() {
   const p = active();
-  stepPrev(p);
-  view.editing = false;
-  commit(p);
+  if (document.querySelector(".dlg")) return;
+  if (view.peek) return peekStep(p, -1);
+  const s = currentTab(p);
+  const list = partRows(p, s);
+  const cur = currentRow(p, s);
+  if (!cur) return;
+  const fin = !!p.fin[s];
+  const pv = fin ? cur : list[list.indexOf(cur) - 1];
+  if (!pv) return;
+  // 이미 뜬 단으로 갈 때: 보기만 할지, 진행을 되돌릴지
+  const dl = dialog(`${pv.n}단으로 갈까요?`, [
+    h("div", { class: "back-choice" },
+      h("button", { class: "btn primary", type: "button", on: { click: () => { dl.close(); view.peek = { id: p.id, s, n: pv.n }; view.editing = false; render(); window.scrollTo({ top: 0, behavior: "smooth" }); } } },
+        h("b", { text: "도안만 보기" }), h("small", { text: `진행은 ${fin ? "완료 상태" : cur.n + "단"} 그대로 두고 앞 단을 살펴봐요` })),
+      h("button", { class: "btn", type: "button", on: { click: () => { dl.close(); stepPrev(p); view.editing = false; commit(p); render(); toast(fin ? `${s} 완료를 취소했어요.` : `${pv.n}단으로 되돌렸어요.`); } } },
+        h("b", { text: fin ? "완료 취소하기" : "한 단 되돌리기" }), h("small", { text: fin ? `${pv.n}단을 다시 떠요 (파트 완료 표시가 지워져요)` : `${pv.n}단부터 다시 떠요 (${pv.n}단 완료 표시가 지워져요)` }))),
+    h("div", { class: "actions", style: "justify-content:flex-end" }, h("button", { class: "btn ghost", type: "button", text: "취소", on: { click: () => dl.close() } })),
+  ]);
+}
+
+/** 도안만 보기 중 앞뒤로 넘기기: 지금 단에 닿으면 보기를 끝낸다 */
+function peekStep(p: Pattern, d: 1 | -1) {
+  const s = currentTab(p);
+  const list = partRows(p, s);
+  const cur = currentRow(p, s)!;
+  const at = list.findIndex((x) => x.n === view.peek?.n);
+  const nx = list[at + d];
+  if (!nx || nx === cur) view.peek = null;
+  else view.peek = { id: p.id, s, n: nx.n };
   render();
+}
+
+function peekBanner(p: Pattern, r: Row, cur: Row) {
+  return h("div", { class: "peek-banner", role: "status" },
+    h("span", {}, h("b", { text: `${r.n}단 보는 중` }), ` · 지금 뜨는 곳은 ${p.fin[r.s] ? "완료" : cur.n + "단"} (진행은 그대로예요)`),
+    h("button", { class: "btn", type: "button", text: "지금 단으로", on: { click: () => { view.peek = null; render(); } } }));
 }
 $("#nextBtn").onclick = next;
 $("#prevBtn").onclick = prev;

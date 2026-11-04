@@ -52,6 +52,7 @@ await step("예시: 파트 탭 전환과 파트별 위치 기억", async () => {
 await step("예시: 이전 단 → 완료 기록 지움", async () => {
   const before = await txt(".ptab[aria-selected=true] small");
   await T("#prevBtn").click();
+  await T(".back-choice button:has-text('한 단 되돌리기')").click();
   const after = await txt(".ptab[aria-selected=true] small");
   ok(before !== after, `완료 수 변화 없음 ${before}`);
   return `${before} → ${after}`;
@@ -93,6 +94,7 @@ await step("예시: 키보드 → ← 스페이스", async () => {
   await page.keyboard.press(" ");
   ok(+(await txt(".rowno b")) === a + 2, "→/스페이스");
   await page.keyboard.press("ArrowLeft");
+  await T(".back-choice button:has-text('한 단 되돌리기')").click();
   ok(+(await txt(".rowno b")) === a + 1, "←");
 });
 await step("예시: 배색 띠 차트 확대/축소/전체", async () => {
@@ -498,6 +500,7 @@ await step("스트레칭 알림 → 타이머 자동 정지 → 다시 시작", 
   ok(await T(".now .work button:has-text('중지')").count(), "다시 시작 안 됨");
   await T(".now .work button:has-text('중지')").click();
   await T("button:has-text('이전 단')").first().click();
+  if (await T(".back-choice").count()) await T(".back-choice button:has-text('한 단 되돌리기')").click();
   return "멈춤 → 다시 시작 ✓";
 });
 await step("진행 기록 지우기", async () => {
