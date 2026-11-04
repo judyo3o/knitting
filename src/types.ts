@@ -91,7 +91,8 @@ export type DrawOpt = {
 export type Gauge = { st: number; rows: number };
 export type GaugeSet = {
   label: string; // 예: "메리야스", "무늬"
-  needle?: string; // 예: "4.5mm"
+  needle?: string; // 도안 바늘 예: "4.5mm"
+  myNeedle?: string; // 내가 스와치를 뜬 바늘
   pattern: Gauge | null; // 도안 게이지
   before: Gauge | null; // 내 스와치 세탁 전
   after: Gauge | null; // 내 스와치 세탁 후

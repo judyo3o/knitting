@@ -119,3 +119,39 @@ export function swatchFromLabel(set: GaugeSet): GaugeSet {
   if (!m) return set;
   return { ...set, label: set.label.replace(m[0], "").trim() || "무늬", swatch: { st: +m[1], rows: +m[2], w: +m[3], h: +m[4] } };
 }
+
+/** 도안의 권장 여유분: "실제 가슴둘레보다 +20cm 정도 여유", "10 cm positive ease", "여유분 20cm" */
+export function findEase(text: string): number | null {
+  const t = text.replace(/\s+/g, " ");
+  const m = t.match(/\+\s*(\d+(?:\.\d+)?)\s*cm[^.\n]{0,12}여유/) || t.match(/여유(?:분)?[^\d+\-]{0,12}\+?\s*(\d+(?:\.\d+)?)\s*cm/) || t.match(/(\d+(?:\.\d+)?)\s*cm\s*(?:of\s*)?positive\s*ease/i) || t.match(/ease[^\d]{0,15}(\d+(?:\.\d+)?)\s*cm/i);
+  if (!m) return null;
+  const v = parseFloat(m[1]);
+  return v >= 0 && v <= 60 ? v : null;
+}
+
+/** 줄여 부르는 내 게이지 비율: 도안 콧수대로 뜨면 너비가 몇 배 (게이지가 없으면 1) */
+export const widthFactor = (pattern: Gauge | null, mine: Gauge | null) => (pattern && mine ? pattern.st / mine.st : 1);
+
+/**
+ * 신체 사이즈로 사이즈 추천: 완성 가슴둘레(내 게이지로 뜬 크기) = 몸 + 여유에 가장 가까운 사이즈.
+ * 조금 작은 것보다 조금 큰 쪽을 고른다(2cm 넘게 작으면 감점). half: 표 값이 '품'(반 둘레)이면 true
+ */
+export function recommendSize(order: string[], values: number[], body: number, ease: number, factor = 1, half = false) {
+  const want = (body + ease) / (half ? 2 : 1);
+  const list = order.map((sz, i) => {
+    const fin = Number.isFinite(values[i]) ? Math.round(values[i] * factor * 10) / 10 : NaN;
+    const full = half ? fin * 2 : fin;
+    return { sz, pat: values[i], fin, ease: Number.isFinite(full) ? Math.round((full - body) * 10) / 10 : NaN };
+  });
+  let best: string | null = null, bd = Infinity;
+  for (const x of list) {
+    if (!Number.isFinite(x.fin)) continue;
+    const d = x.fin - want;
+    const score = d < 0 ? -d * 1.6 : d; // 작은 쪽은 더 싫다
+    if (score < bd) { bd = score; best = x.sz; }
+  }
+  return { want: Math.round(want * 10) / 10, list, best };
+}
+
+/** 바늘 굵기 숫자 (mm) */
+export const needleMm = (s: string | undefined) => { const m = (s || "").match(/(\d+(?:[.,]\d+)?)/); return m ? parseFloat(m[1].replace(",", ".")) : null; };

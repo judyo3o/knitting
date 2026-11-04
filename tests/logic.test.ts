@@ -701,3 +701,24 @@ describe("무늬 스와치 게이지 (전체 크기를 재는)", () => {
     expect(old.swatch).toEqual({ st: 38, rows: 27, w: 19, h: 13 });
   });
 });
+
+import { findEase, recommendSize, needleMm } from "../src/gauge";
+describe("신체 사이즈로 추천", () => {
+  it("도안의 여유분을 찾는다", () => {
+    expect(findEase("가슴둘레 : 96 (104) 110 cm\n(실제 가슴둘레보다 +20cm 정도 여유를 권장합니다.)")).toBe(25);
+    expect(findEase("여유분 10cm 권장")).toBe(10);
+    expect(findEase("Choose a size with 15 cm positive ease")).toBe(15);
+    expect(findEase("가슴둘레 104cm")).toBeNull();
+  });
+  it("몸 + 여유에 맞는 사이즈 (게이지 반영)", () => {
+    const order = ["S", "M", "L", "XL", "2XL", "3XL"], v = [96, 104, 110, 120, 126, 136];
+    expect(recommendSize(order, v, 92, 25).best).toBe("L"); // 110 → 110
+    expect(recommendSize(order, v, 95, 25).best).toBe("L"); // 120: L은 2cm 작음, XL은 8cm 큼 → L
+    expect(recommendSize(order, v, 97, 25).best).toBe("XL"); // 122: L은 4cm 작음 → XL
+    // 내 게이지가 느슨하면(도안 18코, 내 17코) 같은 콧수로 더 크게 → 한 사이즈 작게
+    expect(recommendSize(order, v, 92, 25, 18 / 17).best).toBe("M"); // M 112×1.059=118.6
+    // 품(반 둘레) 표
+    expect(recommendSize(["S", "M"], [52, 58], 92, 20, 1, true).best).toBe("M");
+  });
+  it("바늘 숫자", () => { expect(needleMm("5.5mm")).toBe(5.5); expect(needleMm("4,5 mm")).toBe(4.5); expect(needleMm("")).toBeNull(); });
+});
