@@ -173,22 +173,43 @@ function crossDir(m: Uint8ClampedArray, W: number, H: number): number | null {
   return back - slash;
 }
 
-/** 안뜨기 교차의 가로줄: 평평한 가로 잉크(위아래 두 줄에는 잉크가 거의 없음)가 폭의 12% 넘게 이어지면 */
-function purlDash(m: Uint8ClampedArray, W: number, H: number): boolean {
-  const ink = (x: number, y: number) => y >= 0 && y < H && !!m[(y * W + x) * 4];
-  const need = Math.max(5, W * 0.14);
-  for (let y = Math.floor(H * 0.35); y < H; y++) {
-    let x = 0;
-    while (x < W) {
+/**
+ * 안뜨기 교차(PC)의 짧은 가로줄을 원본 픽셀에서: 수평으로 곧고(위아래 한 줄도 같은 자리) 위아래가 비어 있는
+ * 폭 9~45%의 가로 획. 비스듬한 교차선 끝부분은 한 줄 위아래에서 옆으로 밀려서 걸러진다.
+ */
+function dashRaw(img: ImageData, X0: number, Y0: number, X1: number, Y1: number): boolean {
+  const w = X1 - X0, hh = Y1 - Y0;
+  if (w < 6 || hh < 6) return false;
+  const ink = (x: number, y: number) => {
+    x = Math.round(x); y = Math.round(y);
+    if (x < 0 || y < 0 || x >= img.width || y >= img.height) return false;
+    const i = (y * img.width + x) * 4;
+    return img.data[i] + img.data[i + 1] + img.data[i + 2] < 3 * 150;
+  };
+  const off = Math.max(2, Math.round(hh * 0.12));
+  const minL = Math.max(4, w * 0.09), maxL = w * 0.45;
+  const xa = Math.round(X0 + w * 0.03), xb = Math.round(X1 - w * 0.03);
+  const runAt = (y: number, x: number): [number, number] | null => {
+    if (!ink(x, y)) return null;
+    let a = x, b = x;
+    while (a > xa && ink(a - 1, y)) a--;
+    while (b < xb && ink(b + 1, y)) b++;
+    return [a, b];
+  };
+  for (let y = Math.round(Y0 + hh * 0.1); y <= Y1 - hh * 0.1; y++) {
+    for (let x = xa; x <= xb; ) {
       if (!ink(x, y)) { x++; continue; }
-      let e = x;
-      while (e < W && ink(e, y)) e++;
-      if (e - x >= need) {
-        let off = 0;
-        for (let k = x; k < e; k++) if (ink(k, y - 3) || ink(k, y + 3)) off++;
-        if (off / (e - x) < 0.2) return true;
-      }
-      x = e;
+      const [a, b] = runAt(y, x)!;
+      x = b + 1;
+      const L = b - a + 1;
+      if (L < minL || L > maxL) continue;
+      let up = 0, dn = 0;
+      for (let k = a; k <= b; k++) { if (ink(k, y - off)) up++; if (ink(k, y + off)) dn++; }
+      if (up / L > 0.25 || dn / L > 0.25) continue;
+      // 곧은 가로줄: 바로 위·아래 줄의 획은 없거나 같은 자리
+      const mid = (a + b) / 2;
+      const straight = [y - 1, y + 1].every((yy) => { const r = runAt(yy, mid); return !r || (Math.abs(r[0] - a) <= 2 && Math.abs(r[1] - b) <= 2); });
+      if (straight) return true;
     }
   }
   return false;
@@ -421,7 +442,6 @@ export async function identify(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, 
   if (!lat || !rect) return { ...out(token, null, true, null), name: token ? "기호표에서 찾지 못했어요" : "칸을 찾지 못했어요" };
   // 2) 그림 기호: 기호표 그림과 비교 (기호가 여러 칸이면 누른 칸을 포함하는 자리마다)
   const cellRatio = lat.w / (h * S);
-  let best: { e: LegendEntry; d: number; start: number; cells: number } | null = null;
   // 기호 폭: 이 단에서 칸 사이 격자선이 끊긴 만큼(교차뜨기처럼 여러 칸에 걸친 기호)
   const lineAt = (xb: number) => {
     const ya = Math.round((yTop + h * 0.25) * S), yb = Math.round((yTop + h * 0.75) * S);
@@ -437,6 +457,17 @@ export async function identify(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, 
   }
   // 교차뜨기도 6칸(3/3)이 가장 넓다: 더 넓게 이어지면 격자선을 못 찾은 것 → 누른 칸 하나로
   if (cR - cL + 1 > 8) { cL = k; cR = k; }
+  // 붙어 있는 두 교차뜨기(2/1 RPC + 2/1 LC): 가운데 선이 단 높이 대부분에 걸쳐 있으면 거기서 나눈다
+  // (교차선 끝이 경계에 닿아 가운데만 보면 끊겨 보인다. 한 기호 안의 경계는 사선이 잠깐 지날 뿐)
+  if (!token && cR - cL + 1 >= 4) {
+    const fullLine = (xb: number) => {
+      const ya = Math.round((yTop + h * 0.05) * S), yb = Math.round((yTop + h * 0.95) * S);
+      let n2 = 0;
+      for (let yy = ya; yy < yb; yy++) if (dark(xb - 1, yy) || dark(xb, yy) || dark(xb + 1, yy)) n2++;
+      return n2 / Math.max(1, yb - ya) > 0.6;
+    };
+    for (let j = cL + 1; j <= cR; j++) if (fullLine(B[j])) { if (j <= k) cL = j; else { cR = j - 1; break; } }
+  }
   // 여러 칸 기호 안에 글자(SSK, k2tog…)가 있으면 그 글자로 (누른 자리가 글자 옆이어도)
   if (!token) {
     const bx0 = B[cL] / S, bx1 = B[cR + 1] / S;
@@ -446,41 +477,65 @@ export async function identify(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, 
       if (e) return out(it.str.trim(), e, false, { x0: bx0, x1: bx1, y0: yTop, y1: yTop + h });
     }
   }
-  const cells = cR - cL + 1;
   // 글자 칸인데 글자 기호표에 없으면(예: '|') 그림 기호 중에서만 고른다
   const cands = token ? tmpls.filter((tm) => !tm.entry.sym && tm.canvas && tm.canvas.width / tm.canvas.height / cellRatio < 1.5) : tmpls;
   const IN = 0.16; // 테두리·격자선을 빼고 안쪽만 비교
-  const DIN = IN;
-  const W = 12 * cells, H = 12;
-  const sx = B[cL], cw = B[cR + 1] - B[cL], chh = h * S;
-  // 글자 칸(기호표엔 그림으로만 있는 '|' 등)은 그 글자를 칸 가운데에 그려서 비교 — 칸 안 위치와 상관없게
-  const b = token ? features(glyphCell(token, cellRatio), 0, 0, 0, 0, W, H, true) : features(img, sx + lat.w * IN, yTop * S - OY + chh * IN, cw - 2 * lat.w * IN, chh * (1 - 2 * IN), W, H);
-  // 격자선도 획도 없는 넓은 빈 곳(모양 낸 가장자리 바깥)은 칸이 아니다
-  if (!token && cells > 1 && !b.some((v, i) => i % 4 === 0 && v > 0)) return null;
-  // 교차뜨기 방향: 칸 가운데를 끊기지 않고 지나가는 선이 \\ 인가 / 인가
-  const bigB = token ? null : features(img, sx + lat.w * IN, yTop * S - OY + chh * IN, cw - 2 * lat.w * IN, chh * (1 - 2 * IN), W * 2, H * 2);
-  const dirB = bigB ? crossDir(bigB, W * 2, H * 2) : null;
-  const dashB = !token && cells > 1 ? purlDash(features(img, sx + lat.w * IN, yTop * S - OY + chh * DIN, cw - 2 * lat.w * IN, chh * (1 - 2 * DIN), W * 2, H * 2), W * 2, H * 2) : null;
-  for (const tm of cands) {
-    if (!tm.canvas) continue;
-    const tw = tm.canvas.width, th = tm.canvas.height;
-    // 기호표 상자가 차트 칸 비율과 크게 다르면(1칸 기호를 3칸에 맞추는 등) 감점
-    const want = tw / th / cellRatio;
-    const a = features(tpix(tm.canvas), (tw * IN) / cells, th * IN, tw * (1 - (2 * IN) / cells), th * (1 - 2 * IN), W, H);
-    const tk = `${cells}`;
-    let tc = tmplDir.get(tm.canvas)?.[tk];
-    if (!tc) {
-      const bigA = features(tpix(tm.canvas), (tw * IN) / cells, th * IN, tw * (1 - (2 * IN) / cells), th * (1 - 2 * IN), W * 2, H * 2);
-      tc = { dir: crossDir(bigA, W * 2, H * 2), dash: purlDash(features(tpix(tm.canvas), (tw * IN) / cells, th * DIN, tw * (1 - (2 * IN) / cells), th * (1 - 2 * DIN), W * 2, H * 2), W * 2, H * 2) };
-      tmplDir.set(tm.canvas, { ...(tmplDir.get(tm.canvas) || {}), [tk]: tc });
+  /** 칸 cL..cR을 한 기호로 보고 기호표에서 가장 닮은 것 (빈 칸이면 undefined) */
+  const match = (cL: number, cR: number): { e: LegendEntry; d: number; start: number; cells: number } | null | undefined => {
+    const cells = cR - cL + 1;
+    const W = 12 * cells, H = 12;
+    const sx = B[cL], cw = B[cR + 1] - B[cL], chh = h * S;
+    // 글자 칸(기호표엔 그림으로만 있는 '|' 등)은 그 글자를 칸 가운데에 그려서 비교 — 칸 안 위치와 상관없게
+    const b = token ? features(glyphCell(token, cellRatio), 0, 0, 0, 0, W, H, true) : features(img, sx + lat.w * IN, yTop * S - OY + chh * IN, cw - 2 * lat.w * IN, chh * (1 - 2 * IN), W, H);
+    // 격자선도 획도 없는 넓은 빈 곳(모양 낸 가장자리 바깥)은 칸이 아니다
+    if (!token && cells > 1 && !b.some((v, i) => i % 4 === 0 && v > 0)) return undefined;
+    // 교차뜨기 방향: 칸 가운데를 끊기지 않고 지나가는 선이 \\ 인가 / 인가
+    const bigB = token ? null : features(img, sx + lat.w * IN, yTop * S - OY + chh * IN, cw - 2 * lat.w * IN, chh * (1 - 2 * IN), W * 2, H * 2);
+    const dirB = bigB ? crossDir(bigB, W * 2, H * 2) : null;
+    // 안뜨기 교차(PC)의 짧은 가로줄은 원본 픽셀에서 찾는다 (줄인 그림에선 사선과 섞여 놓친다)
+    const dashB = !token && cells > 1 ? dashRaw(img, sx + lat.w * 0.1, yTop * S - OY, sx + cw - lat.w * 0.1, yTop * S - OY + chh) : null;
+    let best: { e: LegendEntry; d: number; start: number; cells: number } | null = null;
+    for (const tm of cands) {
+      if (!tm.canvas) continue;
+      const tw = tm.canvas.width, th = tm.canvas.height;
+      // 기호표 상자가 차트 칸 비율과 크게 다르면(1칸 기호를 3칸에 맞추는 등) 감점
+      const want = tw / th / cellRatio;
+      const a = features(tpix(tm.canvas), (tw * IN) / cells, th * IN, tw * (1 - (2 * IN) / cells), th * (1 - 2 * IN), W, H);
+      const tk = `${cells}`;
+      let tc = tmplDir.get(tm.canvas)?.[tk];
+      if (!tc) {
+        const bigA = features(tpix(tm.canvas), (tw * IN) / cells, th * IN, tw * (1 - (2 * IN) / cells), th * (1 - 2 * IN), W * 2, H * 2);
+        tc = { dir: crossDir(bigA, W * 2, H * 2), dash: dashRaw(tpix(tm.canvas), (tw * 0.1) / cells, 0, tw - (tw * 0.1) / cells, th) };
+        tmplDir.set(tm.canvas, { ...(tmplDir.get(tm.canvas) || {}), [tk]: tc });
+      }
+      const da = tc.dir;
+      // 안뜨기 교차(PC)는 아래에 짧은 가로줄이 있다
+      const dashPen = dashB != null && spanOf(tm.entry) != null && tc.dash !== dashB ? 0.25 : 0;
+      const dirPen = dirB != null && da != null && Math.sign(da) !== Math.sign(dirB) ? 0.25 : 0;
+      // 허용 오차 없는 비교를 조금 더해 좌우 대칭인 교차뜨기(LC/RC)를 가른다 (위로 지나가는 선은 끊기지 않음)
+      const d = symbolScore(a, b, W, H) + 0.35 * symbolScore(a, b, W, H, 0) + dirPen + dashPen + 0.08 * Math.abs(Math.log(Math.max(0.3, want) / cells)) + (!token && spanOf(tm.entry) != null && spanOf(tm.entry) !== cells ? 0.4 : 0) + (!token && cells > 1 && spanOf(tm.entry) == null && /[a-z]/i.test(tm.entry.sym) ? 0.25 : 0); // 여러 칸인데 글자 기호(L, R…)는 거의 아님 // 칸 수가 다른 교차뜨기는 아님
+      if (!best || d < best.d) best = { e: tm.entry, d, start: cL, cells };
     }
-    const da = tc.dir;
-    // 안뜨기 교차(PC)는 아래에 짧은 가로줄이 있다
-    const dashPen = dashB != null && spanOf(tm.entry) != null && tc.dash !== dashB ? 0.25 : 0;
-    const dirPen = dirB != null && da != null && Math.sign(da) !== Math.sign(dirB) ? 0.25 : 0;
-    // 허용 오차 없는 비교를 조금 더해 좌우 대칭인 교차뜨기(LC/RC)를 가른다 (위로 지나가는 선은 끊기지 않음)
-    const d = symbolScore(a, b, W, H) + 0.35 * symbolScore(a, b, W, H, 0) + dirPen + dashPen + 0.08 * Math.abs(Math.log(Math.max(0.3, want) / cells)) + (!token && spanOf(tm.entry) != null && spanOf(tm.entry) !== cells ? 0.4 : 0) + (!token && cells > 1 && spanOf(tm.entry) == null && /[a-z]/i.test(tm.entry.sym) ? 0.25 : 0); // 여러 칸인데 글자 기호(L, R…)는 거의 아님 // 칸 수가 다른 교차뜨기는 아님
-    if (!best || d < best.d) best = { e: tm.entry, d, start: cL, cells };
+    return best;
+  };
+  let best: { e: LegendEntry; d: number; start: number; cells: number } | null | undefined = match(cL, cR);
+  if (best === undefined) return null;
+  // 6칸 상자에 교차뜨기 둘이 붙어 그려진 경우(2/1 RPC + 2/1 LC): 반씩 나눠 맞춰 보고 더 닮았으면 누른 쪽 반
+  const cells = cR - cL + 1;
+  if (!token && best && cells === 6) {
+    const half = cells / 2;
+    const l = match(cL, cL + half - 1), r = match(cL + half, cR);
+    // 하나의 3/3 교차는 사선이 가운데를 지나가고, 붙어 그린 두 기호는 가운데가 거의 비어 있다
+    const xm = B[cL + half], bw = (B[cR + 1] - B[cL]) / cells * 0.12;
+    const ya = Math.round((yTop + h * 0.12) * S), yb = Math.round((yTop + h * 0.88) * S);
+    let rowsInk = 0;
+    for (let yy = ya; yy < yb; yy++) {
+      let hit = false;
+      for (let xx = Math.round(xm - bw); xx <= xm + bw && !hit; xx++) { const i = (Math.round(yy - OY) * img.width + xx) * 4; if (img.data[i] + img.data[i + 1] + img.data[i + 2] < 3 * 150) hit = true; }
+      if (hit) rowsInk++;
+    }
+    const centerEmpty = rowsInk / Math.max(1, yb - ya) < 0.15;
+    if (centerEmpty && l && r && spanOf(l.e) === half && spanOf(r.e) === half && (l.d + r.d) / 2 < best.d - 0.03) best = k < cL + half ? l : r;
   }
   if (!best) return { ...out(token, null, true, rect), name: "기호표 그림을 찾지 못했어요" };
   const r2 = { x0: B[best.start] / S, x1: B[best.start + best.cells] / S, y0: yTop, y1: yTop + h };
