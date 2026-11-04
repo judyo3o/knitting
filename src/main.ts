@@ -1367,15 +1367,18 @@ function prev() {
   const cur = currentRow(p, s);
   if (!cur) return;
   const fin = !!p.fin[s];
-  const pv = fin ? cur : list[list.indexOf(cur) - 1];
+  const before = list[list.indexOf(cur) - 1];
+  // 되돌리기: 파트를 다 떴으면 완료만 취소(마지막 단으로), 아니면 한 단 앞으로. 보기: 언제나 바로 앞 단
+  const pv = fin ? cur : before;
+  const look = before;
   if (!pv) return;
   // 이미 뜬 단으로 갈 때: 보기만 할지, 진행을 되돌릴지
-  const dl = dialog(`${pv.n}단으로 갈까요?`, [
+  const dl = dialog(`${(look || pv).n}단으로 갈까요?`, [
     h("div", { class: "back-choice" },
-      h("button", { class: "btn primary", type: "button", on: { click: () => { dl.close(); view.peek = { id: p.id, s, n: pv.n }; view.editing = false; render(); window.scrollTo({ top: 0, behavior: "smooth" }); } } },
-        h("b", { text: "도안만 보기" }), h("small", { text: `진행은 ${fin ? "완료 상태" : cur.n + "단"} 그대로 두고 앞 단을 살펴봐요` })),
+      look && h("button", { class: "btn primary", type: "button", on: { click: () => { dl.close(); view.peek = { id: p.id, s, n: look.n }; view.editing = false; render(); window.scrollTo({ top: 0, behavior: "smooth" }); } } },
+        h("b", { text: "도안만 보기" }), h("small", { text: `${look.n}단을 봐요 · 진행은 ${fin ? "완료 상태" : cur.n + "단"} 그대로` })),
       h("button", { class: "btn", type: "button", on: { click: () => { dl.close(); stepPrev(p); view.editing = false; commit(p); render(); toast(fin ? `${s} 완료를 취소했어요.` : `${pv.n}단으로 되돌렸어요.`); } } },
-        h("b", { text: fin ? "완료 취소하기" : "한 단 되돌리기" }), h("small", { text: fin ? `${pv.n}단을 다시 떠요 (파트 완료 표시가 지워져요)` : `${pv.n}단부터 다시 떠요 (${pv.n}단 완료 표시가 지워져요)` }))),
+        h("b", { text: fin ? "완료 취소하기" : "한 단 되돌리기" }), h("small", { text: fin ? `마지막 ${pv.n}단을 다시 떠요 (파트 완료 표시가 지워져요)` : `${pv.n}단부터 다시 떠요 (${pv.n}단 완료 표시가 지워져요)` }))),
     h("div", { class: "actions", style: "justify-content:flex-end" }, h("button", { class: "btn ghost", type: "button", text: "취소", on: { click: () => dl.close() } })),
   ]);
 }
@@ -1394,7 +1397,7 @@ function peekStep(p: Pattern, d: 1 | -1) {
 
 function peekBanner(p: Pattern, r: Row, cur: Row) {
   return h("div", { class: "peek-banner", role: "status" },
-    h("span", {}, h("b", { text: `${r.n}단 보는 중` }), ` · 지금 뜨는 곳은 ${p.fin[r.s] ? "완료" : cur.n + "단"} (진행은 그대로예요)`),
+    h("span", {}, h("b", { text: `${r.n}단 보는 중` }), p.fin[r.s] ? " · 이 파트는 다 떴어요 (진행은 그대로예요)" : ` · 지금 뜨는 곳은 ${cur.n}단 (진행은 그대로예요)`),
     h("button", { class: "btn", type: "button", text: "지금 단으로", on: { click: () => { view.peek = null; render(); } } }));
 }
 $("#nextBtn").onclick = next;
