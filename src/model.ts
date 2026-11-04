@@ -483,36 +483,44 @@ export function partStats(p: Pattern, s: string): { ms: number; rest: number; ro
   return { ms, rest, ...count(doneIdx), skipped: 0 };
 }
 
-/** 도안 전체 페이스: 파트마다 뜬 시간·콧수를 합쳐서 (코/ms, 단/ms) */
-export function patternPace(p: Pattern): { stPerMs: number | null; rowPerMs: number | null } {
-  let ms = 0, rows = 0, st = 0, stKnown = true;
+/** 이 도안에서 콧수를 아는 단들의 평균 콧수 (콧수를 모르는 파트에 대신 씀) */
+function avgRowStitches(p: Pattern): number | null {
+  let t = 0, n = 0;
+  for (const part of partNames(p)) for (const v of rowStitchCounts(partRows(p, part).filter((r) => !r.castOn))) if (v != null) { t += v; n++; }
+  return n ? t / n : null;
+}
+
+/** 도안 전체 페이스 (코/ms): 파트마다 뜬 시간·콧수를 합쳐서. 콧수를 모르는 단은 평균 콧수로 */
+export function patternPace(p: Pattern): number | null {
+  const avg = avgRowStitches(p);
+  let ms = 0, st = 0;
   for (const s of partNames(p)) {
     const x = partStats(p, s);
     if (!x.ms || !x.rows) continue;
-    ms += x.ms; rows += x.rows;
-    if (x.stitches == null) stKnown = false; else st += x.stitches;
+    const sts = x.stitches ?? (avg ? x.rows * avg : null);
+    if (sts == null) continue;
+    ms += x.ms; st += sts;
   }
-  if (ms < 60000 || !rows) return { stPerMs: null, rowPerMs: null };
-  return { stPerMs: stKnown && st ? st / ms : null, rowPerMs: rows / ms };
+  return ms >= 60000 && st ? st / ms : null;
 }
 
-/** 지금 페이스로 남은 시간: 이 파트 · 도안 전체 */
+/** 지금 페이스(콧수 기준)로 남은 시간: 이 파트 · 도안 전체 */
 export function etaText(p: Pattern, s: string): string | null {
   const pace = patternPace(p);
-  if (!pace.rowPerMs) return null;
+  if (!pace) return null;
+  const avg = avgRowStitches(p) || 0;
   const rem = (part: string) => {
     const list = partRows(p, part).filter((r) => !r.castOn);
     const sts = rowStitchCounts(list);
-    let rows = 0, st = 0, known = true;
-    list.forEach((r, i) => { if (p.done[key(part, r.n)]) return; rows++; if (sts[i] == null) known = false; else st += sts[i]!; });
-    const ms = pace.stPerMs && known && st ? st / pace.stPerMs : rows / pace.rowPerMs!;
-    return { rows, ms };
+    let rows = 0, st = 0;
+    list.forEach((r, i) => { if (p.done[key(part, r.n)]) return; rows++; st += sts[i] ?? avg; });
+    return { rows, st, ms: st / pace };
   };
   const here = rem(s);
   let allMs = 0;
   for (const part of partNames(p)) if (!p.fin[part]) allMs += rem(part).ms;
   if (!here.rows && !allMs) return null;
-  return (here.rows ? `이 파트 남은 ${here.rows}단 · 지금 페이스로 약 ${fmtDur(here.ms)}` : "이 파트는 다 떴어요") + (allMs > here.ms + 60000 ? ` · 도안 전체 약 ${fmtDur(allMs)}` : "");
+  return (here.rows ? `이 파트 남은 ${here.rows}단(${Math.round(here.st).toLocaleString()}코) · 지금 페이스로 약 ${fmtDur(here.ms)}` : "이 파트는 다 떴어요") + (allMs > here.ms + 60000 ? ` · 도안 전체 약 ${fmtDur(allMs)}` : "") + ` · 시간당 약 ${Math.round(pace * 3600000).toLocaleString()}코`;
 }
 
 /** "1시간 25분" */

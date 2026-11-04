@@ -458,3 +458,7 @@ select,input[type=text],input[type=number],input[type=password],textarea{border-
 }
 .work-txt{display:flex;flex-direction:column;align-items:flex-end;gap:1px}
 .work-eta{font-family:var(--num);font-size:.72rem;color:var(--rose);text-align:right;max-width:260px}
+/* 스톱워치: 뜬 시간 · 남은 시간 아래에 시작 버튼 */
+.work{flex-direction:column;align-items:flex-end}
+.work .btn{order:2}
+.work-txt{order:1}
