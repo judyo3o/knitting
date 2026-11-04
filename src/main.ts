@@ -815,7 +815,31 @@ function narrative(p: Pattern, r: Row) {
     return wrap;
   }
   wrap.append(chunkBox(p, r, nar.chunks));
+  cableCheck(p, r, wrap);
   return wrap;
+}
+
+/** 서술의 교차뜨기 순서 ("2/1 LPC" …) */
+const cablesIn = (t: string) => (t.match(/\b\d\s*\/\s*\d\s*[A-Z]{2,4}\b/g) || []).map((x) => x.replace(/\s+/g, "").replace(/(\d\/\d)/, "$1 "));
+/**
+ * 저장된 서술의 교차뜨기가 지금 차트에서 읽은 것과 다르면 알려 주고 바꿀 수 있게
+ * (예전 버전이 RPC를 RC로 잘못 읽어 저장한 단 등)
+ */
+function cableCheck(p: Pattern, r: Row, wrap: HTMLElement) {
+  if (!chartPage(p, r) || p.src !== "pdf" || r.castOn || r.auto || (p.draw[r.s] && (view.useDrawing[r.s] ?? true))) return;
+  const mine = cablesIn(r.t || "");
+  if (!mine.length) return;
+  chartRowText(p, r).then((txt) => {
+    if (!txt || !wrap.isConnected) return;
+    const read = cablesIn(txt);
+    if (!read.length || read.join("|") === mine.join("|")) return;
+    const diff = mine.length === read.length ? mine.map((m, i) => (m !== read[i] ? `${m} → ${read[i]}` : "")).filter(Boolean).join(", ") : `${mine.join(", ")} → ${read.join(", ")}`;
+    wrap.append(h("div", { class: "cable-diff" },
+      h("span", { class: "gen", text: `차트를 다시 읽어 보니 교차뜨기가 달라요: ${diff}` }),
+      h("div", { class: "actions" }, h("button", { class: "btn ghost", type: "button", text: "차트대로 바꾸기", on: { click: () => {
+        r.t = withEnd(r, txt); r.span = null; p.rev++; commit(p); render(); toast("차트에서 다시 읽은 서술로 바꿨어요.");
+      } } }))));
+  }).catch(() => {});
 }
 
 /** 배색 격자 크기를 도안에서: 콧수는 차트 코 번호 축 > 기초코·단 끝 콧수, 단수는 파트의 단 범위(차트 단 번호까지) */
