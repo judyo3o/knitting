@@ -436,7 +436,7 @@ async function readLocally(pdf: Pdf, pages: number[], size: string, info: PageIn
 async function gaugesFrom(text: string | null, pdf: Pdf | null, info: PageInfo[]) {
   let src = text || "";
   if (!src && pdf) for (const pi of info.filter((x) => x.gauge).slice(0, 2)) src += " " + (await textItems(pdf, pi.n)).items.map((i) => i.str).join(" ");
-  return findGauges(src).map((g) => ({ label: g.label, needle: g.needle, pattern: { st: g.st, rows: g.rows }, before: null, after: null }));
+  return findGauges(src).map((g) => ({ label: g.label, needle: g.needle, pattern: { st: g.st, rows: g.rows }, before: null, after: null, ...(g.swatch ? { swatch: g.swatch } : {}) }));
 }
 
 /** 아티팩트의 Claude는 PDF를 못 받아서: 쪽마다 위·아래 반씩 이미지로 (한 번에 보낼 수 있는 장수에 맞춰 나눔) */

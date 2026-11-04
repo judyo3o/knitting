@@ -1,11 +1,11 @@
 /** 게이지 입력 화면: 무늬별로 도안 · 세탁 전 · 세탁 후 */
-import { compare, convertRows, convertSt, myGauge, rowsToCm, sizeAdvice, stToCm, washChange } from "./gauge";
+import { compare, convertRows, convertSt, gaugeToSwatch, myGauge, rowsToCm, sizeAdvice, stToCm, swatchToGauge, washChange } from "./gauge";
 import { sizeTable, type SizeRow } from "./parse";
 import { toLines } from "./pdfgeom";
 import { textItems } from "./pdf";
 import { commit, pdfOf } from "./store";
 import { ask, dialog, fmtShort, h } from "./ui";
-import type { Gauge, GaugeSet, Pattern } from "./types";
+import type { Gauge, GaugeSet, Pattern, Swatch } from "./types";
 
 const num = (v: string) => {
   const n = parseFloat(v.replace(",", "."));
@@ -16,6 +16,15 @@ export function openGauge(p: Pattern, onSaved: () => void, onResize?: (size: str
   const sets: GaugeSet[] = p.gauges.length ? p.gauges.map((s) => ({ ...s })) : [{ label: "메리야스", pattern: null, before: null, after: null }];
   const list = h("div", { style: "display:flex;flex-direction:column;gap:14px" });
 
+  // 무늬 스와치: 정해진 콧수·단수로 뜨고 전체 너비·길이(cm)를 잰다
+  const sizeRow = (label: string, sw: Swatch, g: Gauge | null, set: (g: Gauge | null) => void, onChange: () => void) => {
+    const cur = g ? gaugeToSwatch(sw, g) : null;
+    const w = h("input", { type: "number", min: 0, step: "0.1", inputmode: "decimal", value: cur ? String(cur.w) : "", "aria-label": label + " 너비 cm", style: "width:5em" });
+    const hh = h("input", { type: "number", min: 0, step: "0.1", inputmode: "decimal", value: cur ? String(cur.h) : "", "aria-label": label + " 길이 cm", style: "width:5em" });
+    const upd = () => { const a = num(w.value), b = num(hh.value); set(a && b ? swatchToGauge(sw, a, b) : null); onChange(); };
+    w.oninput = upd; hh.oninput = upd;
+    return h("div", { class: "gauge-row" }, h("span", { class: "gauge-lab", text: label }), w, h("span", { text: "×" }), hh, h("span", { text: "cm" }));
+  };
   const gaugeRow = (label: string, g: Gauge | null, set: (g: Gauge | null) => void, onChange: () => void) => {
     const st = h("input", { type: "number", min: 0, step: "0.5", inputmode: "decimal", value: g ? String(g.st) : "", "aria-label": label + " 콧수", style: "width:5em" });
     const rows = h("input", { type: "number", min: 0, step: "0.5", inputmode: "decimal", value: g ? String(g.rows) : "", "aria-label": label + " 단수", style: "width:5em" });
@@ -104,9 +113,15 @@ export function openGauge(p: Pattern, onSaved: () => void, onResize?: (size: str
       list.append(h("section", { class: "gauge-set" },
         h("div", { class: "actions", style: "align-items:center" }, label, needle,
           sets.length > 1 ? h("button", { class: "btn ghost", type: "button", text: "빼기", on: { click: () => { sets.splice(i, 1); render(); } } }) : null),
-        gaugeRow("도안 게이지", s.pattern, (g) => (s.pattern = g), refresh),
-        gaugeRow("세탁 전", s.before, (g) => (s.before = g), refresh),
-        gaugeRow("세탁 후", s.after, (g) => (s.after = g), refresh),
+        ...(s.swatch ? [
+          h("p", { class: "hint", style: "margin:0" }, `스와치를 ${s.swatch.st}코 × ${s.swatch.rows}단으로 뜨고, 다 뜬 스와치 전체의 너비·길이를 재요. 도안 크기: `, h("b", { text: `${s.swatch.w} × ${s.swatch.h} cm` }), ` (10cm에 ${s.pattern?.st ?? "?"}코 ${s.pattern?.rows ?? "?"}단)`),
+          sizeRow("세탁 전", s.swatch, s.before, (g) => (s.before = g), refresh),
+          sizeRow("세탁 후", s.swatch, s.after, (g) => (s.after = g), refresh),
+        ] : [
+          gaugeRow("도안 게이지", s.pattern, (g) => (s.pattern = g), refresh),
+          gaugeRow("세탁 전", s.before, (g) => (s.before = g), refresh),
+          gaugeRow("세탁 후", s.after, (g) => (s.after = g), refresh),
+        ]),
         out,
         h("div", { class: "actions", style: "align-items:center" }, h("span", { class: "gen", text: "환산" }), calcIn), calcOut,
         s.at ? h("span", { class: "gen", text: "마지막 수정 " + fmtShort(s.at) }) : null,
@@ -141,6 +156,11 @@ export function gaugeSummary(p: Pattern): string | null {
   const lines = p.gauges.map((s) => {
     const mine = myGauge(s);
     const name = s.label.replace(/\s*\(원문.*$/, "");
+    if (s.swatch) {
+      const sw = s.swatch;
+      const m2 = mine ? gaugeToSwatch(sw, mine) : null;
+      return `${name}: 스와치 ${sw.st}코 ${sw.rows}단 → 도안 ${sw.w}×${sw.h}cm` + (m2 ? ` · 내 ${m2.w}×${m2.h}cm ${s.pattern && compare(s.pattern, mine!).stOk && compare(s.pattern, mine!).rowOk ? "✓ 맞음" : ""}` : " · 떠서 재 보세요");
+    }
     if (s.pattern && mine) {
       const c = compare(s.pattern, mine);
       return `${name}: 도안 ${fmt(s.pattern)} · 내 ${fmt(mine)} ${c.stOk && c.rowOk ? "✓ 맞음" : `· 콧수 ${sign(c.stPct)}%`}`;

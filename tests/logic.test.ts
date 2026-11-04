@@ -259,7 +259,7 @@ describe("gauge", () => {
   it("finds gauges in pattern text", () => {
     expect(findGauges("게이지 : 20코 26단 (5.5mm 바늘, 10 x 10cm 메리야스뜨기) 42코 30단 (5.5mm 바늘, 19 x 13cm 무늬게이지)")).toEqual([
       { label: "메리야스", st: 18, rows: 23, needle: "5.5mm" },
-      { label: "무늬 (원문 42코 30단 / 19×13cm)", st: 22.1, rows: 23.1, needle: "5.5mm" }]);
+      { label: "무늬", st: 22.1, rows: 23.1, needle: "5.5mm", swatch: { st: 38, rows: 27, w: 19, h: 13 } }]);
     expect(findGauges("Knitting tension: 22 sts and 30 rows = 10 cm in stockinette").map((g) => [g.st, g.rows])).toEqual([[22, 30]]);
   });
 });
@@ -685,5 +685,19 @@ describe("스톱워치 없이 뜬 단은 페이스에서 빼기 · 남은 시간
     expect(Math.round(st.ms / M)).toBe(20);
     // 남은 3단(120코), 페이스 80코/20분 → 30분
     expect(etaText(p, "a")).toBe("이 파트 남은 3단(120코) · 지금 페이스로 약 30분 · 시간당 약 240코");
+  });
+});
+
+describe("무늬 스와치 게이지 (전체 크기를 재는)", () => {
+  it("42코 30단 (19 x 13cm)은 스와치 크기로, 잰 cm는 10cm 게이지로", async () => {
+    const { findGauges, swatchToGauge, gaugeToSwatch, swatchFromLabel } = await import("../src/gauge");
+    const g = findGauges("게이지 : 20코 26단 (5.5mm 바늘, 10 x 10cm 메리야스뜨기) 42코 30단 (5.5mm 바늘, 19 x 13cm 무늬게이지)");
+    expect(g[0].swatch).toBeUndefined();
+    expect(g[1].swatch).toEqual({ st: 38, rows: 27, w: 19, h: 13 });
+    expect(swatchToGauge(g[1].swatch!, 19, 13)).toEqual({ st: 22.1, rows: 23.1 });
+    expect(gaugeToSwatch(g[1].swatch!, { st: 19, rows: 20 })).toEqual({ w: 20, h: 13.5 });
+    const old = swatchFromLabel({ label: "무늬 (원문 42코 30단 / 19×13cm)", pattern: { st: 22.1, rows: 23.1 }, before: null, after: null });
+    expect(old.label).toBe("무늬");
+    expect(old.swatch).toEqual({ st: 38, rows: 27, w: 19, h: 13 });
   });
 });

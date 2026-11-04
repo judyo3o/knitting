@@ -1,3 +1,4 @@
+import { swatchFromLabel } from "./gauge";
 import { MAX_LOG, SESSION_GAP_MS } from "./config";
 import type { AiSection, Pattern, Row, SecInfo, Side } from "./types";
 
@@ -278,6 +279,7 @@ export function normalize(p: Partial<Pattern> & { id: string }): Pattern {
   if (!Array.isArray(out.readPages)) out.readPages = [];
   if (!Array.isArray(out.colors)) out.colors = [];
   if (!Array.isArray(out.gauges)) out.gauges = [];
+  out.gauges = out.gauges.map(swatchFromLabel); // 옛 데이터: 이름 속 "(원문 42코 30단 / 19×13cm)" → 스와치 크기
   if (typeof p.info !== "string") {
     // 옛 데이터: notes에 도안 정보와 앱 안내가 섞여 있었다 → 앱 안내만 notes에 남김
     const lines = String(out.notes || "").split("\n");

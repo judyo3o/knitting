@@ -96,4 +96,7 @@ export type GaugeSet = {
   before: Gauge | null; // 내 스와치 세탁 전
   after: Gauge | null; // 내 스와치 세탁 후
   at?: number; // 마지막 수정 시각
+  swatch?: Swatch; // 무늬 스와치: 이 콧수·단수로 떠서 전체 크기를 잰다 (예: 42코 30단 → 19×13cm)
 };
+/** 스와치를 정해진 콧수·단수로 뜨고 전체 너비·길이(cm)를 재는 게이지 */
+export type Swatch = { st: number; rows: number; w: number; h: number };

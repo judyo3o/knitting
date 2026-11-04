@@ -1,5 +1,5 @@
 /** 게이지: 도안 · 세탁 전 · 세탁 후 비교와 콧수/단수 환산 (10cm 기준) */
-import type { Gauge, GaugeSet } from "./types";
+import type { Gauge, GaugeSet, Swatch } from "./types";
 
 const ok = (g: Gauge | null | undefined): g is Gauge => !!g && g.st > 0 && g.rows > 0;
 const pct = (a: number, b: number) => ((a - b) / b) * 100;
@@ -49,8 +49,8 @@ export const cmToRows = (cm: number, g: Gauge) => Math.round((cm * g.rows) / 10)
  * "42코 30단 (5.5mm, 19 x 13cm 무늬게이지)", "22 sts and 30 rows = 10 cm" 등.
  * 잰 크기가 10cm가 아니면 10cm 기준으로 바꾼다.
  */
-export function findGauges(text: string): { label: string; st: number; rows: number; needle?: string }[] {
-  const out: { label: string; st: number; rows: number; needle?: string }[] = [];
+export function findGauges(text: string): { label: string; st: number; rows: number; needle?: string; swatch?: Swatch }[] {
+  const out: { label: string; st: number; rows: number; needle?: string; swatch?: Swatch }[] = [];
   const t = text.replace(/\s+/g, " ");
   const re = /(\d(?: ?\d){0,2}(?:[.,]\d)?)\s*(?:코|sts?|stitches)\s*(?:[x×X*,/]|and)?\s*(\d(?: ?\d){0,2}(?:[.,]\d)?)\s*(?:단|rows?|rounds?|rnds?)/gi;
   for (const m of t.matchAll(re)) {
@@ -73,8 +73,11 @@ export function findGauges(text: string): { label: string; st: number; rows: num
     const needle = (ctx.match(/(\d(?:[.,]\d{1,2})?)\s*mm/i) || before.match(/(\d(?:[.,]\d{1,2})?)\s*mm/i) || [])[1];
     const word = (ctx + " " + before).match(/(메리야스|무늬|가터|고무|멍석|배색|stockinette|stocking|texture pattern|pattern|garter|ribbing|rib|colou?rwork|moss|seed)/i);
     let label = word ? word[1].replace(/stocking$/i, "stockinette") : out.length ? `게이지 ${out.length + 1}` : "메리야스";
-    if (size && !/^10\s*[x×]\s*10/.test(size[0].replace(/\s/g, ""))) label += ` (원문 ${m[1]}코 ${m[2]}단 / ${size[1]}×${size[2] || size[1]}cm)`;
-    out.push({ label, st, rows, ...(needle ? { needle: needle.replace(",", ".") + "mm" } : {}) });
+    // 10cm가 아닌 크기(예: 42코 30단 → 19×13cm)는 '스와치를 떠서 전체 크기를 재는' 게이지
+    const swatch: Swatch | undefined = size && !/^10\s*[x×]\s*10/.test(size[0].replace(/\s/g, ""))
+      ? { st: parseFloat(m[1].replace(",", ".")), rows: parseFloat(m[2].replace(",", ".")), w: parseFloat(size[1].replace(",", ".")), h: parseFloat((size[2] || size[1]).replace(",", ".")) }
+      : undefined;
+    out.push({ label, st, rows, ...(needle ? { needle: needle.replace(",", ".") + "mm" } : {}), ...(swatch ? { swatch } : {}) });
   }
   return out;
 }
@@ -103,4 +106,16 @@ export function sizeAdvice(order: string[], values: number[], current: string, p
     for (const x of list) if (Number.isFinite(x.mine) && Math.abs(x.mine - target) < d) { d = Math.abs(x.mine - target); best = x.sz; }
   }
   return { factor: f, list, target, best };
+}
+
+/** 스와치 크기(cm) ↔ 10cm 게이지 */
+export const swatchToGauge = (sw: Swatch, w: number, h: number): Gauge => ({ st: Math.round(((sw.st * 10) / w) * 10) / 10, rows: Math.round(((sw.rows * 10) / h) * 10) / 10 });
+export const gaugeToSwatch = (sw: Swatch, g: Gauge): { w: number; h: number } => ({ w: Math.round(((sw.st * 10) / g.st) * 10) / 10, h: Math.round(((sw.rows * 10) / g.rows) * 10) / 10 });
+
+/** 옛 데이터: 이름에 "(원문 42코 30단 / 19×13cm)"로만 남아 있던 스와치 크기를 꺼낸다 */
+export function swatchFromLabel(set: GaugeSet): GaugeSet {
+  if (set.swatch) return set;
+  const m = set.label.match(/\s*\(원문\s*([\d.]+)코\s*([\d.]+)단\s*\/\s*([\d.]+)\s*[×x]\s*([\d.]+)\s*cm\)/);
+  if (!m) return set;
+  return { ...set, label: set.label.replace(m[0], "").trim() || "무늬", swatch: { st: +m[1], rows: +m[2], w: +m[3], h: +m[4] } };
 }
