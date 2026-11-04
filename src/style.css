@@ -456,3 +456,5 @@ select,input[type=text],input[type=number],input[type=password],textarea{border-
   .now > .chart-col .chartview{max-height:calc(100vh - 300px)}
   .now > .chart-col .legend{max-height:calc(100vh - 300px)}
 }
+.work-txt{display:flex;flex-direction:column;align-items:flex-end;gap:1px}
+.work-eta{font-family:var(--num);font-size:.72rem;color:var(--rose);text-align:right;max-width:260px}

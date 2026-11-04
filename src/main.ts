@@ -7,7 +7,7 @@ import { cellKeyColor, chartBitmap, chartKey, clearBitmaps, splitChartByGap, lab
 import { getFile, putFile } from "./db";
 import { getCell, longestFloat, rowColors } from "./drawing";
 import {
-  applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, spanParts, finishText, continuousKnitMs, castLabel, flexibleRow, addRowAfter, removeRow, workIn, workStart, workStop, sideOf, stepNext, stepPrev,
+  applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, spanParts, finishText, etaText, continuousKnitMs, castLabel, flexibleRow, addRowAfter, removeRow, workIn, workStart, workStop, sideOf, stepNext, stepPrev,
 } from "./model";
 import { blobB64, canvasBlob, textItems } from "./pdf";
 import { chartFor, chartsForSize, chartTitle, chartTitleCount, findCharts, findLegend, LEGEND_RE, partTitleScore, rowH, rowY, sizeRange, stitchAxis, type Chart } from "./pdfgeom";
@@ -197,7 +197,13 @@ function workButtons(p: Pattern) {
   const clock = h("span", { class: "work-clock" });
   const today = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return workIn(p, d.getTime(), Date.now()); };
   const hms = (ms: number) => { const t = Math.floor(ms / 1000); return `${Math.floor(t / 3600)}:${String(Math.floor((t % 3600) / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`; };
-  const tick = () => { clock.textContent = on ? `뜨는 중 ${hms(Date.now() - p.work!.on!)} · 오늘 ${hms(today())}` : today() > 0 ? `오늘 뜬 시간 ${hms(today())}` : ""; };
+  // 뜬 시간 아래: 지금 페이스로 이 파트·도안 전체가 언제 끝나는지
+  const eta = h("span", { class: "work-eta" });
+  let etaAt = 0;
+  const tick = () => {
+    clock.textContent = on ? `뜨는 중 ${hms(Date.now() - p.work!.on!)} · 오늘 ${hms(today())}` : today() > 0 ? `오늘 뜬 시간 ${hms(today())}` : "";
+    if (Date.now() - etaAt > 15000) { etaAt = Date.now(); eta.textContent = etaText(p, currentTab(p)) || ""; }
+  };
   clearInterval(workTick);
   tick();
   if (on) workTick = window.setInterval(() => { if (!clock.isConnected) return clearInterval(workTick); tick(); if (Date.now() % 30000 < 1000) stretchReminder(p); }, 1000);
@@ -207,7 +213,7 @@ function workButtons(p: Pattern) {
     commit(p);
     refreshWork(p);
   } } });
-  return h("span", { class: "work" }, b, clock);
+  return h("span", { class: "work" }, b, h("span", { class: "work-txt" }, clock, eta));
 }
 
 function tabs(p: Pattern, s: string) {

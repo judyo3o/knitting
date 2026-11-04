@@ -437,45 +437,82 @@ export function expandLengthRepeats(p: Pattern): void {
   }
 }
 
+/** 단마다 콧수 (단 끝 콧수가 있으면 그 값, 없으면 앞 단 콧수를 이어 쓰고, 처음엔 기초코 수) */
+function rowStitchCounts(list: Row[]): (number | null)[] {
+  let cur = partStitches(list);
+  return list.map((r) => { const m = (r.st || "").match(/\d{1,4}/); if (m) cur = +m[0]; return m ? +m[0] : cur; });
+}
+
+/** 스톱워치를 켜 둔 동안 뜬 단인가 (완료 시각이 켜 둔 구간 안, 끄기 직후 1분 30초까지) */
+export function timedAt(p: Pattern, t: number, now = Date.now()): boolean {
+  const spans = [...(p.work?.spans || []), ...(p.work?.on ? [[p.work.on, now] as [number, number]] : [])];
+  return spans.some(([a, b]) => t >= a && t <= b + 90000);
+}
+
 /**
  * 파트를 뜨는 데 걸린 시간과 뜬 콧수 (완성 페이스).
- * 시간: 단 완료 시각 사이 간격의 합. 평소 한 단 시간보다 훨씬 긴 간격(4배 넘고 15분 넘음)은 쉰 것으로 보고
- * 평소 한 단 시간만 센다. 첫 단은 누르기 전에 뜬 시간을 모르니 평소 한 단 시간으로.
- * 콧수: 단 끝 콧수(st)가 있으면 그 값, 없으면 앞 단 콧수를 이어 쓰고, 처음엔 기초코 수.
+ * 스톱워치를 썼으면: 켜 둔 시간만 세고, 스톱워치 없이 뜬 것 같은 단(꺼져 있을 때 완료)은 단·콧수 모두 평균에서 뺀다 (skipped).
+ * 안 썼으면: 단 완료 시각 사이 간격의 합. 평소보다 훨씬 긴 간격(4배·15분 넘음)은 쉰 것으로 보고 평소 한 단 시간만 센다.
  */
-export function partStats(p: Pattern, s: string): { ms: number; rest: number; rows: number; stitches: number | null } {
-  const list = partRows(p, s);
-  const ts = list.map((r) => p.done[key(s, r.n)]).filter((t): t is number => !!t).sort((a, b) => a - b);
-  const gaps = ts.slice(1).map((t, i) => t - ts[i]).filter((d) => d > 0);
-  let ms = 0, rest = 0;
+export function partStats(p: Pattern, s: string): { ms: number; rest: number; rows: number; stitches: number | null; skipped: number } {
+  const list = partRows(p, s).filter((r) => !r.castOn);
+  const sts = rowStitchCounts(list);
+  const doneIdx = list.map((r, i) => (p.done[key(s, r.n)] ? i : -1)).filter((i) => i >= 0);
+  const count = (idx: number[]) => {
+    let total = 0, known = true;
+    for (const i of idx) { if (sts[i] == null) known = false; else total += sts[i]!; }
+    return { rows: idx.length, stitches: known && total ? total : null };
+  };
+  const ts = doneIdx.map((i) => p.done[key(s, list[i].n)]).sort((a, b) => a - b);
   if (workUsed(p) && ts.length) {
-    // 시작·중지 버튼을 썼으면 켜 둔 시간만: 첫 단을 시작한 때(앞 파트 마지막 단 이후)부터 마지막 단까지
+    const timed = doneIdx.filter((i) => timedAt(p, p.done[key(s, list[i].n)]));
     const before = Object.values(p.done).filter((t) => t < ts[0]).sort((a, b) => b - a)[0] ?? 0;
     const from = Math.max(before, ts[0] - 6 * 3600000);
     const on = workIn(p, from, ts[ts.length - 1]);
-    if (on > 0) return { ms: on, rest: Math.max(0, ts[ts.length - 1] - from - on), rows: countRows(), stitches: countSts() };
+    const c = count(timed);
+    return { ms: on, rest: Math.max(0, ts[ts.length - 1] - from - on), ...c, skipped: doneIdx.length - timed.length };
   }
+  let ms = 0, rest = 0;
+  const gaps = ts.slice(1).map((t, i) => t - ts[i]).filter((d) => d > 0);
   if (gaps.length) {
     const med = [...gaps].sort((a, b) => a - b)[gaps.length >> 1];
     const cap = Math.max(med * 4, 15 * 60000);
     for (const d of gaps) if (d > cap) { ms += med; rest += d - med; } else ms += d;
     ms += med; // 첫 단
   }
-  return { ms, rest, rows: countRows(), stitches: countSts() };
-  function countRows() { return list.filter((r) => p.done[key(s, r.n)] && !r.castOn).length; }
-  function countSts(): number | null {
-    let cur = partStitches(list);
-    let total = 0, known = true;
-    for (const r of list) {
-      const m = (r.st || "").match(/\d{1,4}/);
-      const st = m ? +m[0] : cur;
-      if (m) cur = +m[0];
-      if (!p.done[key(s, r.n)] || r.castOn) continue;
-      if (st == null) known = false;
-      else total += st;
-    }
-    return known && total ? total : null;
+  return { ms, rest, ...count(doneIdx), skipped: 0 };
+}
+
+/** 도안 전체 페이스: 파트마다 뜬 시간·콧수를 합쳐서 (코/ms, 단/ms) */
+export function patternPace(p: Pattern): { stPerMs: number | null; rowPerMs: number | null } {
+  let ms = 0, rows = 0, st = 0, stKnown = true;
+  for (const s of partNames(p)) {
+    const x = partStats(p, s);
+    if (!x.ms || !x.rows) continue;
+    ms += x.ms; rows += x.rows;
+    if (x.stitches == null) stKnown = false; else st += x.stitches;
   }
+  if (ms < 60000 || !rows) return { stPerMs: null, rowPerMs: null };
+  return { stPerMs: stKnown && st ? st / ms : null, rowPerMs: rows / ms };
+}
+
+/** 지금 페이스로 남은 시간: 이 파트 · 도안 전체 */
+export function etaText(p: Pattern, s: string): string | null {
+  const pace = patternPace(p);
+  if (!pace.rowPerMs) return null;
+  const rem = (part: string) => {
+    const list = partRows(p, part).filter((r) => !r.castOn);
+    const sts = rowStitchCounts(list);
+    let rows = 0, st = 0, known = true;
+    list.forEach((r, i) => { if (p.done[key(part, r.n)]) return; rows++; if (sts[i] == null) known = false; else st += sts[i]!; });
+    const ms = pace.stPerMs && known && st ? st / pace.stPerMs : rows / pace.rowPerMs!;
+    return { rows, ms };
+  };
+  const here = rem(s);
+  let allMs = 0;
+  for (const part of partNames(p)) if (!p.fin[part]) allMs += rem(part).ms;
+  if (!here.rows && !allMs) return null;
+  return (here.rows ? `이 파트 남은 ${here.rows}단 · 지금 페이스로 약 ${fmtDur(here.ms)}` : "이 파트는 다 떴어요") + (allMs > here.ms + 60000 ? ` · 도안 전체 약 ${fmtDur(allMs)}` : "");
 }
 
 /** "1시간 25분" */
@@ -490,7 +527,7 @@ export function finishText(p: Pattern, s: string): string | null {
   const st = partStats(p, s);
   if (!st.ms || st.ms < 30000) return null;
   const pace = st.stitches ? Math.round(st.stitches / (st.ms / 3600000)) : null;
-  return `실제 뜬 시간 ${fmtDur(st.ms)}` + (st.rest >= 60000 ? ` · 쉰 시간까지 ${fmtDur(st.ms + st.rest)}` : "") + (pace ? ` · 시간당 약 ${pace.toLocaleString()}코 페이스 (총 ${st.stitches!.toLocaleString()}코 · ${st.rows}단)` : ` · ${st.rows}단`);
+  return `실제 뜬 시간 ${fmtDur(st.ms)}` + (st.skipped ? ` (스톱워치 없이 뜬 ${st.skipped}단은 페이스에서 뺌)` : "") + (st.rest >= 60000 ? ` · 쉰 시간까지 ${fmtDur(st.ms + st.rest)}` : "") + (pace ? ` · 시간당 약 ${pace.toLocaleString()}코 페이스 (총 ${st.stitches!.toLocaleString()}코 · ${st.rows}단)` : ` · ${st.rows}단`);
 }
 
 /** 쉬지 않고 뜬 시간: 모든 파트의 단 완료 시각을 거꾸로 따라가며 10분 넘게 빈 곳에서 끊는다 */

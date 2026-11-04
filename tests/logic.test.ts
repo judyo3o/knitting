@@ -669,3 +669,21 @@ describe("약어표 기호표", () => {
     expect(matchToken("k2tog", e)!.sym).toBe("K2tog");
   });
 });
+
+describe("스톱워치 없이 뜬 단은 페이스에서 빼기 · 남은 시간", () => {
+  it("꺼져 있을 때 완료한 단은 단·콧수에서 빠지고, 남은 단은 그 페이스로", async () => {
+    const { newPattern, partStats, workStart, workStop, etaText } = await import("../src/model");
+    const R = (n: number) => ({ s: "a", n, t: "겉뜨기", st: "40코", side: null, pg: null, ch: null, span: null });
+    const p = newPattern({ id: "x", name: "x", rows: [1, 2, 3, 4, 5, 6].map(R) as any });
+    const M = 60000, t0 = 1_000_000;
+    workStart(p, t0); p.done["a#1"] = t0 + 10 * M; p.done["a#2"] = t0 + 20 * M; workStop(p, t0 + 20 * M);
+    p.done["a#3"] = t0 + 200 * M; // 스톱워치 없이
+    const st = partStats(p, "a");
+    expect(st.rows).toBe(2);
+    expect(st.stitches).toBe(80);
+    expect(st.skipped).toBe(1);
+    expect(Math.round(st.ms / M)).toBe(20);
+    // 남은 3단(120코), 페이스 80코/20분 → 30분
+    expect(etaText(p, "a")).toBe("이 파트 남은 3단 · 지금 페이스로 약 30분");
+  });
+});
