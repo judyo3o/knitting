@@ -472,3 +472,13 @@ select,input[type=text],input[type=number],input[type=password],textarea{border-
 .peek-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 10px 14px; border-radius: 14px; background: var(--lav-bg); color: var(--lav-ink); border: 1.5px dashed var(--lav); font-size: 14px; }
 .peek-banner b { font-weight: 700; }
 body.peeking #nextBtn { background: var(--lav-l); color: var(--lav-ink); border-color: var(--lav); }
+
+/* 사이즈 추천: 사이즈마다 고르기 */
+.size-pick { display: flex; flex-direction: column; gap: 6px; }
+.size-opt { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1.5px solid var(--rule); border-radius: 12px; background: var(--sheet); }
+.size-opt.best { border-color: var(--pink); background: var(--pink-bg); }
+.size-opt.cur { border-style: dashed; }
+.size-opt b { font-size: 16px; margin-right: 6px; }
+.size-opt .tag { font-size: 12px; padding: 1px 7px; border-radius: 999px; background: var(--pink); color: var(--accent-ink); margin-right: 4px; }
+.size-opt .tag.cur { background: var(--lav-l); color: var(--lav-ink); }
+.size-opt .btn { flex: none; }

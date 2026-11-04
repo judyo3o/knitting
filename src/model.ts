@@ -619,3 +619,14 @@ export function removeRow(p: Pattern, s: string, n: number) {
   delete p.done[key(s, n)]; delete p.part[key(s, n)];
   shiftRows(p, s, n, -1);
 }
+
+/** 한 파트의 진행 초기화: 뜬 단·완료·묶음 진행·진행 기록을 지우고 첫 단으로 */
+export function resetPart(p: Pattern, s: string) {
+  const pre = s + "#";
+  for (const k of Object.keys(p.done)) if (k.startsWith(pre)) delete p.done[k];
+  for (const k of Object.keys(p.part)) if (k.startsWith(pre)) delete p.part[k];
+  delete p.fin[s];
+  p.log = p.log.filter((l) => l.s !== s);
+  const first = partRows(p, s)[0];
+  if (first) p.pos[s] = first.n;
+}

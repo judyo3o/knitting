@@ -7,7 +7,7 @@ import { cellKeyColor, chartBitmap, chartKey, clearBitmaps, splitChartByGap, lab
 import { getFile, putFile } from "./db";
 import { getCell, longestFloat, rowColors } from "./drawing";
 import {
-  applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, spanParts, finishText, etaText, continuousKnitMs, castLabel, flexibleRow, addRowAfter, removeRow, workIn, workStart, workStop, sideOf, stepNext, stepPrev,
+  applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, spanParts, finishText, etaText, continuousKnitMs, castLabel, flexibleRow, addRowAfter, removeRow, workIn, workStart, workStop, sideOf, stepNext, stepPrev, resetPart,
 } from "./model";
 import { blobB64, canvasBlob, renderRegion, textItems } from "./pdf";
 import type { Guide } from "./symbolid";
@@ -1184,7 +1184,16 @@ function renderSub(p: Pattern, s: string, r: Row) {
       if (n == null || !jumpTo(p, s, n)) return toast(`${s}에 ${num.value}단이 없어요.`);
       commit(p, false); back();
     };
-    root.append(head("단 목록", `${p.name} · ${s} ${r.n}/${pr.total}단`), tabs(p, s), form, infoCard(p), rowList(p, s));
+    const hasProg = pr.done > 0 || !!p.fin[s] || Object.keys(p.part).some((k) => k.startsWith(s + "#")) || (p.pos[s] != null && p.pos[s] !== partRows(p, s)[0]?.n);
+    const reset = hasProg && !p.example ? h("div", { class: "danger" }, h("button", { class: "link warn", type: "button", text: `'${s}' 진행 초기화`, on: { click: async () => {
+      if (!(await ask(`'${s}' 진행 초기화`, `'${s}'에서 뜬 단 표시${p.fin[s] ? "·완료" : ""}·묶음 진행·진행 기록을 지우고 첫 단부터 다시 시작해요. 다른 파트와 단 서술·게이지는 그대로예요.`, "초기화"))) return;
+      resetPart(p, s);
+      view.peek = null;
+      commit(p);
+      render();
+      toast(`'${s}' 진행을 처음으로 돌렸어요.`);
+    } } })) : null;
+    root.append(head("단 목록", `${p.name} · ${s} ${r.n}/${pr.total}단`), tabs(p, s), form, infoCard(p), rowList(p, s), ...(reset ? [reset] : []));
   } else {
     root.append(head("진행 기록", `${p.name} · 10분 안에 이어 뜬 단은 한 번으로`), history(p), backupCard(p));
   }

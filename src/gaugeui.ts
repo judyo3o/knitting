@@ -49,6 +49,16 @@ export function openGauge(p: Pattern, onSaved: () => void, onResize?: (size: str
         onResize(to);
       } } }))
     : null;
+  // 어느 사이즈든 골라서 바꾸기 (추천이 S여도 M을 뜨고 싶을 수 있다)
+  const chooseBtn = (to: string) => onResize
+    ? h("button", { class: "btn ghost", type: "button", text: "이 사이즈로", on: { click: async () => {
+        if (!(await ask("사이즈 바꾸기", `${p.size || "지금"} → ${to}로 바꾸고 도안을 그 사이즈로 다시 읽어요. 단 목록이 새 사이즈로 바뀌고, 게이지·진행 기록은 그대로 둬요.`, "바꾸기"))) return;
+        p.gauges = sets.filter((x) => x.pattern || x.before || x.after || x.label.trim());
+        commit(p);
+        dl.close();
+        onResize(to);
+      } } })
+    : null;
   let chestIn: HTMLInputElement | null = null, easeIn: HTMLInputElement | null = null;
   const updateSize = () => {
     const row = table?.rows.find((r) => /가슴|둘레|품|chest|bust|width|너비/i.test(r.label)) || table?.rows[0];
@@ -80,12 +90,16 @@ export function openGauge(p: Pattern, onSaved: () => void, onResize?: (size: str
       const ease = num(easeIn!.value) || (parseFloat(easeIn!.value) === 0 ? 0 : patEase ?? 10);
       const rec = recommendSize(table.order, row.values, body.chest, ease, f, half);
       out.push(
-        h("ul", { class: "info-list", style: "padding-left:18px" }, ...rec.list.map((x) => h("li", { style: x.sz === rec.best ? { fontWeight: "700" } : {} },
-          `${x.sz}: ${row.label} 도안 ${Number.isFinite(x.pat) ? x.pat + u : "(PDF에서 읽지 못함)"}` + (f !== 1 && Number.isFinite(x.fin) ? ` → 내 게이지 ${x.fin}${u}` : "") + (Number.isFinite(x.ease) ? ` · 몸보다 ${x.ease >= 0 ? "+" : ""}${x.ease}cm` : ""),
-          x.sz.toUpperCase() === (p.size || "").toUpperCase() ? " · 지금 사이즈" : "",
-          x.sz === rec.best ? " · 추천" : ""))),
-        h("p", { style: "margin:0", text: rec.best ? `원하는 완성 ${half ? "품" : "가슴둘레"} ${rec.want}cm에 가장 가까운 건 ${rec.best} 사이즈예요.` : "도안 치수를 읽지 못했어요." }),
-        rec.best ? resizeBtn(rec.best) : null,
+        h("p", { style: "margin:0", text: rec.best ? `원하는 완성 ${half ? "품" : "가슴둘레"} ${rec.want}cm에 가장 가까운 건 ${rec.best} 사이즈예요. 더 넉넉하게나 딱 맞게 입고 싶으면 다른 사이즈를 골라도 돼요.` : "도안 치수를 읽지 못했어요." }),
+        h("div", { class: "size-pick" }, ...rec.list.map((x) => {
+          const now = x.sz.toUpperCase() === (p.size || "").toUpperCase();
+          const fit = !Number.isFinite(x.ease) ? "" : x.ease - ease < -4 ? "작게" : x.ease - ease > 6 ? "넉넉하게" : "권장 여유";
+          return h("div", { class: "size-opt" + (x.sz === rec.best ? " best" : "") + (now ? " cur" : "") },
+            h("div", {},
+              h("b", { text: x.sz }), x.sz === rec.best ? h("span", { class: "tag", text: "추천" }) : null, now ? h("span", { class: "tag cur", text: "지금" }) : null,
+              h("div", { class: "gen", text: `${row.label} ${Number.isFinite(x.pat) ? x.pat + u : "(PDF에서 읽지 못함)"}` + (f !== 1 && Number.isFinite(x.fin) ? ` → 내 게이지 ${x.fin}${u}` : "") + (Number.isFinite(x.ease) ? ` · 몸보다 ${x.ease >= 0 ? "+" : ""}${x.ease}cm${fit ? ` (${fit})` : ""}` : "") })),
+            now ? null : chooseBtn(x.sz));
+        })),
       );
     } else if (set && mine) {
       // 몸 치수가 없으면: 지금 사이즈의 도안 크기에 가장 가까운 사이즈 (스와치로 다시 고르기)
@@ -116,7 +130,7 @@ export function openGauge(p: Pattern, onSaved: () => void, onResize?: (size: str
     list.innerHTML = "";
     sets.forEach((s, i) => {
       const out = h("div", { class: "gauge-out", "aria-live": "polite" });
-      const calcIn = h("input", { type: "number", min: 1, inputmode: "numeric", placeholder: "도안 숫자", style: "width:6em", "aria-label": "도안 콧수나 단수" });
+      const calcIn = h("input", { type: "number", min: 1, inputmode: "numeric", placeholder: "예: 120", style: "width:6em", "aria-label": "도안에 적힌 콧수나 단수" });
       const calcOut = h("div", { class: "gen" });
       const refresh = () => {
         s.at = Date.now();
@@ -127,7 +141,7 @@ export function openGauge(p: Pattern, onSaved: () => void, onResize?: (size: str
           const c = compare(s.pattern, mine);
           // 내 바늘(없으면 도안 바늘)에서 반 호수 굵게·가늘게
           const mm = needleMm(s.myNeedle) ?? needleMm(s.needle);
-          const adv = mm && !c.stOk ? `${c.advice.split("→")[0]}→ ${mm}mm 대신 ${Math.round((mm + (c.stPct > 0 ? 0.5 : -0.5)) * 100) / 100}mm로 다시 떠 보세요.` : c.advice;
+          const adv = mm && !c.stOk ? `${c.advice.split("→")[0]}→ 바늘을 반 호수 ${c.stPct > 0 ? "굵게" : "가늘게"}: ${mm}mm 대신 ${Math.round((mm + (c.stPct > 0 ? 0.5 : -0.5)) * 100) / 100}mm로 떠 보세요.` : c.advice;
           lines.push(h("b", { text: adv, style: { color: c.stOk && c.rowOk ? "var(--ok)" : "var(--warn)" } }));
           lines.push(`콧수 ${sign(c.stPct)}% ${c.stOk ? "✓" : ""} · 단수 ${sign(c.rowPct)}% ${c.rowOk ? "✓" : ""} (${s.after ? "세탁 후" : "세탁 전"} 기준)`);
           lines.push(`도안 콧수 그대로 뜨면 너비 ${sign(c.widthPct)}%, 도안 단수 그대로 뜨면 길이 ${sign(c.lengthPct)}%`);
@@ -142,7 +156,7 @@ export function openGauge(p: Pattern, onSaved: () => void, onResize?: (size: str
         const n = parseInt(calcIn.value, 10);
         calcOut.textContent = "";
         if (n && s.pattern && mine)
-          calcOut.textContent = `콧수라면 → ${convertSt(n, s.pattern, mine)}코 (${stToCm(n, s.pattern)}cm) · 단수라면 → ${convertRows(n, s.pattern, mine)}단 (${rowsToCm(n, s.pattern)}cm)`;
+          calcOut.textContent = `도안 ${n}코(${stToCm(n, s.pattern)}cm)는 내 게이지로 ${convertSt(n, s.pattern, mine)}코 · 도안 ${n}단(${rowsToCm(n, s.pattern)}cm)은 내 게이지로 ${convertRows(n, s.pattern, mine)}단`;
         else if (n && (mine || s.pattern)) {
           const g = (mine || s.pattern)!;
           calcOut.textContent = `${n}코 = ${stToCm(n, g)}cm · ${n}단 = ${rowsToCm(n, g)}cm`;
@@ -171,7 +185,7 @@ export function openGauge(p: Pattern, onSaved: () => void, onResize?: (size: str
           myNeedleRow,
         ]),
         out,
-        h("div", { class: "actions", style: "align-items:center" }, h("span", { class: "gen", text: "환산" }), calcIn), calcOut,
+        h("div", { class: "actions", style: "align-items:center" }, h("span", { class: "gen", text: "콧수·단수 바꿔 보기: 도안에 적힌 숫자" }), calcIn), calcOut,
         s.at ? h("span", { class: "gen", text: "마지막 수정 " + fmtShort(s.at) }) : null,
       ));
       refresh();

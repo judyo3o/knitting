@@ -223,7 +223,7 @@ assert.match(await page.textContent(".gauge-line"), /메리야스: 도안 20코 
 await page.click(".gauge-line");
 await page.fill(".gauge-set >> nth=0 >> input[aria-label='세탁 후 콧수']", "20");
 await page.fill(".gauge-set >> nth=0 >> input[aria-label='세탁 후 단수']", "23");
-await page.fill(".gauge-set >> nth=0 >> input[aria-label='도안 콧수나 단수']", "110");
+await page.fill(".gauge-set >> nth=0 >> input[aria-label='도안에 적힌 콧수나 단수']", "110");
 const gout = await page.textContent(".gauge-set >> nth=0");
 console.log("   ", gout.replace(/\s+/g, " ").slice(0, 200));
 assert.match(gout, /굵게/);

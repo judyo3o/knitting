@@ -722,3 +722,21 @@ describe("신체 사이즈로 추천", () => {
   });
   it("바늘 숫자", () => { expect(needleMm("5.5mm")).toBe(5.5); expect(needleMm("4,5 mm")).toBe(4.5); expect(needleMm("")).toBeNull(); });
 });
+
+import { resetPart as _resetPart } from "../src/model";
+it("파트 진행 초기화: 그 파트만 지운다", async () => {
+  const { newPattern, key: k } = await import("../src/model");
+  const p = newPattern({ id: "r", name: "r" });
+  p.rows = [1, 2, 3].map((n) => ({ s: "A", n, t: "", st: null, side: null, pg: null, ch: null, span: null })).concat([{ s: "B", n: 1, t: "", st: null, side: null, pg: null, ch: null, span: null }]);
+  p.done = { [k("A", 1)]: 1, [k("A", 2)]: 2, [k("B", 1)]: 3 };
+  p.part = { [k("A", 3)]: { i: 1, t: 4 } };
+  p.fin = { A: 5, B: 6 };
+  p.pos = { A: 3, B: 1 };
+  p.log = [{ a: 1, b: 2, s: "A", from: 1, to: 3 }, { a: 1, b: 2, s: "B", from: 1, to: 2 }];
+  _resetPart(p, "A");
+  expect(p.done).toEqual({ [k("B", 1)]: 3 });
+  expect(p.part).toEqual({});
+  expect(p.fin).toEqual({ B: 6 });
+  expect(p.pos.A).toBe(1);
+  expect(p.log.map((l) => l.s)).toEqual(["B"]);
+});
