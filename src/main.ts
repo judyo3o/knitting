@@ -9,7 +9,8 @@ import { getCell, longestFloat, rowColors } from "./drawing";
 import {
   applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, spanParts, finishText, etaText, continuousKnitMs, castLabel, flexibleRow, addRowAfter, removeRow, workIn, workStart, workStop, sideOf, stepNext, stepPrev,
 } from "./model";
-import { blobB64, canvasBlob, textItems } from "./pdf";
+import { blobB64, canvasBlob, renderRegion, textItems } from "./pdf";
+import type { Guide } from "./symbolid";
 import { chartFor, chartsForSize, chartTitle, chartTitleCount, findCharts, findLegend, LEGEND_RE, partTitleScore, rowH, rowY, sizeRange, stitchAxis, type Chart } from "./pdfgeom";
 import { explainCheck, explainDraft, explainHead } from "./prompts";
 import { active, commit, exportJson, importJson, load, pdfOf, removePattern, saveNow, setActive, startAutosave, state, syncRemote } from "./store";
@@ -358,6 +359,31 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
     });
     return wrap;
   }
+  const noChart = (why: string) => {
+    box.remove();
+    t.prepend(h("span", { class: "gen", text: why }));
+    for (const b of [...t.querySelectorAll("button")].filter((b) => /^[−+]$|차트 전체/.test(b.textContent || ""))) b.remove();
+  };
+  // 고무단처럼 '차트 상단 가이드 라인을 참고'하는 파트: 차트 위 가이드 줄만 크게
+  const showGuide = async (why: string) => {
+    const gd = await guideOf(p, r).catch(() => null);
+    if (seq !== renderSeq) return;
+    if (!gd) return noChart(why);
+    const gc = await guideCanvas(p, gd.page, gd.g, Math.max(22, view.rowPx * 1.4));
+    if (seq !== renderSeq) return;
+    if (!gc) return noChart(why);
+    lg?.remove();
+    cv.innerHTML = "";
+    cv.append(gc);
+    box.after(h("span", { class: "gen", text: `차트 p${gd.page} 위 고무단 가이드 라인${p.size ? ` · ${p.size} 사이즈` : ""} · ${gd.g.st.length}코 (옆으로 밀어 보기)` }));
+    for (const b of [...t.querySelectorAll("button")].filter((b) => /차트 전체/.test(b.textContent || ""))) b.remove();
+    scrollStart(cv, side === "RS" || round);
+  };
+  if (!page && guidePage(p, r)) {
+    cv.append(h("p", { class: "empty", text: "고무단 가이드 라인을 찾는 중…" }));
+    showGuide("차트 없음 ·");
+    return wrap;
+  }
   if (!page) {
     // 차트 없는 파트(코바늘·서술형): 큰 상자 대신 한 줄
     box.remove();
@@ -377,11 +403,11 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
     const bmp = await bmpForSize(p, pdf, page, await chartBitmap(pdf, p.id, page), r.s);
     if (seq !== renderSeq) return;
     // 이 단이 차트에 없으면(고무단처럼 차트 없이 서술로만 뜨는 파트) 그냥 '차트 없음'
+    // 가이드 라인 파트(고무단)는 차트 단이 아니라 가이드 줄을 보여 준다 (단 번호가 차트와 겹쳐도 — 소매 고무단 1단 ≠ 소매 차트 1단)
+    if (guidePage(p, r)) return showGuide(`차트 없음 (p${page} 차트에 ${r.n}단이 없어요) ·`);
     if (!chartFor(bmp.charts, r.n)) {
-      box.remove();
-      t.prepend(h("span", { class: "gen", text: `차트 없음 (p${page} 차트에 ${r.n}단이 없어요) ·` }));
-      for (const b of [...t.querySelectorAll("button")].filter((b) => /^[−+]$|차트 전체/.test(b.textContent || ""))) b.remove();
-      return;
+      const why = `차트 없음 (p${page} 차트에 ${r.n}단이 없어요) ·`;
+      return noChart(why);
     }
     const range = await sizeRangeOf(p, pdf, page, bmp, r.n);
     if (seq !== renderSeq) return;
@@ -737,6 +763,32 @@ function narrative(p: Pattern, r: Row) {
     setTimeout(() => ta.focus());
     return wrap;
   }
+  // 고무단 가이드 라인을 참고하라는 단: 차트 위 가이드 줄을 기기에서 읽어 내 사이즈 콧수까지
+  if (guidePage(p, r)) {
+    const nar = splitNarrative(r.t || "");
+    const body = h("div", { style: "display:flex;flex-direction:column;gap:6px" });
+    const plain = () => {
+      body.innerHTML = "";
+      for (const n of nar.notes) body.append(h("p", { class: "instr note", text: n }));
+      if (nar.chunks.length) body.append(chunkBox(p, r, nar.chunks));
+      else if (!nar.notes.length) body.append(h("p", { class: "instr", text: "(서술 없음)" }));
+    };
+    body.append(h("div", { class: "gen", text: "차트 위 고무단 가이드 라인을 읽는 중…" }));
+    wrap.append(body);
+    guideOf(p, r).then((gd) => {
+      if (!body.isConnected) return;
+      if (!gd) return plain();
+      const ws = sideOf(p, r) === "WS" && !p.secs[r.s]?.round;
+      body.innerHTML = "";
+      for (const n of nar.notes) body.append(h("p", { class: "instr note", text: n }));
+      if (nar.chunks.length) body.append(h("p", { class: "gen", text: "도안 원문: " + nar.chunks.join(", ").slice(0, 90) }));
+      body.append(
+        chunkBox(p, r, chunksOf(rowText(gd.g.st, ws))),
+        h("span", { class: "gen", text: `차트 p${gd.page} 위 가이드 라인에서 ${p.size ? p.size + " 사이즈 " : ""}${gd.g.st.length}코를 읽었어요${ws ? " (안면이라 겉·안을 바꿔 적음)" : ""}.` }),
+      );
+    }).catch(() => body.isConnected && plain());
+    return wrap;
+  }
   // 서술 없이 '차트를 따라 진행'뿐인 단: 기기에서 차트를 읽어 그 단의 서술을 만들어 보여 준다
   if (wantsChartText(p, r)) {
     if (r.t) wrap.append(h("p", { class: "gen", text: "도안 원문: " + (r.span ? spanParts(r.t, r.span).each : r.t.split("\n")[0]).slice(0, 80) }));
@@ -885,6 +937,70 @@ async function chartRowText(p: Pattern, r: Row): Promise<string | null> {
   const st = await chartRowStitches(p, r);
   const ws = sideOf(p, r) === "WS" && !p.secs[r.s]?.round;
   return st && st.length ? rowText(st, ws) : null;
+}
+
+/* ---------------- 고무단 가이드 라인 (차트 위 따로 그린 한 줄) ---------------- */
+const GUIDE_RE = /가이드\s*라인|가이드\s*선|guide\s*line/i;
+/** 이 파트가 '차트 상단 고무단 가이드 라인을 참고'하라는 파트면, 가이드가 있는 차트 쪽 */
+function guidePage(p: Pattern, r: Row): number | null {
+  if (p.src !== "pdf" || r.castOn) return null;
+  if (!GUIDE_RE.test(r.t || "") && !partRows(p, r.s).some((x) => GUIDE_RE.test(x.t || ""))) return null;
+  const own = chartPage(p, r);
+  if (own) return own;
+  // 쪽이 없으면 같은 이름(고무단 앞)의 파트 차트 → 바로 앞 파트 차트
+  const names = Object.keys(p.secs);
+  const base = r.s.replace(/고무단|ribbing|rib|밴드|\s+/gi, "");
+  const same = names.find((n) => n !== r.s && base && n.replace(/\s+/g, "").includes(base) && p.secs[n]?.ch);
+  if (same) return p.secs[same].ch!;
+  const order = [...new Set(p.rows.map((x) => x.s))];
+  for (let i = order.indexOf(r.s) - 1; i >= 0; i--) {
+    const ch = p.secs[order[i]]?.ch || p.rows.find((x) => x.s === order[i] && x.ch)?.ch;
+    if (ch) return ch;
+  }
+  return null;
+}
+const guideCache = new Map<string, Promise<{ page: number; g: Guide } | null>>();
+function guideOf(p: Pattern, r: Row): Promise<{ page: number; g: Guide } | null> {
+  const page = guidePage(p, r);
+  if (!page) return Promise.resolve(null);
+  const ws = sideOf(p, r) === "WS" && !p.secs[r.s]?.round;
+  const ck = [p.id, page, r.s, ws, p.size].join(":");
+  let c = guideCache.get(ck);
+  if (!c) {
+    c = (async () => {
+      const pdf = await pdfOf(p);
+      if (!pdf) return null;
+      const bmp = await bmpForSize(p, pdf, page, await chartBitmap(pdf, p.id, page), r.s);
+      if (!bmp.charts.length) return null;
+      const topC = [...bmp.charts].sort((a: Chart, b: Chart) => rowY(a, a.nMax) - rowY(b, b.nMax))[0];
+      const range = await sizeRangeOf(p, pdf, page, bmp, topC.nMax);
+      const { readGuide } = await import("./symbolid");
+      const g = await readGuide(pdf, page, bmp, range, ws);
+      return g ? { page, g } : null;
+    })();
+    guideCache.set(ck, c);
+    c.catch(() => guideCache.delete(ck));
+  }
+  return c;
+}
+/** 가이드 라인 띠 그림 (내 사이즈 부분만, 위아래 조금 여유) */
+async function guideCanvas(p: Pattern, page: number, g: Guide, rowPx: number): Promise<HTMLCanvasElement | null> {
+  const pdf = await pdfOf(p);
+  if (!pdf) return null;
+  const hh = g.y1 - g.y0, pad = hh * 0.6;
+  const sc = Math.max(2, (rowPx / hh) * (window.devicePixelRatio || 1));
+  const src = await renderRegion(pdf, page, sc, g.y0 - pad, g.y1 + pad);
+  const k = src.height / (hh + 2 * pad);
+  const x0 = Math.max(0, (g.x0 - pad) * k), x1 = Math.min(src.width, (g.x1 + pad) * k);
+  const out = document.createElement("canvas");
+  out.width = Math.max(1, Math.round(x1 - x0));
+  out.height = src.height;
+  out.getContext("2d")!.drawImage(src, x0, 0, out.width, out.height, 0, 0, out.width, out.height);
+  const css = (rowPx * (hh + 2 * pad)) / hh;
+  out.style.height = css + "px";
+  out.style.width = (out.width / out.height) * css + "px";
+  out.style.maxWidth = "none";
+  return out;
 }
 
 /** 묶음 진행을 저장했으면 차트를 그 코 자리로 스크롤하고 세로 표시 */

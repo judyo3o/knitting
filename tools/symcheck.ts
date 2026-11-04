@@ -186,3 +186,18 @@ import { newPattern } from "../src/model";
   }
   return out;
 };
+
+(window as any).guidedbg = async (b64: string, pages: number[]) => {
+  const bin = atob(b64);
+  const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  const pdf = await openPdf(new Blob([u]));
+  const { readGuide, rowText } = await import("../src/symbolid");
+  const out: any[] = [];
+  for (const page of pages) {
+    const bmp = await chartBitmap(pdf, "chk" + page, page);
+    const g = await readGuide(pdf, page, bmp, null, false);
+    out.push({ page, n: g?.st.length ?? null, y: g && [g.y0, g.y1], text: g ? rowText(g.st, false) : null });
+  }
+  return out;
+};

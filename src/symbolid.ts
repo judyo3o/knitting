@@ -487,3 +487,98 @@ export async function identify(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, 
   return out(token || best.e.sym, best.e, true, r2);
 }
 
+
+export type Guide = { y0: number; y1: number; x0: number; x1: number; st: RowStitch[] };
+const guideCache = new Map<string, Promise<Guide | null>>();
+/**
+ * 차트 위 '고무단 가이드 라인': 맨 윗단 바로 위에 단 번호 없이 따로 그려진 한 줄 칸.
+ * 칸마다 표시(|)가 있으면 겉, 비었으면 안 (안뜨기 기호 생략 표기). 표시가 가로줄(—)뿐이면 반대로 읽는다.
+ * range(내 사이즈 범위, pt)가 있으면 그 안의 칸만. 결과는 뜨기 시작하는 쪽부터.
+ */
+export function readGuide(pdf: Pdf, page: number, bmp: Bitmap, range: [number, number] | null, fromLeft: boolean): Promise<Guide | null> {
+  const ck = [page, bmp.charts.map((c) => `${c.x0},${c.a}`).join("|"), range?.map(Math.round).join("-"), fromLeft].join(":");
+  let pr = guideCache.get(ck);
+  if (!pr) {
+    if (guideCache.size > 8) guideCache.clear();
+    pr = findGuide(pdf, page, bmp, range, fromLeft).catch(() => null);
+    guideCache.set(ck, pr);
+  }
+  return pr;
+}
+
+async function findGuide(pdf: Pdf, page: number, bmp: Bitmap, range: [number, number] | null, fromLeft: boolean): Promise<Guide | null> {
+  if (!bmp.charts.length) return null;
+  // 가장 위에 있는 차트의 맨 윗단
+  const c = [...bmp.charts].sort((a, b) => rowY(a, a.nMax) - rowY(b, b.nMax))[0];
+  const h = rowH(c);
+  const top = rowY(c, c.nMax) - h / 2;
+  const zy0 = Math.max(0, top - h * 6), zy1 = top + h * 0.2;
+  const strip = await renderRegion(pdf, page, Math.max(bmp.scale, 26 / h), zy0, zy1);
+  const S = strip.width / bmp.w;
+  const img = pixels(strip);
+  const at = (px: number, py: number) => { const i = (Math.round(py) * img.width + Math.round(px)) * 4; return [img.data[i], img.data[i + 1], img.data[i + 2]]; };
+  const dark = (px: number, py: number) => {
+    if (px < 0 || py < 0 || px >= img.width || py >= img.height) return false;
+    const [r, g, b] = at(px, py);
+    return r + g + b < 3 * 236 && Math.max(r, g, b) - Math.min(r, g, b) < 14;
+  };
+  const xa = (range ? range[0] : c.x0) * S, xb = (range ? range[1] : c.x1) * S;
+  // 가로선: 차트 폭의 40% 넘게 이어지는 회색 줄
+  const lines: number[] = [];
+  for (let y = 0; y < img.height; y++) {
+    let n = 0;
+    for (let x = Math.floor(xa); x < xb; x++) if (dark(x, y)) n++;
+    if (n / Math.max(1, xb - xa) >= 0.4) {
+      if (lines.length && y - lines[lines.length - 1] <= 2) lines[lines.length - 1] = y;
+      else lines.push(y);
+    }
+  }
+  const topPx = (top - zy0) * S, hPx = h * S;
+  // 차트 맨 윗단의 윗선이 아닌, 그 위쪽에서 단 높이만큼 떨어진 두 선 (차트에 가장 가까운 것)
+  let best: [number, number] | null = null;
+  for (let i = lines.length - 1; i > 0; i--) {
+    const a = lines[i - 1], b = lines[i];
+    if (b > topPx - hPx * 0.5) continue;
+    if (b - a >= hPx * 0.6 && b - a <= hPx * 1.6) { best = [a, b]; break; }
+  }
+  if (!best) return null;
+  const [ya, yb] = best;
+  const gap = Math.max(2, Math.round(S * 0.9));
+  const lum = (px: number, py: number) => { const v = at(px, py); return v[0] + v[1] + v[2]; };
+  // 칸 경계선은 띠 위아래 선까지 닿는다 (칸 안의 | 표시는 닿지 않음)
+  const reach = (px: number, py: number) => { for (let d = -1; d <= 1; d++) if (dark(px + d, py)) return true; return false; };
+  const thin = (px: number, py: number) => dark(px, py) && lum(px, py) < Math.min(lum(px - gap, py), lum(px + gap, py)) - 20 && reach(px, ya + 2) && reach(px, yb - 2);
+  const lat = gridLattice(thin, xa - hPx, xb + hPx, ya + 2, yb - 1);
+  if (!lat) return null;
+  let B = boundaries(lat.xs, lat.w);
+  // 내 사이즈 범위·차트 폭 안 칸만
+  B = B.filter((x) => x >= xa - lat.w * 0.4 && x <= xb + lat.w * 0.4);
+  if (B.length < 3) return null;
+  // 칸마다 안쪽 잉크 모양: 세로 막대 / 가로 막대 / 그 밖
+  const cells: ("v" | "h" | "o" | "")[] = [];
+  for (let k = 0; k < B.length - 1; k++) {
+    const x0 = B[k] + (B[k + 1] - B[k]) * 0.2, x1 = B[k + 1] - (B[k + 1] - B[k]) * 0.2;
+    const y0 = ya + (yb - ya) * 0.15, y1 = yb - (yb - ya) * 0.15;
+    let mx = Infinity, Mx = -Infinity, my = Infinity, My = -Infinity, n = 0;
+    for (let y = Math.floor(y0); y <= y1; y++)
+      for (let x = Math.floor(x0); x <= x1; x++) {
+        const [r, g, b] = at(x, y);
+        if (r + g + b < 3 * 150) { n++; if (x < mx) mx = x; if (x > Mx) Mx = x; if (y < my) my = y; if (y > My) My = y; }
+      }
+    if (n < 2) { cells.push(""); continue; }
+    const w = Mx - mx + 1, hh = My - my + 1;
+    cells.push(hh >= w * 2.5 ? "v" : w >= hh * 2.5 ? "h" : "o");
+  }
+  const marks = cells.filter((x) => x).length;
+  if (!marks) return null; // 빈 줄은 가이드가 아님
+  if (cells.filter((x) => x === "o").length > marks * 0.1) return null; // 다른 기호가 섞이면 고무단 가이드가 아님 (옆 차트의 단 등)
+  const purlBar = cells.includes("h") && !cells.includes("v");
+  const st: RowStitch[] = cells.map((t, k) => {
+    const x0 = B[k] / S, x1 = B[k + 1] / S;
+    if (t === "v" || (t === "" && purlBar)) return { name: "겉뜨기", sym: "|", cells: 1, x0, x1 };
+    if (t === "" || t === "h") return { name: "안뜨기", sym: "-", cells: 1, x0, x1 };
+    return { name: "", sym: "?", cells: 1, x0, x1 };
+  });
+  if (!fromLeft) st.reverse();
+  return { y0: zy0 + ya / S, y1: zy0 + yb / S, x0: B[0] / S, x1: B[B.length - 1] / S, st };
+}
