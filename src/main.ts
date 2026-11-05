@@ -94,6 +94,14 @@ function showHome() {
   const pats = list.length ? list : [active()];
   const cont = pats.find((x) => !x.example && !patStats(x).all) || pats[0];
   const open = (id: string) => { setActive(id); view.home = false; view.full = false; render(); window.scrollTo({ top: 0 }); };
+  // 도안 지우기 (예시 도안은 지울 게 없음)
+  const delBtn = (x: Pattern) => x.example ? null : h("button", { class: "home-del", type: "button", "aria-label": `${x.name} 삭제`, title: "도안 삭제", text: "삭제", on: { click: async (e: Event) => {
+    e.stopPropagation();
+    if (!(await ask("도안 삭제", `'${x.name}'을 지울까요? 단 목록과 진행 기록, 이 기기에 저장된 PDF도 함께 지워지고 되돌릴 수 없어요. 남겨 두고 싶으면 먼저 진행 기록 화면의 '진행 내보내기'로 저장하세요.`, "삭제"))) return;
+    await removePattern(x.id);
+    toast(`'${x.name}'을 지웠어요.`);
+    showHome();
+  } } });
   const head = h("header", { class: "home-head" },
     h("div", { class: "home-title" }, h("h1", { text: "도안 단수 카운터" }), h("div", { class: "dots" }, h("i", { style: { background: "var(--pink)" } }), h("i", { style: { background: "var(--sky)" } }), h("i", { style: { background: "var(--lav-2)" } }))),
     h("button", { class: "round-btn", type: "button", "aria-label": "설정", text: "⚙", on: { click: () => openSettings(() => showHome()) } }));
@@ -109,19 +117,19 @@ function showHome() {
       r ? h("div", { class: "hc-row" }, h("span", { class: "hc-part", text: s }), h("b", { text: `${r.n}단` }), h("span", { class: "hc-frac", text: `${pr.done}/${pr.total}` })) : null,
       yarnBar(pr.total ? pr.done / pr.total : 0),
       h("button", { class: "btn primary big", type: "button", text: "이어서 뜨기 →", on: { click: () => open(cont.id) } }),
-      lastWorked(cont) ? h("span", { class: "hc-when", text: "마지막 작업 " + fmtFull(lastWorked(cont)) }) : null));
+      h("div", { class: "hc-foot" }, lastWorked(cont) ? h("span", { class: "hc-when", text: "마지막 작업 " + fmtFull(lastWorked(cont)) }) : h("span"), delBtn(cont))));
   }
   const others = pats.filter((x) => x !== cont);
   if (others.length) {
     root.append(h("div", { class: "home-sec", text: "내 도안" }));
     for (const x of others) {
       const st = patStats(x);
-      root.append(h("button", { class: "home-item", type: "button", on: { click: () => open(x.id) } },
+      root.append(h("div", { class: "home-row" }, h("button", { class: "home-item", type: "button", on: { click: () => open(x.id) } },
         swatch(x, 46),
         h("div", { class: "hi-body" },
           h("div", { class: "hi-top" }, h("b", { text: x.name }), st.all ? h("span", { class: "badge fin", text: "완료 ✓" }) : x.example ? h("span", { class: "badge ex", text: "예시" }) : null),
           yarnBar(st.total ? st.done / st.total : 0, st.all),
-          h("span", { class: "hi-sub", text: `${st.fin}/${st.names.length} 파트` + (lastWorked(x) ? ` · ${fmtShort(lastWorked(x))}` : "") }))));
+          h("span", { class: "hi-sub", text: `${st.fin}/${st.names.length} 파트` + (lastWorked(x) ? ` · ${fmtShort(lastWorked(x))}` : "") }))), delBtn(x)));
     }
   }
   root.append(h("p", { class: "home-foot", text: "진행은 이 기기에만 저장돼요 · 10분마다 백업" }),

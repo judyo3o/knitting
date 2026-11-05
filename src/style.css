@@ -482,3 +482,11 @@ body.peeking #nextBtn { background: var(--lav-l); color: var(--lav-ink); border-
 .size-opt .tag { font-size: 12px; padding: 1px 7px; border-radius: 999px; background: var(--pink); color: var(--accent-ink); margin-right: 4px; }
 .size-opt .tag.cur { background: var(--lav-l); color: var(--lav-ink); }
 .size-opt .btn { flex: none; }
+
+/* 도안 목록: 삭제 */
+.home-row{position:relative}
+.home-row .home-item{padding-right:64px}
+.home-del{position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:1px solid var(--rule);border-radius:999px;padding:4px 10px;font-size:.78rem;color:var(--ink-2);cursor:pointer}
+.home-del:hover{color:var(--rose);border-color:var(--pink)}
+.hc-foot{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.hc-foot .home-del{position:static;transform:none}
