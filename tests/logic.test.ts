@@ -740,3 +740,17 @@ it("파트 진행 초기화: 그 파트만 지운다", async () => {
   expect(p.pos.A).toBe(1);
   expect(p.log.map((l) => l.s)).toEqual(["B"]);
 });
+
+it("n단을 떴거나 n단으로 건너뛰면 그 앞 단은 다 뜬 것", async () => {
+  const { newPattern, key: k, stepNext, markBefore, EARLIER, partStats } = await import("../src/model");
+  const p = newPattern({ id: "m", name: "m" });
+  p.rows = [1, 2, 3, 4, 5].map((n) => ({ s: "A", n, t: "겉10", st: null, side: null, pg: null, ch: null, span: null }));
+  p.tab = "A"; p.pos = { A: 4 };
+  stepNext(p, 1000);
+  expect([1, 2, 3].map((n) => p.done[k("A", n)])).toEqual([EARLIER, EARLIER, EARLIER]);
+  expect(p.done[k("A", 4)]).toBe(1000);
+  expect(partStats(p, "A").rows).toBe(1); // 시각 모르는 단은 페이스에서 뺌
+  const q = newPattern({ id: "q", name: "q" });
+  q.rows = p.rows;
+  expect(markBefore(q, "A", 3)).toBe(2);
+});

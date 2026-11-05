@@ -200,6 +200,7 @@ export function stepNext(p: Pattern, now = Date.now()): StepResult {
     p.tab = nextPart;
     return "next-part";
   }
+  markBefore(p, s, cur.n); // 이 단을 떴으면 그 앞 단은 다 뜬 것
   p.done[key(s, cur.n)] = now;
   if (k < list.length - 1) {
     const nx = list[k + 1];
@@ -459,7 +460,8 @@ export function timedAt(p: Pattern, t: number, now = Date.now()): boolean {
 export function partStats(p: Pattern, s: string): { ms: number; rest: number; rows: number; stitches: number | null; skipped: number } {
   const list = partRows(p, s).filter((r) => !r.castOn);
   const sts = rowStitchCounts(list);
-  const doneIdx = list.map((r, i) => (p.done[key(s, r.n)] ? i : -1)).filter((i) => i >= 0);
+  // 시각을 모르는 단(앞 단을 한꺼번에 뜬 것으로 표시)은 페이스에서 뺀다
+  const doneIdx = list.map((r, i) => (p.done[key(s, r.n)] > EARLIER ? i : -1)).filter((i) => i >= 0);
   const count = (idx: number[]) => {
     let total = 0, known = true;
     for (const i of idx) { if (sts[i] == null) known = false; else total += sts[i]!; }
@@ -629,4 +631,13 @@ export function resetPart(p: Pattern, s: string) {
   p.log = p.log.filter((l) => l.s !== s);
   const first = partRows(p, s)[0];
   if (first) p.pos[s] = first.n;
+}
+
+/** '앞서 뜸' 표시: 언제 떴는지 모르는 단 (뒤 단을 떴거나 그 단으로 건너뛰어서) */
+export const EARLIER = 1;
+/** 파트에서 n단 앞의 안 뜬 단을 모두 뜬 것으로 (시각 모름). 표시한 단 수 */
+export function markBefore(p: Pattern, s: string, n: number): number {
+  let c = 0;
+  for (const r of partRows(p, s)) if (r.n < n && !p.done[key(s, r.n)]) { p.done[key(s, r.n)] = EARLIER; c++; }
+  return c;
 }
