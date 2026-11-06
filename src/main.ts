@@ -13,7 +13,7 @@ import { blobB64, canvasBlob, renderRegion, textItems } from "./pdf";
 import type { Guide } from "./symbolid";
 import { chartFor, chartsForSize, chartTitle, chartTitleCount, findCharts, findLegend, LEGEND_RE, partTitleScore, rowH, rowY, sizeRange, stitchAxis, type Chart } from "./pdfgeom";
 import { explainCheck, explainDraft, explainHead } from "./prompts";
-import { active, commit, exportJson, importJson, load, pdfOf, removePattern, saveNow, setActive, startAutosave, state, syncRemote } from "./store";
+import { active, commit, exportJson, importJson, load, pdfOf, pushAllFiles, removePattern, saveNow, setActive, startAutosave, state, syncRemote } from "./store";
 import { openSettings, manualHandler, openViewer } from "./dialogs";
 import { openUpload } from "./upload";
 import { openEditor, type DrawSize } from "./drawui";
@@ -227,7 +227,7 @@ function workButtons(p: Pattern) {
   let etaAt = 0;
   const tick = () => {
     clock.textContent = on ? `뜨는 중 ${hms(Date.now() - p.work!.on!)} · 오늘 ${hms(today())}` : today() > 0 ? `오늘 뜬 시간 ${hms(today())}` : "";
-    if (Date.now() - etaAt > 15000) { etaAt = Date.now(); eta.textContent = etaText(p, currentTab(p)) || ""; }
+    if (Date.now() - etaAt > 15000) { etaAt = Date.now(); eta.replaceChildren(...(etaText(p, currentTab(p)) || "").split(" · ").filter(Boolean).map((t) => h("span", { class: "eta-seg", text: t }))); } // 항목마다 한 줄 (숫자 중간에서 끊기지 않게)
   };
   clearInterval(workTick);
   tick();
@@ -421,7 +421,7 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
     if (seq !== renderSeq) return;
     if (!pdf) {
       cv.innerHTML = "";
-      cv.append(h("p", { class: "empty", text: "이 기기에 원본 PDF가 없어요. 아래 '이 기기에 PDF 다시 연결'로 골라주세요." }));
+      cv.append(h("p", { class: "empty", text: "이 기기에 원본 PDF가 없어요. 원본을 올린 기기에서 이 앱을 한 번 열면 같은 Claude 계정의 다른 기기에서도 자동으로 받아져요. 지금 바로 보려면 '진행 기록' 화면의 'PDF 다시 연결'로 골라주세요." }));
       return;
     }
     const bmp = await bmpForSize(p, pdf, page, await chartBitmap(pdf, p.id, page), r.s);
@@ -1458,7 +1458,8 @@ document.addEventListener("visibilitychange", () => { if (wantWake && document.v
   await load();
   render();
   // 아티팩트: 다른 기기에서 뜬 기록까지 불러온다
-  syncRemote().then((changed) => changed && render());
+  // 다른 기기에서 바뀐 진행 기록을 받고, 이 기기에만 있는 원본 파일은 올린다
+  syncRemote().then((changed) => { if (changed) render(); setTimeout(() => pushAllFiles().catch(() => {}), 3000); });
   startAutosave(() => renderMeta(active()));
   // 화면 폭이 바뀌면(가로·세로 돌리기, 창 크기) 차트·내용을 새 폭에 맞춰 다시 그린다. 높이만 바뀌는 건(키보드·주소창) 무시
   let lastW = window.innerWidth, rT: number | undefined;

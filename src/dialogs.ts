@@ -5,7 +5,7 @@ import type { CallReq } from "./anthropicCall";
 import { getFile } from "./db";
 import { openPdf, renderWidth, textItems } from "./pdf";
 import { findRowSpot } from "./pdfgeom";
-import { saveAi, state } from "./store";
+import { fileOf, saveAi, state } from "./store";
 import { dialog, download, h, toast } from "./ui";
 import type { Pattern } from "./types";
 
@@ -90,8 +90,8 @@ function b64Blob(b64: string, type: string) {
 
 /** 원본 보기 */
 export async function openViewer(p: Pattern, page: number, focus?: { n: number; span: [number, number] | null }) {
-  const rec = await getFile(p.id);
-  if (!rec) return toast("원본은 도안을 올린 기기에만 저장돼요. 'PDF 다시 연결'로 골라주세요.", 4200);
+  const rec = await fileOf(p);
+  if (!rec) return toast("이 기기에 원본이 없어요. 원본을 올린 기기에서 이 앱을 한 번 열면 같은 계정의 다른 기기에서도 받아져요. 아니면 'PDF 다시 연결'로 골라주세요.", 5000);
   const pdf = rec.type === "pdf" ? await openPdf(rec.blob).catch(() => null) : null;
   const count = pdf ? pdf.numPages : rec.type === "images" ? rec.blobs.length : 1;
   let cur = Math.min(Math.max(1, page), count);

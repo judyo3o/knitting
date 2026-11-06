@@ -490,3 +490,6 @@ body.peeking #nextBtn { background: var(--lav-l); color: var(--lav-ink); border-
 .home-del:hover{color:var(--rose);border-color:var(--pink)}
 .hc-foot{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .hc-foot .home-del{position:static;transform:none}
+
+/* 남은 시간 안내: 항목마다 한 줄, 항목 안에서는 줄바꿈 없이 */
+.work-eta .eta-seg{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

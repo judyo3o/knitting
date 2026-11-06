@@ -12,7 +12,7 @@ import { extractInfo, localGoodEnough, localParseLines, parseRange, resolveSizes
 import { b64, blobB64, canvasBlob, extractPages, openPdf, renderWidth, sha256, textItems, type Pdf } from "./pdf";
 import { autoPick, findCharts, normSize, pageInfo, toLines, type PageInfo } from "./pdfgeom";
 import { STRUCTURE_SCHEMA, structurePrompt } from "./prompts";
-import { commit, forgetPdf, setActive, state } from "./store";
+import { commit, fileOf, forgetPdf, saveFile, setActive, state } from "./store";
 import { $, dialog, h, toast } from "./ui";
 import type { AiResult, AiSection, Pattern, Yarn } from "./types";
 import { clearBitmaps } from "./chart";
@@ -181,7 +181,7 @@ export function openUpload(o: Opts) {
 
   // 사이즈 바꾸기: 이 기기에 저장된 원본 PDF를 바로 불러와 새 사이즈로 쪽을 고른다
   if (o.resize && target && target.src === "pdf")
-    getFile(target.id).then((f) => { if (f && f.type === "pdf") take([new File([f.blob], "pattern.pdf", { type: "application/pdf" })] as unknown as FileList); }).catch(() => {});
+    fileOf(target).then((f) => { if (f && f.type === "pdf") take([new File([f.blob], "pattern.pdf", { type: "application/pdf" })] as unknown as FileList); }).catch(() => {});
 
   /* ----- 읽기 ----- */
   readBtn.onclick = run;
@@ -290,7 +290,7 @@ export function openUpload(o: Opts) {
 
     // PDF만 연결
     if (o.relink && target && up.pdfBlob && !sections.length) {
-      await putFile(target.id, { type: "pdf", blob: up.pdfBlob });
+      await saveFile(target, { type: "pdf", blob: up.pdfBlob });
       Object.assign(target, { src: "pdf", srcPages: up.pdf!.numPages, pdfHash });
       forgetPdf(target.id); clearBitmaps(); commit(target);
       toast("이 기기에 PDF를 연결했어요."); return close();
@@ -323,7 +323,7 @@ export function openUpload(o: Opts) {
       if (appNote) target.notes = appNote;
       if (size) target.size = size;
       target.readPages = [...new Set([...target.readPages, ...readNow])].sort((a, b) => a - b);
-      if (up.pdfBlob && target.src !== "images") { await putFile(target.id, { type: "pdf", blob: up.pdfBlob }); target.src = "pdf"; target.srcPages = srcPages; target.pdfHash = pdfHash; forgetPdf(target.id); }
+      if (up.pdfBlob && target.src !== "images") { await saveFile(target, { type: "pdf", blob: up.pdfBlob }); target.src = "pdf"; target.srcPages = srcPages; target.pdfHash = pdfHash; forgetPdf(target.id); }
       fillColors(target);
       if (!target.gauges.length) target.gauges = await gaugesFrom(null, up.pdf, up.info);
       expandLengthRepeats(target);
@@ -340,9 +340,9 @@ export function openUpload(o: Opts) {
     expandLengthRepeats(p); // "for 2\" [5 cm]" 같은 길이 반복을 게이지로 단 수로
     p.tab = p.rows[0].s;
     fillColors(p);
-    if (src === "pdf" && up.pdfBlob) await putFile(id, { type: "pdf", blob: up.pdfBlob });
-    else if (src === "images" && (up as any).imgBlobs) await putFile(id, { type: "images", blobs: (up as any).imgBlobs });
     commit(p);
+    if (src === "pdf" && up.pdfBlob) await saveFile(p, { type: "pdf", blob: up.pdfBlob });
+    else if (src === "images" && (up as any).imgBlobs) await saveFile(p, { type: "images", blobs: (up as any).imgBlobs });
     setActive(id);
     toast(`${p.rows.length}단, ${new Set(p.rows.map((r) => r.s)).size}개 파트로 정리했어요.`);
     close();

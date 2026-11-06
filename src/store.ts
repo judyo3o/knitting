@@ -4,7 +4,7 @@ import * as db from "./db";
 import { applyDrawing, expand, mergeSections, newPattern, normalize } from "./model";
 import { openPdf, type Pdf } from "./pdf";
 import { migrateSettings, type AiSettings } from "./ai";
-import { inArtifact, myCollection } from "./artifact";
+import { getAssets, inArtifact, myCollection } from "./artifact";
 import { toast } from "./ui";
 import type { AiSection, Drawing, Pattern } from "./types";
 
@@ -144,6 +144,8 @@ export async function saveAi(s: AiSettings) {
   await db.setSetting("ai", s);
 }
 export async function removePattern(id: string) {
+  const gone = state.patterns[id]?.remote?.ids || [];
+  if (gone.length) getAssets().then((a) => { if (a) for (const x of gone) a.delete(x).catch(() => {}); }).catch(() => {});
   delete state.patterns[id];
   if (state.activeId === id) state.activeId = null;
   pdfCache.delete(id);
@@ -177,16 +179,79 @@ export function startAutosave(onSaved: () => void) {
 
 /* ---------- 원본 PDF (이 기기에만) ---------- */
 const pdfCache = new Map<string, Promise<Pdf | null>>();
+/* ---------- 원본 파일: 기기(IndexedDB)와 아티팩트 저장소 둘 다에 ---------- */
+const fileSig = (f: db.FileRec) => (f.type === "pdf" ? `pdf:${f.blob.size}` : `images:${f.blobs.map((b) => b.size).join(",")}`);
+const uploading = new Set<string>();
+/** 기기에 있는 원본을 아티팩트 저장소에도 올린다 (같은 Claude 계정의 다른 기기에서 받게). 바뀌었으면 다시 */
+async function pushFile(p: Pattern, f: db.FileRec) {
+  if (!inArtifact || p.example || uploading.has(p.id)) return;
+  const sig = fileSig(f);
+  if (p.remote?.sig === sig) return;
+  const assets = await getAssets();
+  if (!assets) return;
+  uploading.add(p.id);
+  try {
+    const blobs = f.type === "pdf" ? [f.blob] : f.blobs;
+    const ids: string[] = [];
+    for (const b of blobs) {
+      const type = f.type === "pdf" ? "application/pdf" : /^image\/(png|jpeg|webp|gif)$/.test(b.type) ? b.type : "image/jpeg";
+      ids.push((await assets.upload(b, { type })).id);
+    }
+    const old = p.remote;
+    p.remote = { type: f.type, ids, sig };
+    commit(p, false);
+    queueRemote(p);
+    // 바꾼 파일이면 예전 것은 지운다 (이 도안만 가리키던 것)
+    for (const id of old?.ids || []) if (!ids.includes(id)) assets.delete(id).catch(() => {});
+  } catch (e: any) {
+    if (e?.code === "too_large") toast("원본 파일이 20MB보다 커서 이 기기에만 저장했어요.", 4000);
+    else if (e?.code === "quota_or_state") toast("저장 공간이 가득 차서 원본은 이 기기에만 저장했어요.", 4000);
+  } finally {
+    uploading.delete(p.id);
+  }
+}
+/** 원본 파일: 이 기기 → 없으면 아티팩트 저장소에서 받아 이 기기에도 저장 */
+export async function fileOf(p: Pattern): Promise<db.FileRec | null> {
+  const f = await db.getFile(p.id).catch(() => undefined);
+  if (f) { pushFile(p, f).catch(() => {}); return f; }
+  if (!inArtifact || !p.remote?.ids.length) return null;
+  try {
+    const blobs = await Promise.all(p.remote.ids.map((id) => fetch("/_blob/" + id).then((r) => (r.ok ? r.blob() : Promise.reject(new Error(String(r.status)))))));
+    const rec: db.FileRec = p.remote.type === "pdf" ? { type: "pdf", blob: new Blob([blobs[0]], { type: "application/pdf" }) } : { type: "images", blobs };
+    await db.putFile(p.id, rec).catch(() => {});
+    return rec;
+  } catch {
+    return null;
+  }
+}
+/** 원본을 새로 저장: 기기에 저장하고 아티팩트 저장소에도 올린다 */
+export async function saveFile(p: Pattern, f: db.FileRec) {
+  await db.putFile(p.id, f);
+  pdfCache.delete(p.id);
+  pushFile(p, f).catch(() => {});
+}
+/** 이 기기에만 있는 원본들을 차례로 올린다 (앱을 열 때 한 번) */
+export async function pushAllFiles() {
+  if (!inArtifact) return;
+  for (const p of Object.values(state.patterns)) {
+    if (p.example || p.src === "text" || !p.src) continue;
+    const f = await db.getFile(p.id).catch(() => undefined);
+    if (f) await pushFile(p, f).catch(() => {});
+  }
+}
+
 export function pdfOf(p: Pattern): Promise<Pdf | null> {
   if (p.src !== "pdf") return Promise.resolve(null);
   let c = pdfCache.get(p.id);
   if (!c) {
     c = (async () => {
-      const f = await db.getFile(p.id);
+      const f = await fileOf(p);
       if (!f || f.type !== "pdf") return null;
       return openPdf(f.blob);
     })().catch(() => null);
     pdfCache.set(p.id, c);
+    // 못 찾았으면 기억하지 않는다 (다른 기기에서 원본이 올라오면 다시 받게)
+    c.then((v) => { if (!v) pdfCache.delete(p.id); });
   }
   return c;
 }

@@ -30,6 +30,7 @@ export const getSample = () => cap<any>("sample");
 export const getDb = () => cap<any>("db");
 export const getUser = () => cap<any>("user");
 export const getDownloads = () => cap<any>("downloads");
+export const getAssets = () => cap<any>("assets");
 
 /** 사진을 보낼 수 있는지·한 번에 몇 장인지 */
 export async function sampleLimits(): Promise<{ maxImages: number; maxBytes: number } | null> {

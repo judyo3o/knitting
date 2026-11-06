@@ -50,6 +50,7 @@ export type Pattern = {
   srcPages: number | null;
   readPages: number[];
   pdfHash?: string;
+  remote?: { type: "pdf" | "images"; ids: string[]; sig: string }; // 원본 파일을 아티팩트 저장소에 올린 것 (같은 계정 다른 기기에서 받기)
   rev: number;
   updatedAt: number;
   example?: boolean;
