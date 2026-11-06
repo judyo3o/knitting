@@ -88,20 +88,28 @@ function queueRemote(p: Pattern) {
     }
   }, 1200));
 }
+/** Claude 연결이 늦게 생겼으면 AI 설정을 다시 맞춘다 (기본: 이 아티팩트의 Claude) */
+export async function reloadAi() {
+  try { state.ai = migrateSettings(await db.getSetting("ai")); } catch {}
+}
+/** 계정 동기화 상태 (화면에 보여 주려고) */
+export const syncInfo = { state: "off" as "off" | "ok" | "fail", detail: "", at: 0, count: 0 };
 /** 서버 기록을 불러와 더 최신인 것으로 맞춘다. 바뀐 게 있으면 true */
 export async function syncRemote(): Promise<boolean> {
-  if (!inArtifact) return false;
+  if (!inArtifact) { syncInfo.state = "off"; return false; }
   const col = await myCollection();
-  if (!col) return false;
+  if (!col) { Object.assign(syncInfo, { state: "fail", detail: "Claude 계정 저장소에 연결하지 못했어요 (로그인 상태나 권한을 확인해 주세요)" }); return false; }
   let changed = false;
   try {
     const snap = await col.get();
+    Object.assign(syncInfo, { state: "ok", detail: "", at: Date.now(), count: snap.docs.length });
     const remoteIds = new Set<string>();
     for (const d of snap.docs) {
       const v = d.data();
       if (!v || !Array.isArray(v.rows)) continue;
       remoteIds.add(d.id);
-      const rp = normalize({ ...v, id: d.id });
+      let rp: Pattern;
+      try { rp = normalize({ ...v, id: d.id }); } catch { continue; } // 한 도안이 깨져도 나머지는 받는다
       const lp = state.patterns[d.id];
       if (!lp || (rp.updatedAt || 0) > (lp.updatedAt || 0)) {
         state.patterns[d.id] = rp;
@@ -117,7 +125,9 @@ export async function syncRemote(): Promise<boolean> {
     }
     // 이 브라우저에만 있던 도안은 올린다
     for (const p of Object.values(state.patterns)) if (!remoteIds.has(p.id)) queueRemote(p);
-  } catch {}
+  } catch (e: any) {
+    Object.assign(syncInfo, { state: "fail", detail: "계정 저장소에서 불러오지 못했어요" + (e?.code ? ` (${e.code})` : "") });
+  }
   return changed;
 }
 

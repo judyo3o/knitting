@@ -11,8 +11,25 @@ const claudeUse = (): Use | null => {
   return c && typeof c.use === "function" ? c.use.bind(c) : null;
 };
 
-/** 아티팩트 뷰어 안인가 (페이지 스크립트보다 먼저 window.claude가 생김) */
-export const inArtifact = !!claudeUse();
+/**
+ * 아티팩트 뷰어 안인가. 보통 페이지 스크립트보다 먼저 window.claude가 생기지만,
+ * 모바일 앱 등에서는 조금 늦게 생길 수 있어 whenArtifact()로 기다린다 (live binding이라 가져다 쓰는 곳도 바뀐 값을 본다)
+ */
+export let inArtifact = !!claudeUse();
+let waiting: Promise<boolean> | null = null;
+/** window.claude가 생길 때까지 잠깐 기다린다 (없으면 false) */
+export function whenArtifact(ms = 10000): Promise<boolean> {
+  if (inArtifact) return Promise.resolve(true);
+  return (waiting ||= new Promise<boolean>((res) => {
+    const t0 = Date.now();
+    const tick = () => {
+      if (claudeUse()) { inArtifact = true; res(true); }
+      else if (Date.now() - t0 > ms) { waiting = null; res(false); }
+      else setTimeout(tick, 150);
+    };
+    tick();
+  }));
+}
 
 const memo = new Map<string, Promise<any>>();
 function cap<T = any>(name: string): Promise<T | null> {

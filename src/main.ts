@@ -2,7 +2,7 @@ import "./style.css";
 import { chunksOf, splitNarrative, stitchesThrough } from "./chunks";
 import { MAX_TOKENS } from "./config";
 import { callAi, canCallDirect, errCopy } from "./ai";
-import { inArtifact } from "./artifact";
+import { inArtifact, whenArtifact } from "./artifact";
 import { cellKeyColor, chartBitmap, chartKey, clearBitmaps, splitChartByGap, labelColor, sharpRows, sizeLabelColors, sizeLineRange, drawGrid, drawPdfFull, drawPdfRows, explainStrip, hitCell, legendCanvas, sampleRowColors, yarnHex } from "./chart";
 import { getFile, putFile } from "./db";
 import { getCell, longestFloat, rowColors } from "./drawing";
@@ -13,7 +13,7 @@ import { blobB64, canvasBlob, renderRegion, textItems } from "./pdf";
 import type { Guide } from "./symbolid";
 import { chartFor, chartsForSize, chartTitle, chartTitleCount, findCharts, findLegend, LEGEND_RE, partTitleScore, rowH, rowY, sizeRange, stitchAxis, type Chart } from "./pdfgeom";
 import { explainCheck, explainDraft, explainHead } from "./prompts";
-import { active, commit, exportJson, importJson, load, pdfOf, pushAllFiles, removePattern, saveNow, setActive, startAutosave, state, syncRemote } from "./store";
+import { active, commit, exportJson, importJson, load, pdfOf, pushAllFiles, reloadAi, removePattern, saveNow, setActive, startAutosave, state, syncInfo, syncRemote } from "./store";
 import { openSettings, manualHandler, openViewer } from "./dialogs";
 import { openUpload } from "./upload";
 import { openEditor, type DrawSize } from "./drawui";
@@ -132,7 +132,7 @@ function showHome() {
           h("span", { class: "hi-sub", text: `${st.fin}/${st.names.length} 파트` + (lastWorked(x) ? ` · ${fmtShort(lastWorked(x))}` : "") }))), delBtn(x)));
     }
   }
-  root.append(h("p", { class: "home-foot", text: "진행은 이 기기에만 저장돼요 · 10분마다 백업" }),
+  root.append(h("p", { class: "home-foot", text: syncText() }),
     h("div", { class: "home-add" }, h("button", { class: "btn add", type: "button", text: "+ 도안 올리기", on: { click: () => { view.home = false; openUpload({ onDone: render }); } } })));
 }
 
@@ -1209,6 +1209,14 @@ function renderSub(p: Pattern, s: string, r: Row) {
   }
 }
 
+/** 계정 동기화 상태 한 줄 */
+function syncText() {
+  if (!inArtifact) return "진행은 이 기기에만 저장돼요 · 10분마다 백업";
+  if (syncInfo.state === "ok") return `같은 Claude 계정의 다른 기기와 동기화돼요 · 계정에 도안 ${syncInfo.count}개 · ${fmtTime(syncInfo.at)} 확인`;
+  if (syncInfo.state === "fail") return `계정 동기화 안 됨: ${syncInfo.detail}`;
+  return "계정 저장소에 연결하는 중…";
+}
+
 /** 저장 · 백업 카드 + 이 도안 삭제 */
 /** n단으로 옮겼으면 그 앞 단은 다 뜬 것으로 */
 function jumped(p: Pattern, s: string, n: number) {
@@ -1225,12 +1233,13 @@ function backupCard(p: Pattern) {
     h("div", { class: "home-sec", text: "저장 · 백업" }),
     h("section", { class: "backup" },
       h("div", { class: "bk-top" },
-        h("div", { class: "bk-txt" }, h("b", { text: state.lastSaved ? `마지막 저장 ${fmtSmart(state.lastSaved)}` : "이 기기에 바로 저장돼요" }), h("span", { text: "이 기기에 바로 저장 · 10분마다 백업" })),
+        h("div", { class: "bk-txt" }, h("b", { text: state.lastSaved ? `마지막 저장 ${fmtSmart(state.lastSaved)}` : "이 기기에 바로 저장돼요" }), h("span", { text: syncText() })),
         h("button", { class: "btn lav", type: "button", text: "지금 저장", on: { click: async () => { await saveNow(); render(); toast("저장했어요."); } } })),
       h("div", { class: "bk-grid" },
         h("button", { class: "btn ghost", type: "button", text: "진행 내보내기", on: { click: () => download(`knitting-progress-${new Date().toISOString().slice(0, 10)}.json`, exportJson()) } }),
         h("button", { class: "btn ghost", type: "button", text: "가져오기", on: { click: importFile } }),
-        h("button", { class: "btn ghost", type: "button", text: "백업에서 복원", on: { click: restoreDialog } }))),
+        h("button", { class: "btn ghost", type: "button", text: "백업에서 복원", on: { click: restoreDialog } }),
+        inArtifact ? h("button", { class: "btn ghost", type: "button", text: "계정과 지금 동기화", on: { click: async () => { const c = await syncRemote(); render(); toast(syncInfo.state === "ok" ? (c ? "다른 기기의 기록을 받았어요." : "이미 최신이에요.") : syncText(), 4000); } } }) : null)),
     h("div", { class: "danger" },
       h("button", { class: "link", type: "button", text: "페이지 더 읽어서 붙이기", on: { click: () => openUpload({ appendTo: p.id, onDone: render }) } }),
       p.src === "pdf" ? h("button", { class: "link", type: "button", text: "이 기기에 PDF 다시 연결", on: { click: () => openUpload({ appendTo: p.id, relink: true, onDone: render }) } }) : null,
@@ -1459,7 +1468,16 @@ document.addEventListener("visibilitychange", () => { if (wantWake && document.v
   render();
   // 아티팩트: 다른 기기에서 뜬 기록까지 불러온다
   // 다른 기기에서 바뀐 진행 기록을 받고, 이 기기에만 있는 원본 파일은 올린다
-  syncRemote().then((changed) => { if (changed) render(); setTimeout(() => pushAllFiles().catch(() => {}), 3000); });
+  // (모바일 앱처럼 Claude 연결이 조금 늦게 생기면 기다렸다가)
+  const doSync = () => syncRemote().then((changed) => { if (changed || view.home) render(); else renderMeta(active()); }).catch(() => {});
+  whenArtifact().then(async (ok) => {
+    if (!ok) return;
+    await reloadAi();
+    await doSync();
+    setTimeout(() => pushAllFiles().catch(() => {}), 3000);
+    // 다른 기기에서 뜨고 이 화면으로 돌아오면 다시 맞춘다
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") doSync(); });
+  });
   startAutosave(() => renderMeta(active()));
   // 화면 폭이 바뀌면(가로·세로 돌리기, 창 크기) 차트·내용을 새 폭에 맞춰 다시 그린다. 높이만 바뀌는 건(키보드·주소창) 무시
   let lastW = window.innerWidth, rT: number | undefined;
