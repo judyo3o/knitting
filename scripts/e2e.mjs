@@ -10,6 +10,13 @@ try { ({ chromium } = await import("playwright")); } catch { ({ chromium } = cre
 mkdirSync("check-out", { recursive: true });
 const pdfPath = "check-out/synthetic-pattern.pdf";
 if (!existsSync(pdfPath)) execFileSync("python3", ["scripts/make-fixture.py", pdfPath], { stdio: "inherit" });
+// 사진처럼 만든 배색 차트 (합성 PDF 2쪽 스와치: 42코 × 34단)
+if (!existsSync("check-out/photo-chart.jpg")) execFileSync("python3", ["-c", `
+import pypdfium2 as pdfium, random
+from PIL import ImageFilter, ImageEnhance
+im = pdfium.PdfDocument("${pdfPath}")[1].render(scale=1.6).to_pil().convert("RGB")
+im = ImageEnhance.Brightness(im.filter(ImageFilter.GaussianBlur(0.8))).enhance(0.93)
+im.save("check-out/photo-chart.jpg", quality=82)`]);
 // 2색 테스트 이미지 (어두운 바탕에 밝은 사슴 비슷한 모양, 가장자리는 흰 여백)
 const imgPath = "check-out/test-image.png";
 execFileSync("python3", ["-c", `
@@ -42,6 +49,15 @@ step("다음 단 → 완료 시각 기록, 이전 단 → 취소");
 await page.click("#nextBtn");
 assert.equal(await page.textContent(".rowno b"), "13");
 await page.click("#prevBtn");
+// 뜬 단으로 갈 땐 고르기: 도안만 보기 → 12단이 보이고 진행은 13단 그대로
+await page.click(".back-choice button:has-text('도안만 보기')");
+assert.equal(await page.textContent(".rowno b"), "12");
+assert.ok((await page.textContent(".peek-banner")).includes("13단"));
+await page.click("#nextBtn"); // 지금 단으로
+assert.equal(await page.textContent(".rowno b"), "13");
+assert.equal(await page.locator(".peek-banner").count(), 0);
+await page.click("#prevBtn");
+await page.click(".back-choice button:has-text('한 단 되돌리기')");
 assert.equal(await page.textContent(".rowno b"), "12");
 
 step("묶음 누르기 → 진행 저장 + 콧수 추정");
@@ -114,6 +130,24 @@ const chunks2 = await page.locator(".chunk").allTextContents();
 console.log("   이미지 차트 1단:", chunks2.slice(0, 4).join(" | "));
 assert.ok(chunks2.length >= 1);
 
+step("사진 → 배색 차트로 읽기 (격자 자동 찾기)");
+await page.click("#addBtn");
+await page.setInputFiles("#fileIn", "check-out/photo-chart.jpg");
+await page.click("text=배색 차트로 읽기");
+await page.waitForSelector(".editor[aria-label='이미지로 시작'] canvas");
+await page.waitForFunction(() => document.querySelector(".editor[aria-label='이미지로 시작'] input[aria-label='가로 콧수']")?.value === "38", null, { timeout: 30000 });
+const gw = await page.inputValue(".editor[aria-label='이미지로 시작'] input[aria-label='가로 콧수']");
+const gh = await page.inputValue(".editor[aria-label='이미지로 시작'] input[aria-label='세로 단수']");
+console.log(`   찾은 격자: ${gw}코 × ${gh}단`);
+assert.equal(gh, "31");
+await page.click("text=▩ 격자");
+await shot("13-photo-grid");
+await page.click(".editor[aria-label='이미지로 시작'] >> text=💾 저장");
+await page.waitForSelector(".editor[aria-label='이미지로 시작']", { state: "detached" });
+await page.click(".editor >> text=💾 저장");
+await page.waitForSelector(".editor", { state: "detached" });
+console.log("   1단:", (await page.locator(".chunk").allTextContents()).join(" | ").slice(0, 80));
+
 step("설정: 복사·붙여넣기 기본");
 await page.click("#setBtn");
 assert.ok(await page.isChecked("input[value=manual]"));
@@ -142,12 +176,12 @@ assert.match(rowTxt, /110코가 되도록/); // L 사이즈 숫자만 남김
 assert.doesNotMatch(rowTxt, /\(104\)/);
 await shot("4b-local-read");
 
-step("Claude로 정확하게 읽기 (키 없음 → 복사·붙여넣기) → 답 붙여넣기");
+step("Claude로 읽기 (키 없음 → 복사·붙여넣기) → 답 붙여넣기");
 await page.click("#addBtn");
 await page.fill("input[placeholder='예: L']", "L");
 await page.setInputFiles("#fileIn", pdfPath);
 await page.waitForFunction(() => /쪽을 골랐어요/.test(document.querySelector(".pg-tools .hint")?.textContent || ""), null, { timeout: 30000 });
-await page.check("#uploadView label:has-text('Claude로 정확하게') input");
+await page.check("#uploadView label:has-text('Claude로 읽기') input");
 const answer = (pages) => JSON.stringify({
   title: "리본 케이블 가디건", notes: "L 사이즈 기준", colors: pages.includes(2) ? [{ code: "A", name: "버건디", hex: "#B23A48" }, { code: "B", name: "네이비", hex: "#2F5D8A" }] : null,
   sections: pages.includes(2)
@@ -187,20 +221,21 @@ assert.equal(await page.locator(".gauge-line").count(), 0); // 뒷판 탭엔 없
 await page.click(".ptab:has-text('스와치')");
 assert.match(await page.textContent(".gauge-line"), /메리야스: 도안 20코 26단/);
 await page.click(".gauge-line");
-await page.fill(".gauge-set >> nth=0 >> input[aria-label='세탁 후 콧수']", "20");
-await page.fill(".gauge-set >> nth=0 >> input[aria-label='세탁 후 단수']", "23");
-await page.fill(".gauge-set >> nth=0 >> input[aria-label='도안 콧수나 단수']", "110");
+await page.fill(".gauge-set >> nth=0 >> input[aria-label='세탁 후 콧수']", "22");
+await page.fill(".gauge-set >> nth=0 >> input[aria-label='세탁 후 단수']", "26");
+await page.fill(".gauge-set >> nth=0 >> input[aria-label='도안에 적힌 콧수나 단수']", "110");
 const gout = await page.textContent(".gauge-set >> nth=0");
 console.log("   ", gout.replace(/\s+/g, " ").slice(0, 200));
 assert.match(gout, /굵게/);
-assert.match(gout, /122코/);
+assert.match(gout, /121코/);
 await shot("11-gauge");
 await page.click(".dlg >> text=저장");
-assert.match(await page.textContent(".gauge-line"), /내 20코 23단/);
+assert.match(await page.textContent(".gauge-line"), /내 22코 26단/);
 await page.click(".ptab:has-text('뒷판')");
 
 step("차트 기호 누르기 → 기법 이름 말풍선 + 기호표 줄");
 {
+  await page.locator(".chartview").evaluate((el) => { el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2; }); // 차트 가운데 (끝은 단 번호 칸)
   const bb = await page.locator(".chartview").boundingBox(); // 보이는 부분 가운데
   await page.mouse.click(bb.x + bb.width * 0.5, bb.y + bb.height * 0.5);
   await page.waitForSelector(".sympop", { timeout: 30000 });

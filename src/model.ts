@@ -1,3 +1,4 @@
+import { swatchFromLabel } from "./gauge";
 import { MAX_LOG, SESSION_GAP_MS } from "./config";
 import type { AiSection, Pattern, Row, SecInfo, Side } from "./types";
 
@@ -84,8 +85,34 @@ export function expand(sections: AiSection[]): { rows: Row[]; secs: Record<strin
   // 파트별로 모아 정렬 (도안 순서 유지)
   const order = [...new Set(rows.map((r) => r.s))];
   const sorted = order.flatMap((s) => rows.filter((r) => r.s === s).sort((a, b) => a.n - b.n));
-  for (const s of order) secs[s].odd = inferOdd(sorted.filter((r) => r.s === s));
+  for (const s of order) {
+    const list = sorted.filter((r) => r.s === s);
+    markStart(list);
+    secs[s].odd = inferOdd(list);
+  }
   return { rows: sorted, secs };
+}
+
+/** "코잡기가 1단", "cast-on counts as row 1" */
+export const CAST_ON_ROW1 = /코\s*잡기(?:가|는)?\s*1\s*단|기초코(?:가|는)?\s*1\s*단|cast[- ]?on\s+(?:counts?\s+as|is)\s+(?:row|rnd|round)\s*1/i;
+/** "2단 안면부터", "2단(WS)부터", "row 2 (WS)" → 그 단의 면 */
+const START_SIDE = /(\d{1,3})\s*단\s*(?:은|는|이|가)?\s*\(?\s*(안면|겉면|WS|RS)\s*\)?\s*(?:부터|에서|으로)?|(?:row|rnd)\s*(\d{1,3})\s*\(?\s*(WS|RS)\b/i;
+
+/** 파트 서술에서 코잡기 단·시작 면을 읽어 표시한다 (차트의 ← → 방향과 같게) */
+export function markStart(list: Row[]) {
+  const first = list[0];
+  if (!first) return;
+  const text = list.slice(0, 3).map((r) => r.t).join(" ");
+  if (first.n === 1 && CAST_ON_ROW1.test(text)) first.castOn = true;
+  // 코줍기로 시작하는 파트: 1단 서술이 코줍기뿐(코 지시 없음)이면 코줍기 자체가 1단 (차트 1단도 코줍기 표시)
+  if (first.n === 1 && /코를?\s*줍|코\s*줍기|주워|감아\s*코|pick\s*up|cast\s*on/i.test(first.t) && !/(?:겉|안)\s*\d|\b[kp]\d|겉뜨기\s*\d|안뜨기\s*\d/i.test(first.t)) first.castOn = true;
+  const m = text.match(START_SIDE);
+  if (m) {
+    const n = +(m[1] || m[3]);
+    const side = /안면|WS/i.test(m[2] || m[4]) ? "WS" : "RS";
+    const r = list.find((x) => x.n === n);
+    if (r && !r.side) r.side = side;
+  }
 }
 
 /** 파트 안에서 side가 적힌 첫 단으로 "홀수단 = RS/WS"를 정한다. 없으면 RS. */
@@ -173,6 +200,7 @@ export function stepNext(p: Pattern, now = Date.now()): StepResult {
     p.tab = nextPart;
     return "next-part";
   }
+  markBefore(p, s, cur.n); // 이 단을 떴으면 그 앞 단은 다 뜬 것
   p.done[key(s, cur.n)] = now;
   if (k < list.length - 1) {
     const nx = list[k + 1];
@@ -221,6 +249,7 @@ export function newPattern(init: Partial<Pattern> & { id: string; name: string }
   return {
     size: "",
     notes: "",
+    info: "",
     rows: [],
     secs: {},
     tab: "",
@@ -251,7 +280,17 @@ export function normalize(p: Partial<Pattern> & { id: string }): Pattern {
   if (!Array.isArray(out.readPages)) out.readPages = [];
   if (!Array.isArray(out.colors)) out.colors = [];
   if (!Array.isArray(out.gauges)) out.gauges = [];
+  out.gauges = out.gauges.map(swatchFromLabel); // 옛 데이터: 이름 속 "(원문 42코 30단 / 19×13cm)" → 스와치 크기
+  if (typeof p.info !== "string") {
+    // 옛 데이터: notes에 도안 정보와 앱 안내가 섞여 있었다 → 앱 안내만 notes에 남김
+    const lines = String(out.notes || "").split("\n");
+    const app = (l: string) => /^기기에서 읽었어요|^예시 도안이에요/.test(l);
+    out.info = lines.filter((l) => l.trim() && !app(l)).join("\n");
+    out.notes = lines.filter(app).join("\n");
+  }
+  expandLengthRepeats(out);
   for (const s of partNames(out)) {
+    markStart(partRows(out, s));
     out.secs[s] = out.secs[s] || {};
     if (!out.secs[s].odd) out.secs[s].odd = inferOdd(partRows(out, s));
   }
@@ -323,4 +362,282 @@ export function applyDrawing(p: Pattern, s: string): number {
   if (!order.includes(s)) order.push(s);
   p.rows = order.flatMap((name) => (name === s ? mine : others.filter((r) => r.s === name)));
   return changed;
+}
+
+/** 파트 콧수: 기초코 문장("110코를 만듭니다", "38코 기초코", "cast on 60 sts") > 단 끝 콧수 중 가장 많이 나온 값 */
+export function partStitches(rows: Row[]): number | null {
+  for (const r of rows.slice(0, 3)) {
+    const m = (r.t || "").match(/(\d{1,4})\s*코\s*(?:를|을)?\s*(?:기초코|만듭|만들|잡|일반코|코잡기)|(?:기초코|코잡기|cast\s*on)\s*(\d{1,4})\s*(?:코|sts?|stitches)?/i);
+    if (m) return +(m[1] || m[2]);
+  }
+  const cnt = new Map<number, number>();
+  for (const r of rows) { const m = (r.st || "").match(/\d{1,4}/); if (m) cnt.set(+m[0], (cnt.get(+m[0]) || 0) + 1); }
+  const best = [...cnt.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0];
+  return best ? best[0] : null;
+}
+
+/**
+ * 여러 단 공통 지시("16단~58단까지 차트를 따라 진행합니다. 이제 바늘에 96코예요. 실을 자르고 코를 쉼코로 둡니다.")를
+ * 매 단 할 일(each)과 다 뜬 뒤에 할 일(end)로 나눈다. 다른 범위("16단~66단", 다른 사이즈)를 가리키는 줄은 뺀다.
+ */
+export function spanParts(t: string, span: [number, number] | null): { each: string; end: string } {
+  const RANGE = /(\d{1,3})\s*단\s*[~\-–]\s*(\d{1,3})\s*단/;
+  let lines = (t || "").split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  if (span) {
+    const mine = lines.filter((l) => { const m = l.match(RANGE); return !m || (+m[1] === span[0] && +m[2] === span[1]); });
+    if (mine.length) lines = mine;
+  }
+  const sents = lines.flatMap((l) => l.split(/(?<=[.。])\s+/)).map((x) => x.trim()).filter(Boolean);
+  const END = /코가\s*(?:있|남|됩)|코\s*남|바늘에\s*\d+\s*코|실을\s*(?:끊|자르)|쉬어\s*둡|쉬어둡|쉼코|홀더|코막음|코\s*막음|마무리/;
+  // "차트를 따라 진행합니다."와 "차트를 따라 진행"은 같은 말로
+  const uniq = (a: string[]) => { const seen = new Set<string>(); return a.filter((x) => { const k = x.replace(/\s+/g, "").replace(/(?:합니다|한다|해요|하기)?[.。]?$/, ""); if (seen.has(k)) return false; seen.add(k); return true; }); };
+  const each = uniq(sents.filter((x) => !END.test(x)).map((x) => x.replace(RANGE, "").replace(/^\s*까지\s*/, "").trim()).filter(Boolean));
+  const end = uniq(sents.filter((x) => END.test(x)));
+  return { each: each.join(" ") || "차트대로 뜨기", end: end.join(" ") };
+}
+
+/**
+ * 길이로 정한 반복("Rep last 2 rows ribbing for 2\" [5 cm], ending on a 2nd row", "5cm가 될 때까지 반복")을
+ * 단 게이지로 단 수를 계산해 실제 단으로 푼다. 홀수·짝수 단 서술은 괄호 안 표기나 바로 앞 단들에서 가져온다.
+ * 뒤에 오는 단 번호는 늘어난 만큼 민다. 한 번 푼 단(ln)은 다시 풀지 않는다.
+ */
+export function expandLengthRepeats(p: Pattern): void {
+  const g = p.gauges.find((x) => x.after || x.before || x.pattern);
+  const per10 = g ? (g.after || g.before || g.pattern)!.rows : 0;
+  if (!per10) return;
+  const LEN = /(?:for|until[^.]*?measures?)\s*(\d+(?:\.\d+)?)\s*(?:"|”|in(?:ches)?\b)\s*(?:\[\s*(\d+(?:\.\d+)?)\s*cm\s*\])?|(\d+(?:\.\d+)?)\s*cm\s*(?:가\s*될\s*때까지|까지|만큼)/i;
+  const REP = /rep(?:eat)?\s+(?:the\s+)?last\s+(\d+)\s+rows|(\d+)\s*단\s*(?:을|를)?\s*(?:반복|되풀이)|반복/i;
+  for (const s of partNames(p)) {
+    const list = partRows(p, s);
+    const r = list.find((x) => !x.ln && !x.span && REP.test(x.t) && LEN.test(x.t));
+    if (!r) continue;
+    const m = r.t.match(LEN)!;
+    const cm = m[2] ? +m[2] : m[1] ? +m[1] * 2.54 : +m[3];
+    const rm = r.t.match(REP)!;
+    const k = Math.max(1, Math.min(4, +(rm[1] || rm[2] || 2)));
+    let total = Math.round((cm * per10) / 10);
+    // "ending on a 2nd row / WS row"면 짝수 단에서 끝나게, "1st row / RS row"면 홀수
+    if (k === 2 && /ending (?:on|with) (?:a |the )?(?:2nd|second|wrong side|ws)\b|안면\s*단?에서\s*끝/i.test(r.t) && total % 2) total++;
+    if (k === 2 && /ending (?:on|with) (?:a |the )?(?:1st|first|right side|rs)\b|겉면\s*단?에서\s*끝/i.test(r.t) && total % 2 === 0) total++;
+    if (total <= r.n) continue;
+    // 반복할 서술: "(홀수 단: … / 짝수 단: …)" > 바로 앞 k단
+    const odd = r.t.match(/홀수\s*단\s*[:：]\s*([^/]+?)\s*\/\s*짝수\s*단\s*[:：]\s*([^)]+)\)/);
+    const prev = list.filter((x) => x.n < r.n).slice(-k);
+    const textFor = (n: number) => {
+      if (odd) return (n % 2 ? odd[1] : odd[2]).trim();
+      const src = prev.find((x) => (x.n - n) % k === 0);
+      return src ? src.t.replace(/^.*?\d+(?:st|nd|rd|th)\s+row\s*:\s*(?:\((?:RS|WS)\)\.?\s*)?/i, "").trim() : r.t;
+    };
+    const add = total - r.n;
+    // 뒤 단 번호 밀기 (진행 기록 키도 같이)
+    shiftRows(p, s, r.n, add);
+    const note = `${m[0].trim()} → 단 게이지 ${per10}단/10cm로 약 ${total}단까지 (실제 길이를 재서 맞춰요)`;
+    const orig = r.t;
+    const made: Row[] = [];
+    for (let n = r.n; n <= total; n++) made.push({ ...r, n, t: n === total ? `${textFor(n)}\n${orig}` : textFor(n), side: null, st: n === total ? r.st : null, ln: note });
+    const at = p.rows.indexOf(r);
+    p.rows.splice(at, 1, ...made);
+  }
+}
+
+/** 단마다 콧수 (단 끝 콧수가 있으면 그 값, 없으면 앞 단 콧수를 이어 쓰고, 처음엔 기초코 수) */
+function rowStitchCounts(list: Row[]): (number | null)[] {
+  let cur = partStitches(list);
+  return list.map((r) => { const m = (r.st || "").match(/\d{1,4}/); if (m) cur = +m[0]; return m ? +m[0] : cur; });
+}
+
+/** 스톱워치를 켜 둔 동안 뜬 단인가 (완료 시각이 켜 둔 구간 안, 끄기 직후 1분 30초까지) */
+export function timedAt(p: Pattern, t: number, now = Date.now()): boolean {
+  const spans = [...(p.work?.spans || []), ...(p.work?.on ? [[p.work.on, now] as [number, number]] : [])];
+  return spans.some(([a, b]) => t >= a && t <= b + 90000);
+}
+
+/**
+ * 파트를 뜨는 데 걸린 시간과 뜬 콧수 (완성 페이스).
+ * 스톱워치를 썼으면: 켜 둔 시간만 세고, 스톱워치 없이 뜬 것 같은 단(꺼져 있을 때 완료)은 단·콧수 모두 평균에서 뺀다 (skipped).
+ * 안 썼으면: 단 완료 시각 사이 간격의 합. 평소보다 훨씬 긴 간격(4배·15분 넘음)은 쉰 것으로 보고 평소 한 단 시간만 센다.
+ */
+export function partStats(p: Pattern, s: string): { ms: number; rest: number; rows: number; stitches: number | null; skipped: number } {
+  const list = partRows(p, s).filter((r) => !r.castOn);
+  const sts = rowStitchCounts(list);
+  // 시각을 모르는 단(앞 단을 한꺼번에 뜬 것으로 표시)은 페이스에서 뺀다
+  const doneIdx = list.map((r, i) => (p.done[key(s, r.n)] > EARLIER ? i : -1)).filter((i) => i >= 0);
+  const count = (idx: number[]) => {
+    let total = 0, known = true;
+    for (const i of idx) { if (sts[i] == null) known = false; else total += sts[i]!; }
+    return { rows: idx.length, stitches: known && total ? total : null };
+  };
+  const ts = doneIdx.map((i) => p.done[key(s, list[i].n)]).sort((a, b) => a - b);
+  if (workUsed(p) && ts.length) {
+    const timed = doneIdx.filter((i) => timedAt(p, p.done[key(s, list[i].n)]));
+    const before = Object.values(p.done).filter((t) => t < ts[0]).sort((a, b) => b - a)[0] ?? 0;
+    const from = Math.max(before, ts[0] - 6 * 3600000);
+    const on = workIn(p, from, ts[ts.length - 1]);
+    const c = count(timed);
+    return { ms: on, rest: Math.max(0, ts[ts.length - 1] - from - on), ...c, skipped: doneIdx.length - timed.length };
+  }
+  let ms = 0, rest = 0;
+  const gaps = ts.slice(1).map((t, i) => t - ts[i]).filter((d) => d > 0);
+  if (gaps.length) {
+    const med = [...gaps].sort((a, b) => a - b)[gaps.length >> 1];
+    const cap = Math.max(med * 4, 15 * 60000);
+    for (const d of gaps) if (d > cap) { ms += med; rest += d - med; } else ms += d;
+    ms += med; // 첫 단
+  }
+  return { ms, rest, ...count(doneIdx), skipped: 0 };
+}
+
+/** 이 도안에서 콧수를 아는 단들의 평균 콧수 (콧수를 모르는 파트에 대신 씀) */
+function avgRowStitches(p: Pattern): number | null {
+  let t = 0, n = 0;
+  for (const part of partNames(p)) for (const v of rowStitchCounts(partRows(p, part).filter((r) => !r.castOn))) if (v != null) { t += v; n++; }
+  return n ? t / n : null;
+}
+
+/** 도안 전체 페이스 (코/ms): 파트마다 뜬 시간·콧수를 합쳐서. 콧수를 모르는 단은 평균 콧수로 */
+export function patternPace(p: Pattern): number | null {
+  const avg = avgRowStitches(p);
+  let ms = 0, st = 0;
+  for (const s of partNames(p)) {
+    const x = partStats(p, s);
+    if (!x.ms || !x.rows) continue;
+    const sts = x.stitches ?? (avg ? x.rows * avg : null);
+    if (sts == null) continue;
+    ms += x.ms; st += sts;
+  }
+  return ms >= 60000 && st ? st / ms : null;
+}
+
+/** 지금 페이스(콧수 기준)로 남은 시간: 이 파트 · 도안 전체 */
+export function etaText(p: Pattern, s: string): string | null {
+  const pace = patternPace(p);
+  if (!pace) return null;
+  const avg = avgRowStitches(p) || 0;
+  const rem = (part: string) => {
+    const list = partRows(p, part).filter((r) => !r.castOn);
+    const sts = rowStitchCounts(list);
+    let rows = 0, st = 0;
+    list.forEach((r, i) => { if (p.done[key(part, r.n)]) return; rows++; st += sts[i] ?? avg; });
+    return { rows, st, ms: st / pace };
+  };
+  const here = rem(s);
+  let allMs = 0;
+  for (const part of partNames(p)) if (!p.fin[part]) allMs += rem(part).ms;
+  if (!here.rows && !allMs) return null;
+  return (here.rows ? `이 파트 남은 ${here.rows}단(${Math.round(here.st).toLocaleString()}코) · 지금 페이스로 약 ${fmtDur(here.ms)}` : "이 파트는 다 떴어요") + (allMs > here.ms + 60000 ? ` · 도안 전체 약 ${fmtDur(allMs)}` : "") + ` · 시간당 약 ${Math.round(pace * 3600000).toLocaleString()}코`;
+}
+
+/** "1시간 25분" */
+export function fmtDur(ms: number): string {
+  const m = Math.max(1, Math.round(ms / 60000));
+  const hh = Math.floor(m / 60), mm = m % 60;
+  return hh ? `${hh}시간${mm ? ` ${mm}분` : ""}` : `${mm}분`;
+}
+
+/** 완성 문구: "실제 뜬 시간 1시간 25분 · 쉰 시간까지 3시간 · 시간당 약 620코 페이스 (총 880코 · 8단)" */
+export function finishText(p: Pattern, s: string): string | null {
+  const st = partStats(p, s);
+  if (!st.ms || st.ms < 30000) return null;
+  const pace = st.stitches ? Math.round(st.stitches / (st.ms / 3600000)) : null;
+  return `실제 뜬 시간 ${fmtDur(st.ms)}` + (st.skipped ? ` (스톱워치 없이 뜬 ${st.skipped}단은 페이스에서 뺌)` : "") + (st.rest >= 60000 ? ` · 쉰 시간까지 ${fmtDur(st.ms + st.rest)}` : "") + (pace ? ` · 시간당 약 ${pace.toLocaleString()}코 페이스 (총 ${st.stitches!.toLocaleString()}코 · ${st.rows}단)` : ` · ${st.rows}단`);
+}
+
+/** 쉬지 않고 뜬 시간: 모든 파트의 단 완료 시각을 거꾸로 따라가며 10분 넘게 빈 곳에서 끊는다 */
+export function continuousKnitMs(p: Pattern, now = Date.now(), gap = 10 * 60000): number {
+  if (workUsed(p)) {
+    // 타이머를 쓰면: 켜 둔 구간들을 거꾸로 이어 붙인다. 구간 사이가 gap(10분) 넘게 비면 쉰 것으로 보고 끊는다
+    const spans = [...(p.work!.spans || []), ...(p.work!.on ? [[p.work!.on, now] as [number, number]] : [])].sort((a, b) => b[1] - a[1]);
+    if (!spans.length || now - spans[0][1] > gap) return 0;
+    let total = 0, start = spans[0][0];
+    for (const [a, b] of spans) {
+      if (start - b > gap) break;
+      total += b - a;
+      start = Math.min(start, a);
+    }
+    return total;
+  }
+  const ts = Object.values(p.done).filter((t) => t <= now).sort((a, b) => b - a);
+  if (!ts.length || now - ts[0] > gap) return 0;
+  let start = ts[0];
+  for (let i = 1; i < ts.length && start - ts[i] <= gap; i++) start = ts[i];
+  return now - start;
+}
+
+/* ---------- 뜨개 시작·중지 (켜 둔 시간만 뜬 시간) ---------- */
+export function workStart(p: Pattern, now = Date.now()) {
+  p.work = p.work || { on: null, spans: [] };
+  if (!p.work.on) p.work.on = now;
+}
+export function workStop(p: Pattern, now = Date.now()) {
+  if (!p.work?.on) return;
+  if (now - p.work.on >= 5000) p.work.spans.push([p.work.on, now]);
+  p.work.on = null;
+  if (p.work.spans.length > 500) p.work.spans.splice(0, p.work.spans.length - 500);
+}
+/** [a, b] 동안 켜 둔 시간 (ms) */
+export function workIn(p: Pattern, a: number, b: number, now = Date.now()): number {
+  const spans = [...(p.work?.spans || []), ...(p.work?.on ? [[p.work.on, now] as [number, number]] : [])];
+  let t = 0;
+  for (const [x, y] of spans) t += Math.max(0, Math.min(b, y) - Math.max(a, x));
+  return t;
+}
+export const workUsed = (p: Pattern) => !!(p.work && (p.work.on || p.work.spans.length));
+
+/** 코잡기 단인지 코줍기 단인지 (이름만) */
+export const castLabel = (r: Row) => (/줍|주워|pick\s*up/i.test(r.t) ? "코줍기" : "코잡기");
+
+/** 파트 s에서 n보다 뒤 단 번호를 d만큼 민다 (단·완료·묶음 진행·현재 위치 키도 같이) */
+export function shiftRows(p: Pattern, s: string, after: number, d: number) {
+  for (const x of p.rows) if (x.s === s && x.n > after) x.n += d;
+  const move = (o: Record<string, any>) => {
+    const ks = Object.keys(o).filter((k) => k.startsWith(s + "#") && +k.split("#").pop()! > after);
+    ks.sort((a, b) => (d > 0 ? -1 : 1) * (+a.split("#").pop()! - +b.split("#").pop()!));
+    for (const k of ks) { const n = +k.split("#").pop()!; o[key(s, n + d)] = o[k]; delete o[k]; }
+  };
+  move(p.done); move(p.part);
+  if ((p.pos[s] || 0) > after) p.pos[s] += d;
+}
+
+/** 원하는 만큼 뜨는 단인가 (길이로 푼 반복, "원하는 길이만큼", "until desired length") */
+export const flexibleRow = (r: Row) => !!r.ln || /원하는\s*(?:길이|만큼)|원하는\s*만큼|desired\s+length|as\s+long\s+as\s+(?:you\s+)?(?:like|want)|until\s+(?:piece|work)\s+measures/i.test(r.t);
+
+/** 이 단 뒤에 한 단 더: 두 단 반복이면 앞 단 서술을, 아니면 이 단 서술을 이어 쓴다 */
+export function addRowAfter(p: Pattern, s: string, n: number) {
+  const list = partRows(p, s);
+  const r = list.find((x) => x.n === n);
+  if (!r) return;
+  const prev = list.find((x) => x.n === n - 1);
+  const src = prev && prev.ln && r.ln && prev.t !== r.t.split("\n")[0] ? prev : r;
+  shiftRows(p, s, n, 1);
+  const nr: Row = { ...r, n: n + 1, t: src.t.split("\n")[0], st: null, side: null, castOn: false, ln: r.ln || "원하는 만큼 뜨는 단 (직접 더함)" };
+  p.rows.splice(p.rows.indexOf(r) + 1, 0, nr);
+}
+
+/** 이 단 빼기 (뒤 단 번호를 당긴다) */
+export function removeRow(p: Pattern, s: string, n: number) {
+  const r = partRows(p, s).find((x) => x.n === n);
+  if (!r) return;
+  p.rows.splice(p.rows.indexOf(r), 1);
+  delete p.done[key(s, n)]; delete p.part[key(s, n)];
+  shiftRows(p, s, n, -1);
+}
+
+/** 한 파트의 진행 초기화: 뜬 단·완료·묶음 진행·진행 기록을 지우고 첫 단으로 */
+export function resetPart(p: Pattern, s: string) {
+  const pre = s + "#";
+  for (const k of Object.keys(p.done)) if (k.startsWith(pre)) delete p.done[k];
+  for (const k of Object.keys(p.part)) if (k.startsWith(pre)) delete p.part[k];
+  delete p.fin[s];
+  p.log = p.log.filter((l) => l.s !== s);
+  const first = partRows(p, s)[0];
+  if (first) p.pos[s] = first.n;
+}
+
+/** '앞서 뜸' 표시: 언제 떴는지 모르는 단 (뒤 단을 떴거나 그 단으로 건너뛰어서) */
+export const EARLIER = 1;
+/** 파트에서 n단 앞의 안 뜬 단을 모두 뜬 것으로 (시각 모름). 표시한 단 수 */
+export function markBefore(p: Pattern, s: string, n: number): number {
+  let c = 0;
+  for (const r of partRows(p, s)) if (r.n < n && !p.done[key(s, r.n)]) { p.done[key(s, r.n)] = EARLIER; c++; }
+  return c;
 }

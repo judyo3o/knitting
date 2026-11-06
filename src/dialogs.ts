@@ -1,34 +1,41 @@
 /** 설정 · 복사/붙여넣기 모드 · 원본 보기 */
-import { AiError, providerLabel } from "./ai";
+import { AiError, providerLabel, type Provider } from "./ai";
+import { inArtifact } from "./artifact";
 import type { CallReq } from "./anthropicCall";
 import { getFile } from "./db";
-import { openPdf, renderWidth } from "./pdf";
-import { saveAi, state } from "./store";
+import { openPdf, renderWidth, textItems } from "./pdf";
+import { findRowSpot } from "./pdfgeom";
+import { fileOf, saveAi, state } from "./store";
 import { dialog, download, h, toast } from "./ui";
 import type { Pattern } from "./types";
 
 export function openSettings(onSaved: () => void) {
   const key = h("input", { type: "password", autocomplete: "off", placeholder: "sk-ant-api…", value: state.ai.claudeKey || "", "aria-label": "Claude API 키" });
-  const useKey = h("input", { type: "radio", name: "prov", value: "claude", checked: state.ai.provider === "claude" });
-  const noKey = h("input", { type: "radio", name: "prov", value: "manual", checked: state.ai.provider !== "claude" });
+  const opts: Provider[] = inArtifact ? ["artifact", "claude", "manual"] : ["claude", "manual"];
+  const radios = opts.map((p) => h("input", { type: "radio", name: "prov", value: p, checked: state.ai.provider === p }));
+  const help: Record<Provider, string> = {
+    artifact: "지금 이 앱을 Claude 안에서 열었어요. 버튼 한 번에 보는 사람 본인의 Claude로 읽어요. 처음 한 번 허용을 물어봐요.",
+    claude: "버튼 한 번에 바로 읽어요.",
+    manual: "키 없이 claude.ai 채팅을 써요. 앱이 만든 프롬프트와 파일을 넣고 답을 붙여넣어요.",
+  };
   const keyBox = h("label", { class: "field" }, "Claude API 키", key,
     h("small", {}, "console.anthropic.com → API Keys에서 만들어요. 이 기기 안에만 저장되고 Anthropic으로만 보내요. 쓴 만큼 요금이 나가요. ",
       "Claude 구독(Pro/Max) 로그인 토큰은 다른 앱에서 쓸 수 없어서, API 키가 필요해요."));
-  const sync = () => (keyBox.hidden = !useKey.checked);
-  useKey.onchange = noKey.onchange = sync;
+  const chosen = () => (radios.find((r) => r.checked)?.value || opts[0]) as Provider;
+  const sync = () => (keyBox.hidden = chosen() !== "claude");
+  radios.forEach((r) => (r.onchange = sync));
   sync();
   const dl = dialog("Claude 연결", [
-    h("p", { class: "hint", text: "단 세기·차트 표시·기호표·서술 묶음·배색 그리기·게이지, 그리고 글자가 있는 PDF와 텍스트 도안 읽기는 이 기기에서 해요. Claude는 기기에서 못 끝내는 도안(사진·스캔 PDF·'1단과 동일' 같은 지시)과 '차트를 글로 풀기'에만 써요." }),
-    h("div", { class: "radio", role: "radiogroup" },
-      h("label", {}, useKey, h("span", {}, providerLabel("claude"), h("small", { text: "버튼 한 번에 바로 읽어요." }))),
-      h("label", {}, noKey, h("span", {}, providerLabel("manual"), h("small", { text: "키 없이 claude.ai 채팅을 써요. 앱이 만든 프롬프트와 파일을 넣고 답을 붙여넣어요." })))),
+    h("p", { class: "hint", text: "단 세기·차트 표시·기호 이름·서술 묶음·배색 그리기·게이지, 그리고 글자가 있는 PDF와 텍스트 도안 읽기는 이 기기에서 해요. Claude는 기기에서 못 끝내는 도안(사진·스캔 PDF·'1단과 동일' 같은 지시), '차트를 글로 풀기', '이 단 물어보기'에만 써요." }),
+    h("div", { class: "radio", role: "radiogroup" }, ...opts.map((p, i) => h("label", {}, radios[i], h("span", {}, providerLabel(p), h("small", { text: help[p] }))))),
     keyBox,
     h("div", { class: "actions" },
       h("button", { class: "btn primary", type: "button", text: "저장", on: { click: async () => {
         const k = key.value.trim();
-        if (useKey.checked && !k) return toast("API 키를 넣어 주세요.");
-        if (useKey.checked && /^sk-ant-oat/.test(k)) return toast("구독 로그인 토큰은 쓸 수 없어요. console.anthropic.com의 API 키를 넣어 주세요.", 4200);
-        await saveAi({ provider: useKey.checked ? "claude" : "manual", claudeKey: k });
+        const prov = chosen();
+        if (prov === "claude" && !k) return toast("API 키를 넣어 주세요.");
+        if (prov === "claude" && /^sk-ant-oat/.test(k)) return toast("구독 로그인 토큰은 쓸 수 없어요. console.anthropic.com의 API 키를 넣어 주세요.", 4200);
+        await saveAi({ provider: prov, claudeKey: k });
         dl.close();
         toast("설정을 저장했어요.");
         onSaved();
@@ -48,7 +55,7 @@ export function manualHandler(req: CallReq, label: string): Promise<string> {
     const ans = h("textarea", { rows: 6, placeholder: "Claude의 답을 여기에 붙여넣으세요" });
     const fileBtns = files.map((f: any, i) => {
       const isPdf = f.kind === "pdf";
-      const name = isPdf ? `도안-${label.replace(/[^\w가-힣-]+/g, "_")}.pdf` : `이미지-${i + 1}.${f.media === "image/png" ? "png" : "jpg"}`;
+      const name = isPdf ? `pattern-pages.pdf` : `pattern-image-${i + 1}.${f.media === "image/png" ? "png" : "jpg"}`;
       return h("button", { class: "btn", type: "button", text: `${i + 1}. ${isPdf ? "PDF" : "이미지"} 받기`, on: { click: () => download(name, b64Blob(f.b64, isPdf ? "application/pdf" : f.media)) } });
     });
     let done = false;
@@ -82,9 +89,9 @@ function b64Blob(b64: string, type: string) {
 }
 
 /** 원본 보기 */
-export async function openViewer(p: Pattern, page: number) {
-  const rec = await getFile(p.id);
-  if (!rec) return toast("원본은 도안을 올린 기기에만 저장돼요. 'PDF 다시 연결'로 골라주세요.", 4200);
+export async function openViewer(p: Pattern, page: number, focus?: { n: number; span: [number, number] | null }) {
+  const rec = await fileOf(p);
+  if (!rec) return toast("이 기기에 원본이 없어요. 원본을 올린 기기에서 이 앱을 한 번 열면 같은 계정의 다른 기기에서도 받아져요. 아니면 'PDF 다시 연결'로 골라주세요.", 5000);
   const pdf = rec.type === "pdf" ? await openPdf(rec.blob).catch(() => null) : null;
   const count = pdf ? pdf.numPages : rec.type === "images" ? rec.blobs.length : 1;
   let cur = Math.min(Math.max(1, page), count);
@@ -102,7 +109,22 @@ export async function openViewer(p: Pattern, page: number) {
     prevB.disabled = cur <= 1;
     nextB.disabled = cur >= count;
     body.innerHTML = "";
-    if (pdf) body.append(await renderWidth(pdf, cur, Math.min(2400, Math.max(1200, body.clientWidth * 2))));
+    if (pdf) {
+      const cv = await renderWidth(pdf, cur, Math.min(2400, Math.max(1200, body.clientWidth * 2)));
+      const box = h("div", { class: "vpage" }, cv);
+      body.append(box);
+      // 이 단 서술 자리 강조 (한 쪽에 다른 사이즈가 섞여 있어도 내 사이즈 구역에서)
+      if (focus && cur === page) {
+        const t = await textItems(pdf, cur);
+        const spot = findRowSpot(t.items, focus.n, focus.span, p.size);
+        if (spot) {
+          const mark = h("div", { class: "vmark", style: { top: (spot.y0 / t.h) * 100 + "%", height: ((spot.y1 - spot.y0) / t.h) * 100 + "%" } });
+          box.append(mark);
+          requestAnimationFrame(() => body.scrollTo({ top: Math.max(0, mark.offsetTop - 60) }));
+          label.textContent = `${cur} / ${count} · ${p.size ? p.size + "사이즈 " : ""}${focus.n}단 위치`;
+        }
+      }
+    }
     else if (rec.type === "images") {
       const img = h("img", { alt: `${cur}번째 도안 사진` });
       const url = URL.createObjectURL(rec.blobs[cur - 1]);

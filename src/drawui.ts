@@ -10,16 +10,19 @@ import { applyDrawing, partRows, sideOf } from "./model";
 import { chartFor, rowY } from "./pdfgeom";
 import { canvasBlob } from "./pdf";
 import { commit, pdfOf } from "./store";
-import { dialog, download, h, toast } from "./ui";
+import { ask, dialog, download, h, toast } from "./ui";
 import type { Drawing, DrawOpt, Pattern, Yarn } from "./types";
 
 type Tool = "select" | "pen" | "fill" | "erase" | "paste";
 const CODES = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const IDX = "0123456789abcdefghijklmnopqrstuvwxyz";
 
-export function openEditor(p: Pattern, part: string, o: { onSave: () => void; startImage?: File }) {
+export type DrawSize = { w: number; h: number; start: number; why: string };
+export function openEditor(p: Pattern, part: string, o: { onSave: () => void; startImage?: File; size?: DrawSize | null }) {
   const rowsOf = partRows(p, part);
-  let d: Drawing = p.draw[part] ? structuredClone(p.draw[part]) : newDrawing(24, Math.max(10, rowsOf.length || 20), rowsOf[0]?.n || 1);
+  // 새로 그릴 때는 도안의 콧수·단수 그대로 (모르면 24코)
+  const fresh = !p.draw[part];
+  let d: Drawing = p.draw[part] ? structuredClone(p.draw[part]) : newDrawing(o.size?.w || 24, o.size?.h || Math.max(10, rowsOf.length || 20), o.size?.start || rowsOf[0]?.n || 1);
   if (!d.opt) d.opt = {};
   if (d.opt.gauge === undefined) d.opt.gauge = primaryGauge(p.gauges);
   let colors: Yarn[] = p.colors.length ? p.colors.map((y) => ({ ...y })) : [{ code: "A", name: "바탕색", hex: "#EFE8D8" }, { code: "B", name: "배색", hex: "#2F5D8A" }];
@@ -32,6 +35,8 @@ export function openEditor(p: Pattern, part: string, o: { onSave: () => void; st
   let focus: { c: number; r: number } | null = null;
   const undo: Drawing[] = [], redo: Drawing[] = [];
   let geom: GridGeom;
+  // 사진 밑그림: 격자 위에 반투명하게 겹쳐 보며 칠한다 (이 편집 동안만)
+  let under: { img: CanvasImageSource; alpha: number; on: boolean } | null = null;
   let dirty = false;
 
   const canvas = h("canvas", { "aria-label": "배색 격자. 칸을 눌러 칠해요." });
@@ -48,6 +53,13 @@ export function openEditor(p: Pattern, part: string, o: { onSave: () => void; st
     erase: h("button", { class: "btn", type: "button", text: "⌫ 지우개" }),
   };
   (Object.keys(toolBtns) as (keyof typeof toolBtns)[]).forEach((t) => (toolBtns[t].onclick = () => setTool(t)));
+  const alphaIn = h("input", { type: "range", min: 0, max: 90, step: 5, value: "45", "aria-label": "사진 진하기", style: "width:140px" });
+  alphaIn.oninput = () => { if (under) { under.alpha = +alphaIn.value / 100; draw(); } };
+  const underToggle = h("button", { class: "btn", type: "button", text: "사진 숨기기" });
+  underToggle.onclick = () => { if (!under) return; under.on = !under.on; underToggle.textContent = under.on ? "사진 숨기기" : "사진 보이기"; draw(); };
+  const underBar = h("div", { class: "ed-bar", hidden: true },
+    h("span", { class: "gen", text: "사진 밑그림" }), h("span", { class: "gen", text: "흐리게" }), alphaIn, h("span", { class: "gen", text: "진하게" }), underToggle,
+    h("button", { class: "btn ghost", type: "button", text: "밑그림 빼기", on: { click: () => { under = null; draw(); } } }));
   const selBar = h("div", { class: "ed-bar", hidden: true },
     h("span", { class: "gen", text: "선택 영역:" }),
     btn("복사", () => { if (sel) { clip = copyRect(d, sel); setTool("paste"); toast("붙일 자리(왼쪽 위 칸)를 누르세요."); } }),
@@ -67,12 +79,17 @@ export function openEditor(p: Pattern, part: string, o: { onSave: () => void; st
       h("span", { class: "sep" }),
       btn("↶", () => { if (undo.length) { redo.push(d); d = undo.pop()!; dirty = true; draw(); } }, "되돌리기"),
       btn("↷", () => { if (redo.length) { undo.push(d); d = redo.pop()!; dirty = true; draw(); } }, "다시"),
+      h("span", { class: "sep" }),
+      btn("🖼 사진 불러오기", () => importImage(), "사진·이미지로 격자 채우기"),
+      p.src === "pdf" ? btn("📄 PDF 차트에서", () => importFromPdf(), "PDF 차트 색으로 격자 채우기") : null,
       h("span", { style: "flex:1" }),
       btn("⚙ 설정", openSettings),
       h("button", { class: "btn primary", type: "button", text: "💾 저장", on: { click: save } }),
       btn("닫기", closeAsk),
     ),
     selBar,
+    underBar,
+    sizeBar(),
     body,
     h("div", { class: "ed-foot", style: "flex-direction:column;align-items:stretch" },
       desc,
@@ -85,6 +102,17 @@ export function openEditor(p: Pattern, part: string, o: { onSave: () => void; st
   setTool("pen");
   if (o.startImage) importImage(o.startImage);
 
+  /** 도안 크기 안내: 새로 만들면 어디서 가져왔는지, 기존 격자가 도안과 다르면 맞추기 버튼 */
+  function sizeBar() {
+    const z = o.size;
+    if (!z) return fresh ? h("div", { class: "ed-bar" }, h("span", { class: "gen", text: "도안에서 콧수를 찾지 못해 24코로 시작했어요. ⚙ 설정에서 바꿀 수 있어요." })) : null;
+    if (fresh) return h("div", { class: "ed-bar" }, h("span", { class: "gen", text: `도안대로 ${z.w}코 × ${z.h}단(${z.start}단부터)으로 시작했어요 · ${z.why}` }));
+    if (d.w === z.w && d.h === z.h && d.start === z.start) return null;
+    const bar = h("div", { class: "ed-bar" },
+      h("span", { class: "gen", text: `지금 격자 ${d.w}코 × ${d.h}단 · 도안은 ${z.w}코 × ${z.h}단 (${z.why})` }),
+      btn("도안 크기로 맞추기", () => { edit({ ...resize(d, z.w, z.h), start: z.start, opt: d.opt }); bar.remove(); toast(`${z.w}코 × ${z.h}단으로 맞췄어요. 넘친 칸은 잘렸어요.`); }));
+    return bar;
+  }
   function btn(text: string, fn: () => void, label?: string) {
     return h("button", { class: "btn", type: "button", text, "aria-label": label || null, on: { click: fn } });
   }
@@ -126,6 +154,16 @@ export function openEditor(p: Pattern, part: string, o: { onSave: () => void; st
     drawPalette();
     selBar.hidden = !(tool === "select" || tool === "paste") || !sel;
     geom = drawGrid(canvas, d, colors, cell, { sel, n: focusRow, side: sideFor(focusRow), round: !!p.secs[part]?.round });
+    if (under?.on) {
+      const ctx = canvas.getContext("2d")!;
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      ctx.save();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.globalAlpha = under.alpha;
+      ctx.drawImage(under.img, geom.ox, geom.oy, d.w * geom.cell, (geom.rows[1] - geom.rows[0] + 1) * geom.ch);
+      ctx.restore();
+    }
+    underBar.hidden = !under;
     const s = sideFor(focusRow);
     const line = describeRow(d, focusRow, s, colors);
     const fl = longestFloat(d, focusRow);
@@ -248,8 +286,8 @@ export function openEditor(p: Pattern, part: string, o: { onSave: () => void; st
         return h("div", { class: "set-sec" },
           toggle("범례 보이기", "색마다 이름과 코 수를 격자 아래에 보여줘요.", !!opt.legend, (x) => (opt.legend = x)),
           h("div", { class: "field" }, "칸 그리기", v, h("small", { text: "코 모양은 뜬 편물처럼 보여 주고, 격자는 편집할 때 보기 쉬워요." })),
-          h("button", { class: "btn", type: "button", text: "픽셀 보기 받기 (1코 = 1픽셀 PNG)", on: { click: async () => download(`${part}-픽셀.png`, await canvasBlob(pixelCanvas(d, colors, 1), "image/png")) } }),
-          h("button", { class: "btn ghost", type: "button", text: "크게 받기 (1코 = 10픽셀)", on: { click: async () => download(`${part}-격자.png`, await canvasBlob(pixelCanvas(d, colors, 10), "image/png")) } }));
+          h("button", { class: "btn", type: "button", text: "픽셀 보기 받기 (1코 = 1픽셀 PNG)", on: { click: async () => download(`colorwork-pixel.png`, await canvasBlob(pixelCanvas(d, colors, 1), "image/png")) } }),
+          h("button", { class: "btn ghost", type: "button", text: "크게 받기 (1코 = 10픽셀)", on: { click: async () => download(`colorwork-grid.png`, await canvasBlob(pixelCanvas(d, colors, 10), "image/png")) } }));
       },
       서식: () => {
         const b = h("select", {}, ...[5, 10].map((k) => new Option(`${k}칸마다`, String(k), false, (opt.bold || 10) === k)));
@@ -295,8 +333,9 @@ export function openEditor(p: Pattern, part: string, o: { onSave: () => void; st
     if (!res) return;
     colors = res.colors;
     cur = Math.min(cur, colors.length - 1);
+    if (res.photo) { under = { img: res.photo, alpha: +alphaIn.value / 100, on: true }; underToggle.textContent = "사진 숨기기"; }
     edit({ ...res.drawing, opt: d.opt });
-    toast(`이미지를 ${d.w}×${d.h}칸으로 바꿨어요. 틀린 칸은 직접 고쳐 주세요.`, 3600);
+    toast(`이미지를 ${d.w}×${d.h}칸으로 바꿨어요. 사진을 반투명하게 겹쳐 뒀으니 보면서 틀린 칸을 고쳐 주세요.`, 4200);
   }
 
   async function importFromPdf() {
@@ -357,9 +396,9 @@ export function openEditor(p: Pattern, part: string, o: { onSave: () => void; st
     toast("배색을 저장했어요. 단마다 색 서술이 만들어졌어요.");
     close();
   }
-  function closeAsk() {
-    if (dirty && !confirm("저장하지 않은 변경이 있어요. 닫을까요?")) return;
-    close();
+  function closeAsk(): void {
+    if (!dirty) return close();
+    ask("저장하지 않았어요", "고친 내용을 저장하지 않고 닫을까요?", "닫기", "계속 편집").then((ok) => ok && close());
   }
   function close() {
     ed.remove();

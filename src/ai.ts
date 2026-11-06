@@ -1,22 +1,27 @@
 /**
- * AI 연결 (기기에서 못 하는 일만: 도안 읽기를 내장으로 못 끝낼 때, 차트를 글로 풀기)
- *  - claude : 내 Claude API 키로 이 브라우저에서 바로 Anthropic API 호출 (키는 이 기기에만)
- *  - manual : 키 없이. 프롬프트·파일을 내 Claude 채팅(claude.ai)에 넣고 답을 붙여넣는다
+ * AI 연결 (기기에서 못 하는 일만: 도안 읽기를 내장으로 못 끝낼 때, 차트를 글로 풀기, 이 단 물어보기)
+ *  - artifact: Claude 아티팩트 안에서 열었을 때 — 보는 사람의 Claude (키 없이)
+ *  - claude  : 내 Claude API 키로 이 브라우저에서 바로 Anthropic API 호출 (키는 이 기기에만)
+ *  - manual  : 키 없이. 프롬프트·파일을 내 Claude 채팅(claude.ai)에 넣고 답을 붙여넣는다
  */
 import type { CallReq } from "./anthropicCall";
 import { MODEL } from "./config";
+import { getSample, inArtifact } from "./artifact";
 
-export type Provider = "claude" | "manual";
+export type Provider = "artifact" | "claude" | "manual";
 export type AiSettings = { provider: Provider; claudeKey?: string };
-export const DEFAULT_SETTINGS: AiSettings = { provider: "manual" };
+export const DEFAULT_SETTINGS: AiSettings = { provider: inArtifact ? "artifact" : "manual" };
 
 /** 예전 설정(anthropic/openai/server)을 지금 모양으로 */
 export function migrateSettings(s: any): AiSettings {
   const key = s?.claudeKey || s?.anthropicKey || "";
-  return { provider: key && (s?.provider === "claude" || s?.provider === "anthropic") ? "claude" : "manual", claudeKey: key };
+  if (s?.provider === "artifact" || (inArtifact && !s)) return { provider: inArtifact ? "artifact" : "manual", claudeKey: key };
+  return { provider: key && (s?.provider === "claude" || s?.provider === "anthropic") ? "claude" : inArtifact ? "artifact" : "manual", claudeKey: key };
 }
 
 export const hasKey = (s: AiSettings) => s.provider === "claude" && !!s.claudeKey;
+/** 버튼 한 번으로 Claude를 부를 수 있나 (키 또는 아티팩트) */
+export const canCallDirect = (s: AiSettings) => hasKey(s) || (s.provider === "artifact" && inArtifact);
 
 export class AiError extends Error {
   constructor(public code: string, msg?: string) {
@@ -29,6 +34,7 @@ export type ManualHandler = (req: CallReq, label: string) => Promise<string>;
 
 export async function callAi(s: AiSettings, req: CallReq, opts: { signal?: AbortSignal; manual: ManualHandler; label: string }): Promise<string> {
   try {
+    if (s.provider === "artifact" && inArtifact) return await callSample(req, opts.signal);
     if (!hasKey(s)) return await opts.manual(req, opts.label);
     const [{ default: Anthropic }, { callAnthropic }] = await Promise.all([import("@anthropic-ai/sdk"), import("./anthropicCall")]);
     const client = new Anthropic({ apiKey: s.claudeKey, dangerouslyAllowBrowser: true, maxRetries: 1 });
@@ -45,6 +51,37 @@ export async function callAi(s: AiSettings, req: CallReq, opts: { signal?: Abort
     if (st && st >= 500) throw new AiError("server");
     throw new AiError("network", String(e?.message || e));
   }
+}
+
+/** 아티팩트: 보는 사람의 Claude (sample). PDF는 못 받아서 쪽을 이미지로 바꿔 보낸다(upload에서). */
+async function callSample(req: CallReq, signal?: AbortSignal): Promise<string> {
+  const sample = await getSample();
+  if (!sample) throw new AiError("not_granted");
+  const images: Blob[] = [];
+  for (const p of req.parts) {
+    if (p.kind === "image") images.push(b64ToBlob(p.b64, p.media));
+    if (p.kind === "pdf") throw new AiError("too_large", "pdf");
+  }
+  const text = req.parts.filter((p) => p.kind === "text").map((p: any) => p.text).join("\n\n");
+  const input = req.followUp
+    ? [{ role: "user", content: text }, { role: "assistant", content: req.followUp.assistant }, { role: "user", content: req.followUp.user }]
+    : text;
+  const opts: any = { signal, modelTier: "complex", ...(images.length ? { images } : {}) };
+  try {
+    if (req.schema) return JSON.stringify(await sample.json(input, opts));
+    const r = await sample(input, opts);
+    return r.text;
+  } catch (e: any) {
+    const map: Record<string, string> = { cancelled: "cancelled", not_granted: "not_granted", sampling_disabled: "not_granted", rate_limited: "rate_limited", prompt_too_large: "too_large", image_rejected: "too_large", refused: "refused", invalid_json: "invalid_json", images_unavailable: "not_granted" };
+    throw new AiError(map[e?.code] || "server", e?.message);
+  }
+}
+
+export function b64ToBlob(b64: string, type: string) {
+  const bin = atob(b64);
+  const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return new Blob([u], { type });
 }
 
 /** 코드펜스 제거 → 첫 { ~ 마지막 } (§4) */
@@ -64,6 +101,7 @@ export function errCopy(e: unknown): string {
   const c = (e as any)?.code;
   const m: Record<string, string> = {
     cancelled: "중지했어요.",
+    not_granted: "Claude 사용을 허용하지 않아서 읽지 못했어요. 다시 누르면 허용 창이 떠요.",
     auth: "Claude API 키가 맞지 않아요. ⚙ 설정에서 확인해 주세요.",
     rate_limited: "지금은 요청이 너무 많아요. 잠시 뒤 다시 눌러주세요.",
     too_large: "한 번에 보내기엔 너무 커요. 페이지를 더 적게 골라주세요.",
@@ -76,4 +114,4 @@ export function errCopy(e: unknown): string {
   return m[c] || "읽는 중 문제가 생겼어요. 다시 눌러주세요.";
 }
 
-export const providerLabel = (p: Provider) => ({ claude: `내 Claude API 키 (${MODEL})`, manual: "키 없이: 내 Claude 채팅에 복사·붙여넣기" })[p];
+export const providerLabel = (p: Provider) => ({ artifact: "이 아티팩트를 연 사람의 Claude (키 없이)", claude: `내 Claude API 키 (${MODEL})`, manual: "키 없이: 내 Claude 채팅에 복사·붙여넣기" })[p];

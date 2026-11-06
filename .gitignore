@@ -8,3 +8,4 @@ public/pdfjs/
 .env
 .env.*
 .vercel
+dist-artifact/
