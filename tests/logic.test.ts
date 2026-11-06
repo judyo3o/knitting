@@ -257,9 +257,9 @@ describe("gauge", () => {
     expect(myGauge({ label: "", pattern: null, before: { st: 1, rows: 1 }, after: null })).toEqual({ st: 1, rows: 1 });
   });
   it("finds gauges in pattern text", () => {
-    expect(findGauges("게이지 : 20코 26단 (5.5mm 바늘, 10 x 10cm 메리야스뜨기) 42코 30단 (5.5mm 바늘, 19 x 13cm 무늬게이지)")).toEqual([
-      { label: "메리야스", st: 18, rows: 23, needle: "5.5mm" },
-      { label: "무늬", st: 22.1, rows: 23.1, needle: "5.5mm", swatch: { st: 38, rows: 27, w: 19, h: 13 } }]);
+    expect(findGauges("게이지 : 20코 26단 (4.5mm 바늘, 10 x 10cm 메리야스뜨기) 42코 30단 (4.5mm 바늘, 19 x 13cm 무늬게이지)")).toEqual([
+      { label: "메리야스", st: 20, rows: 26, needle: "4.5mm" },
+      { label: "무늬", st: 22.1, rows: 23.1, needle: "4.5mm", swatch: { st: 42, rows: 30, w: 19, h: 13 } }]);
     expect(findGauges("Knitting tension: 22 sts and 30 rows = 10 cm in stockinette").map((g) => [g.st, g.rows])).toEqual([[22, 30]]);
   });
 });
@@ -445,7 +445,7 @@ describe("도안 정보", () => {
   it("사이즈를 고르면 내 사이즈 숫자만, 다른 사이즈 줄은 빼요", async () => {
     const { extractInfo } = await import("../src/parse");
     const t = ["사이즈 : S (M) L (XL) 2XL (3XL)", "가슴둘레 : 96 (104) 110 (1 0) 126 (136) cm", "S사이즈 [차트 p13]", "M사이즈: 소매 길이 44cm"].join("\n");
-    expect(extractInfo(t, "L")).toBe("사이즈 : L\n가슴둘레 : 118 cm");
+    expect(extractInfo(t, "L")).toBe("사이즈 : L\n가슴둘레 : 110 cm");
   });
   it("옛 데이터의 notes는 도안 정보로 옮기고 앱 안내만 남겨요", async () => {
     const { normalize } = await import("../src/model");
@@ -475,7 +475,7 @@ describe("배색 격자 크기", () => {
   it("기초코 문장 > 단 끝 콧수에서 파트 콧수", async () => {
     const { partStitches } = await import("../src/model");
     const R = (n: number, t: string, st: string | null = null) => ({ s: "a", n, t, st, side: null, pg: null, ch: null, span: null });
-    expect(partStitches([R(1, "5.5mm 바늘로 38코 기초코. 코잡기가 1단입니다.")])).toBe(38);
+    expect(partStitches([R(1, "4.5mm 바늘로 42코 기초코. 코잡기가 1단입니다.")])).toBe(42);
     expect(partStitches([R(1, "5.5mm 바늘로 110 코를 만듭니다.")])).toBe(110);
     expect(partStitches([R(1, "Cast on 60 sts")])).toBe(60);
     expect(partStitches([R(1, "겉뜨기", "48코"), R(2, "안뜨기", "48코"), R(3, "늘림", "50코")])).toBe(48);
@@ -486,7 +486,7 @@ describe("배색 격자 크기", () => {
 describe("서술 줄 나누기", () => {
   it("안내 문장은 따로, 코 지시만 묶음, ' / '는 마커", async () => {
     const { splitNarrative } = await import("../src/chunks");
-    const t = "2단에서 표시한 칸 위에 마커를 양쪽에 하나씩 겁니다. (나중에 코 줍는 위치)\n안4, 겉2, 안2 / 안2, 겉9 / 안1, 턴\n차트를 따라 진행 (양쪽 가장자리 'T' 표시 위치 차트대로)";
+    const t = "2단에서 표시한 칸 위에 마커를 양쪽에 하나씩 겁니다. (나중에 코 줍는 위치)\n안4, 겉2, 안2 / 안2, 겉9 / 안1, 턴\n차트를 따라 진행 (가장자리 'T' 표시는 차트대로)";
     const r = splitNarrative(t);
     expect(r.notes.length).toBe(2);
     expect(r.chunks).toEqual(["안4", "겉2", "안2", "마커", "안2", "겉9", "마커", "안1", "턴"]);
@@ -691,32 +691,32 @@ describe("스톱워치 없이 뜬 단은 페이스에서 빼기 · 남은 시간
 describe("무늬 스와치 게이지 (전체 크기를 재는)", () => {
   it("42코 30단 (19 x 13cm)은 스와치 크기로, 잰 cm는 10cm 게이지로", async () => {
     const { findGauges, swatchToGauge, gaugeToSwatch, swatchFromLabel } = await import("../src/gauge");
-    const g = findGauges("게이지 : 20코 26단 (5.5mm 바늘, 10 x 10cm 메리야스뜨기) 42코 30단 (5.5mm 바늘, 19 x 13cm 무늬게이지)");
+    const g = findGauges("게이지 : 20코 26단 (4.5mm 바늘, 10 x 10cm 메리야스뜨기) 42코 30단 (4.5mm 바늘, 19 x 13cm 무늬게이지)");
     expect(g[0].swatch).toBeUndefined();
-    expect(g[1].swatch).toEqual({ st: 38, rows: 27, w: 19, h: 13 });
+    expect(g[1].swatch).toEqual({ st: 42, rows: 30, w: 19, h: 13 });
     expect(swatchToGauge(g[1].swatch!, 19, 13)).toEqual({ st: 22.1, rows: 23.1 });
-    expect(gaugeToSwatch(g[1].swatch!, { st: 19, rows: 20 })).toEqual({ w: 20, h: 13.5 });
+    expect(gaugeToSwatch(g[1].swatch!, { st: 19, rows: 20 })).toEqual({ w: 22.1, h: 15 });
     const old = swatchFromLabel({ label: "무늬 (원문 42코 30단 / 19×13cm)", pattern: { st: 22.1, rows: 23.1 }, before: null, after: null });
     expect(old.label).toBe("무늬");
-    expect(old.swatch).toEqual({ st: 38, rows: 27, w: 19, h: 13 });
+    expect(old.swatch).toEqual({ st: 42, rows: 30, w: 19, h: 13 });
   });
 });
 
 import { findEase, recommendSize, needleMm } from "../src/gauge";
 describe("신체 사이즈로 추천", () => {
   it("도안의 여유분을 찾는다", () => {
-    expect(findEase("가슴둘레 : 96 (104) 110 cm\n(실제 가슴둘레보다 +20cm 정도 여유를 권장합니다.)")).toBe(25);
+    expect(findEase("가슴둘레 : 96 (104) 110 cm\n(실제 가슴둘레보다 +20cm 정도 여유를 권장합니다.)")).toBe(20);
     expect(findEase("여유분 10cm 권장")).toBe(10);
     expect(findEase("Choose a size with 15 cm positive ease")).toBe(15);
     expect(findEase("가슴둘레 104cm")).toBeNull();
   });
   it("몸 + 여유에 맞는 사이즈 (게이지 반영)", () => {
     const order = ["S", "M", "L", "XL", "2XL", "3XL"], v = [96, 104, 110, 120, 126, 136];
-    expect(recommendSize(order, v, 92, 25).best).toBe("L"); // 110 → 110
-    expect(recommendSize(order, v, 95, 25).best).toBe("L"); // 120: L은 2cm 작음, XL은 8cm 큼 → L
-    expect(recommendSize(order, v, 97, 25).best).toBe("XL"); // 122: L은 4cm 작음 → XL
-    // 내 게이지가 느슨하면(도안 18코, 내 17코) 같은 콧수로 더 크게 → 한 사이즈 작게
-    expect(recommendSize(order, v, 92, 25, 18 / 17).best).toBe("M"); // M 112×1.059=118.6
+    expect(recommendSize(order, v, 85, 25).best).toBe("L"); // 110 → 110
+    expect(recommendSize(order, v, 87, 25).best).toBe("L"); // 112: L은 2cm 작음, XL은 8cm 큼 → L
+    expect(recommendSize(order, v, 89, 25).best).toBe("XL"); // 114: L은 4cm 작음 → XL
+    // 내 게이지가 느슨하면(도안 20코, 내 19코) 같은 콧수로 더 크게 → 한 사이즈 작게
+    expect(recommendSize(order, v, 85, 25, 20 / 19).best).toBe("M"); // M 104×1.053=109.5
     // 품(반 둘레) 표
     expect(recommendSize(["S", "M"], [52, 58], 92, 20, 1, true).best).toBe("M");
   });

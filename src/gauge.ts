@@ -45,8 +45,8 @@ export const cmToSt = (cm: number, g: Gauge) => Math.round((cm * g.st) / 10);
 export const cmToRows = (cm: number, g: Gauge) => Math.round((cm * g.rows) / 10);
 
 /**
- * 도안 텍스트에서 게이지 찾기. "20코 26단 (5.5mm 바늘, 10 x 10cm 메리야스뜨기)",
- * "42코 30단 (5.5mm, 19 x 13cm 무늬게이지)", "22 sts and 30 rows = 10 cm" 등.
+ * 도안 텍스트에서 게이지 찾기. "20코 26단 (4.5mm 바늘, 10 x 10cm 메리야스뜨기)",
+ * "42코 30단 (4.5mm, 19 x 13cm 무늬게이지)", "22 sts and 30 rows = 10 cm" 등.
  * 잰 크기가 10cm가 아니면 10cm 기준으로 바꾼다.
  */
 export function findGauges(text: string): { label: string; st: number; rows: number; needle?: string; swatch?: Swatch }[] {

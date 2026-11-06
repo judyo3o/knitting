@@ -221,16 +221,16 @@ assert.equal(await page.locator(".gauge-line").count(), 0); // 뒷판 탭엔 없
 await page.click(".ptab:has-text('스와치')");
 assert.match(await page.textContent(".gauge-line"), /메리야스: 도안 20코 26단/);
 await page.click(".gauge-line");
-await page.fill(".gauge-set >> nth=0 >> input[aria-label='세탁 후 콧수']", "20");
-await page.fill(".gauge-set >> nth=0 >> input[aria-label='세탁 후 단수']", "23");
+await page.fill(".gauge-set >> nth=0 >> input[aria-label='세탁 후 콧수']", "22");
+await page.fill(".gauge-set >> nth=0 >> input[aria-label='세탁 후 단수']", "26");
 await page.fill(".gauge-set >> nth=0 >> input[aria-label='도안에 적힌 콧수나 단수']", "110");
 const gout = await page.textContent(".gauge-set >> nth=0");
 console.log("   ", gout.replace(/\s+/g, " ").slice(0, 200));
 assert.match(gout, /굵게/);
-assert.match(gout, /122코/);
+assert.match(gout, /121코/);
 await shot("11-gauge");
 await page.click(".dlg >> text=저장");
-assert.match(await page.textContent(".gauge-line"), /내 20코 23단/);
+assert.match(await page.textContent(".gauge-line"), /내 22코 26단/);
 await page.click(".ptab:has-text('뒷판')");
 
 step("차트 기호 누르기 → 기법 이름 말풍선 + 기호표 줄");

@@ -388,7 +388,7 @@ export function spanParts(t: string, span: [number, number] | null): { each: str
     if (mine.length) lines = mine;
   }
   const sents = lines.flatMap((l) => l.split(/(?<=[.。])\s+/)).map((x) => x.trim()).filter(Boolean);
-  const END = /코가\s*(?:있|남|됩)|코\s*남|실을\s*끊|쉬어\s*둡|쉬어둡|홀더|코막음|코\s*막음|마무리/;
+  const END = /코가\s*(?:있|남|됩)|코\s*남|바늘에\s*\d+\s*코|실을\s*(?:끊|자르)|쉬어\s*둡|쉬어둡|쉼코|홀더|코막음|코\s*막음|마무리/;
   // "차트를 따라 진행합니다."와 "차트를 따라 진행"은 같은 말로
   const uniq = (a: string[]) => { const seen = new Set<string>(); return a.filter((x) => { const k = x.replace(/\s+/g, "").replace(/(?:합니다|한다|해요|하기)?[.。]?$/, ""); if (seen.has(k)) return false; seen.add(k); return true; }); };
   const each = uniq(sents.filter((x) => !END.test(x)).map((x) => x.replace(RANGE, "").replace(/^\s*까지\s*/, "").trim()).filter(Boolean));
