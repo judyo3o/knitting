@@ -107,6 +107,12 @@ export async function syncRemote(): Promise<boolean> {
         state.patterns[d.id] = rp;
         db.savePattern(rp).catch(() => {});
         changed = true;
+      } else if (rp.remote && JSON.stringify(rp.remote) !== JSON.stringify(lp.remote)) {
+        // 원본 파일 위치는 진행과 따로: 다른 기기가 올린 원본을 이 기기 도안에도 (수정 시각과 상관없이)
+        lp.remote = rp.remote;
+        db.savePattern(lp).catch(() => {});
+        pdfCache.delete(lp.id);
+        changed = true;
       }
     }
     // 이 브라우저에만 있던 도안은 올린다
@@ -199,7 +205,7 @@ async function pushFile(p: Pattern, f: db.FileRec) {
     }
     const old = p.remote;
     p.remote = { type: f.type, ids, sig };
-    commit(p, false);
+    commit(p);
     queueRemote(p);
     // 바꾼 파일이면 예전 것은 지운다 (이 도안만 가리키던 것)
     for (const id of old?.ids || []) if (!ids.includes(id)) assets.delete(id).catch(() => {});
