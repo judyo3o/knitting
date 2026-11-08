@@ -109,7 +109,8 @@ export async function syncRemote(): Promise<boolean> {
       if (!v || !Array.isArray(v.rows)) continue;
       remoteIds.add(d.id);
       let rp: Pattern;
-      try { rp = normalize({ ...v, id: d.id }); } catch { continue; } // 한 도안이 깨져도 나머지는 받는다
+      // 저장소가 주는 data()는 얼려진(수정 불가) 객체라 깊은 복사 후에 맞춘다
+      try { rp = normalize({ ...JSON.parse(JSON.stringify(v)), id: d.id }); } catch (e) { console.warn("도안 받기 실패", d.id, e); continue; } // 한 도안이 깨져도 나머지는 받는다
       const lp = state.patterns[d.id];
       if (!lp || (rp.updatedAt || 0) > (lp.updatedAt || 0)) {
         state.patterns[d.id] = rp;
