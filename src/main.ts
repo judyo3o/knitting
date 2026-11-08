@@ -7,7 +7,7 @@ import { cellKeyColor, chartBitmap, chartKey, clearBitmaps, splitChartByGap, lab
 import { getFile, putFile } from "./db";
 import { getCell, longestFloat, rowColors } from "./drawing";
 import {
-  applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, spanParts, finishText, etaText, continuousKnitMs, castLabel, flexibleRow, addRowAfter, removeRow, workIn, workStart, workStop, sideOf, stepNext, stepPrev, resetPart, markBefore, rewindTo, EARLIER,
+  applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, spanParts, finishText, etaText, continuousKnitMs, castLabel, flexibleRow, addRowAfter, removeRow, workIn, workStart, workStop, sideOf, stepNext, stepPrev, resetPart, markBefore, rewindTo, EARLIER, fmtDur,
 } from "./model";
 import { blobB64, canvasBlob, renderRegion, textItems } from "./pdf";
 import type { Guide } from "./symbolid";
@@ -227,7 +227,7 @@ function workButtons(p: Pattern) {
   let etaAt = 0;
   const tick = () => {
     clock.textContent = on ? `뜨는 중 ${hms(Date.now() - p.work!.on!)} · 오늘 ${hms(today())}` : today() > 0 ? `오늘 뜬 시간 ${hms(today())}` : "";
-    if (Date.now() - etaAt > 15000) { etaAt = Date.now(); eta.replaceChildren(...(etaText(p, currentTab(p)) || "").split(" · ").filter(Boolean).map((t) => h("span", { class: "eta-seg", text: t }))); } // 항목마다 한 줄 (숫자 중간에서 끊기지 않게)
+    if (Date.now() - etaAt > 15000) { etaAt = Date.now(); eta.replaceChildren(...(etaText(p, currentTab(p)) || (p.work?.spans.length || p.work?.on ? "" : "스톱워치를 켜고 뜬 단만 · 페이스·남은 시간에 들어가요")).split(" · ").filter(Boolean).map((t) => h("span", { class: "eta-seg", text: t }))); } // 항목마다 한 줄 (숫자 중간에서 끊기지 않게)
   };
   clearInterval(workTick);
   tick();
@@ -1295,6 +1295,12 @@ function rowList(p: Pattern, s: string) {
 function history(p: Pattern) {
   const wrap = h("div", { class: "hist-wrap" });
   const recent = [...p.log].reverse().slice(0, 60);
+  // 이 기록 동안 스톱워치를 켠 시간 (앞 기록이 끝난 뒤부터 이 기록 끝까지, 최대 3시간 전부터)
+  const knitMs = (l: (typeof p.log)[number]) => {
+    const i = p.log.indexOf(l);
+    const from = Math.max(i > 0 ? p.log[i - 1].b : 0, l.a - 3 * 3600000);
+    return workIn(p, from, l.b);
+  };
   if (!recent.length) wrap.append(h("p", { class: "gen", text: "아직 기록이 없어요. '다음 단'을 누르면 시각이 남아요." }));
   // 날짜별로 묶어 카드 하나에
   const days = new Map<string, typeof recent>();
@@ -1306,7 +1312,7 @@ function history(p: Pattern) {
       const fin = p.fin[l.s] && p.fin[l.s] >= l.a - 60000 && p.fin[l.s] <= l.b + 60000;
       card.append(h("div", { class: "hist-row" },
         h("div", { class: "hr-top" }, h("b", {}, `${l.s} ${l.from} → ${l.to}단`, fin ? h("span", { class: "badge fin", text: "완료 ✓" }) : null), h("span", { class: "hr-d", text: `${d >= 0 ? "+" : ""}${d}단` })),
-        h("div", { class: "hr-bar" }, yarnBar(Math.abs(d) / total, !!fin), h("span", { text: `${fmtTime(l.a)} – ${fmtTime(l.b)}` }))));
+        h("div", { class: "hr-bar" }, yarnBar(Math.abs(d) / total, !!fin), h("span", { text: (() => { const w = knitMs(l); return `${fmtTime(l.b)} · ` + (w >= 60000 ? `뜬 시간 ${fmtDur(w)}` : "스톱워치 안 켬"); })() }))));
     }
     wrap.append(h("div", { class: "home-sec", text: day }), card);
   }

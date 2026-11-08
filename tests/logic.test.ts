@@ -584,16 +584,20 @@ describe("완성 시간·페이스", () => {
     // 단마다 10분, 3단과 4단 사이에 2시간 쉼
     p.done["a#1"] = t0; p.done["a#2"] = t0 + 600000; p.done["a#3"] = t0 + 1200000; p.done["a#4"] = t0 + 1200000 + 600000 + 7200000;
     p.fin["a"] = p.done["a#4"];
+    // 스톱워치를 안 켰으면 단 완료 시각이 있어도 시간·페이스에 넣지 않는다
     const st = partStats(p, "a");
-    expect(Math.round(st.ms / 60000)).toBe(40);
-    expect(Math.round(st.rest / 60000)).toBe(120);
-    expect(st.stitches).toBe(160);
-    expect(finishText(p, "a")).toBe("실제 뜬 시간 40분 · 쉰 시간까지 2시간 40분 · 시간당 약 240코 페이스 (총 160코 · 4단)");
-    // 시작·중지 버튼을 썼으면 켜 둔 시간만
+    expect(st.ms).toBe(0);
+    expect(st.rows).toBe(0);
+    expect(st.skipped).toBe(4);
+    expect(finishText(p, "a")).toBeNull();
+    // 시작·중지 버튼을 썼으면 켜 둔 시간만, 켜 둔 동안 뜬 단만
     const { workStart, workStop } = await import("../src/model");
     workStart(p, p.done["a#1"] - 600000); workStop(p, p.done["a#3"]);
     workStart(p, p.done["a#4"] - 900000); workStop(p, p.done["a#4"]);
-    expect(Math.round(partStats(p, "a").ms / 60000)).toBe(45);
+    const st2 = partStats(p, "a");
+    expect(Math.round(st2.ms / 60000)).toBe(45);
+    expect(st2.rows).toBe(4);
+    expect(finishText(p, "a")).toContain("실제 뜬 시간 45분");
   });
 });
 
@@ -749,7 +753,8 @@ it("n단을 떴거나 n단으로 건너뛰면 그 앞 단은 다 뜬 것", async
   stepNext(p, 1000);
   expect([1, 2, 3].map((n) => p.done[k("A", n)])).toEqual([EARLIER, EARLIER, EARLIER]);
   expect(p.done[k("A", 4)]).toBe(1000);
-  expect(partStats(p, "A").rows).toBe(1); // 시각 모르는 단은 페이스에서 뺌
+  expect(partStats(p, "A").rows).toBe(0); // 스톱워치를 안 켰으니 시간·페이스 없음
+  expect(partStats(p, "A").skipped).toBe(1); // 시각 모르는 단(앞서 뜸)은 아예 세지 않음
   const q = newPattern({ id: "q", name: "q" });
   q.rows = p.rows;
   expect(markBefore(q, "A", 3)).toBe(2);

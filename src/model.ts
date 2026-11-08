@@ -455,7 +455,7 @@ export function timedAt(p: Pattern, t: number, now = Date.now()): boolean {
 /**
  * 파트를 뜨는 데 걸린 시간과 뜬 콧수 (완성 페이스).
  * 스톱워치를 썼으면: 켜 둔 시간만 세고, 스톱워치 없이 뜬 것 같은 단(꺼져 있을 때 완료)은 단·콧수 모두 평균에서 뺀다 (skipped).
- * 안 썼으면: 단 완료 시각 사이 간격의 합. 평소보다 훨씬 긴 간격(4배·15분 넘음)은 쉰 것으로 보고 평소 한 단 시간만 센다.
+ * 안 썼으면: 시간을 모르므로 0 (스톱워치를 켠 시간만 반영).
  */
 export function partStats(p: Pattern, s: string): { ms: number; rest: number; rows: number; stitches: number | null; skipped: number } {
   const list = partRows(p, s).filter((r) => !r.castOn);
@@ -476,15 +476,8 @@ export function partStats(p: Pattern, s: string): { ms: number; rest: number; ro
     const c = count(timed);
     return { ms: on, rest: Math.max(0, ts[ts.length - 1] - from - on), ...c, skipped: doneIdx.length - timed.length };
   }
-  let ms = 0, rest = 0;
-  const gaps = ts.slice(1).map((t, i) => t - ts[i]).filter((d) => d > 0);
-  if (gaps.length) {
-    const med = [...gaps].sort((a, b) => a - b)[gaps.length >> 1];
-    const cap = Math.max(med * 4, 15 * 60000);
-    for (const d of gaps) if (d > cap) { ms += med; rest += d - med; } else ms += d;
-    ms += med; // 첫 단
-  }
-  return { ms, rest, ...count(doneIdx), skipped: 0 };
+  // 스톱워치를 안 썼으면 뜬 시간을 모른다: 시간·페이스에 넣지 않는다 (단 완료 시각 간격으로 추정하지 않음)
+  return { ms: 0, rest: 0, rows: 0, stitches: null, skipped: doneIdx.length };
 }
 
 /** 이 도안에서 콧수를 아는 단들의 평균 콧수 (콧수를 모르는 파트에 대신 씀) */
