@@ -666,3 +666,20 @@ export function reconcile(local: Pattern, remote: Pattern): { pattern: Pattern; 
   }
   return { pattern: local, push: true };
 }
+
+/** n단부터 다시 뜨기: 그 파트의 n단과 그 뒤 단의 뜬 표시·묶음 진행·완료를 지우고 n단으로. 지운 단 수 */
+export function rewindTo(p: Pattern, s: string, n: number, now = Date.now()): number {
+  let c = 0;
+  for (const r of partRows(p, s)) {
+    if (r.n < n) continue;
+    const k = key(s, r.n);
+    if (p.done[k]) { delete p.done[k]; c++; }
+    delete p.part[k];
+  }
+  const from = p.pos[s];
+  delete p.fin[s];
+  p.tab = s;
+  p.pos[s] = n;
+  if (from != null && from !== n) logMove(p, s, from, n, now);
+  return c;
+}

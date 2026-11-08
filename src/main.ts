@@ -7,7 +7,7 @@ import { cellKeyColor, chartBitmap, chartKey, clearBitmaps, splitChartByGap, lab
 import { getFile, putFile } from "./db";
 import { getCell, longestFloat, rowColors } from "./drawing";
 import {
-  applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, spanParts, finishText, etaText, continuousKnitMs, castLabel, flexibleRow, addRowAfter, removeRow, workIn, workStart, workStop, sideOf, stepNext, stepPrev, resetPart, markBefore, EARLIER,
+  applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, spanParts, finishText, etaText, continuousKnitMs, castLabel, flexibleRow, addRowAfter, removeRow, workIn, workStart, workStop, sideOf, stepNext, stepPrev, resetPart, markBefore, rewindTo, EARLIER,
 } from "./model";
 import { blobB64, canvasBlob, renderRegion, textItems } from "./pdf";
 import type { Guide } from "./symbolid";
@@ -1132,13 +1132,9 @@ function tools(p: Pattern, s: string) {
     e.preventDefault();
     // 단을 안 적고 누르면 그 파트의 첫 단으로
     const n = num.value.trim() ? parseInt(num.value, 10) : partRows(p, sel.value)[0]?.n;
-    view.peek = null;
-    if (n == null || !jumpTo(p, sel.value, n)) return toast(num.value.trim() ? `${sel.value}에 ${num.value}단이 없어요.` : `${sel.value}에 단이 없어요.`);
-    jumped(p, sel.value, n);
-    commit(p, false);
-    render();
-    window.scrollTo({ top: 0, behavior: "smooth" });
-    if (!num.value.trim()) toast(`${sel.value} ${n}단(첫 단)으로 이동했어요.`);
+    const first = !num.value.trim();
+    if (n == null || !goToRow(p, sel.value, n, () => { render(); window.scrollTo({ top: 0, behavior: "smooth" }); if (first) toast(`${sel.value} ${n}단(첫 단)으로 이동했어요.`); }))
+      return toast(num.value.trim() ? `${sel.value}에 ${num.value}단이 없어요.` : `${sel.value}에 단이 없어요.`);
   };
   const gauge = h("button", { class: "btn ghost", type: "button", text: "게이지", on: { click: () => openGauge(p, render, (sz) => openUpload({ appendTo: p.id, resize: sz, onDone: render })) } });
   const wake = h("button", { class: "btn ghost", type: "button", "aria-pressed": String(wantWake), text: wantWake ? "화면 켜두는 중" : "화면 켜두기", on: { click: () => setWake(!wantWake) } });
@@ -1189,10 +1185,7 @@ function renderSub(p: Pattern, s: string, r: Row) {
     form.onsubmit = (e) => {
       e.preventDefault();
       const n = num.value.trim() ? parseInt(num.value, 10) : partRows(p, s)[0]?.n;
-      view.peek = null;
-      if (n == null || !jumpTo(p, s, n)) return toast(`${s}에 ${num.value}단이 없어요.`);
-      jumped(p, s, n);
-      commit(p, false); back();
+      if (n == null || !goToRow(p, s, n, back)) return toast(`${s}에 ${num.value}단이 없어요.`);
     };
     const hasProg = pr.done > 0 || !!p.fin[s] || Object.keys(p.part).some((k) => k.startsWith(s + "#")) || (p.pos[s] != null && p.pos[s] !== partRows(p, s)[0]?.n);
     const reset = hasProg && !p.example ? h("div", { class: "danger" }, h("button", { class: "link warn", type: "button", text: `'${s}' 진행 초기화`, on: { click: async () => {
@@ -1222,6 +1215,35 @@ function syncText() {
 function jumped(p: Pattern, s: string, n: number) {
   const c = markBefore(p, s, n);
   if (c) toast(`${n}단 앞의 ${c}단을 뜬 것으로 표시했어요.`, 3500);
+}
+
+/**
+ * 단 목록·단 번호로 옮기기. 앞쪽(이미 뜬) 단으로 가면 '도안만 보기'와 '여기서부터 다시 뜨기'(그 뒤 기록 지움)를 고른다.
+ * 뒤쪽으로 가면 앞 단을 뜬 것으로 채운다. 옮긴 뒤 done()으로 화면 정리.
+ */
+function goToRow(p: Pattern, s: string, n: number, done: () => void): boolean {
+  const list = partRows(p, s);
+  if (!list.some((r) => r.n === n)) return false;
+  const cur = currentRow(p, s);
+  const ci = cur ? list.indexOf(cur) : 0, ti = list.findIndex((r) => r.n === n);
+  const knitAfter = list.slice(ti).filter((r) => p.done[key(s, r.n)]).length + (p.fin[s] ? 1 : 0);
+  view.peek = null;
+  if (ti < ci && knitAfter > 0) {
+    const dl = dialog(`${n}단으로 갈까요?`, [
+      h("div", { class: "back-choice" },
+        h("button", { class: "btn primary", type: "button", on: { click: () => { dl.close(); p.tab = s; view.peek = { id: p.id, s, n }; commit(p, false); done(); } } },
+          h("b", { text: "도안만 보기" }), h("small", { text: `진행은 ${p.fin[s] ? "완료 상태" : (cur?.n ?? "") + "단"} 그대로 두고 ${n}단을 살펴봐요` })),
+        h("button", { class: "btn", type: "button", on: { click: () => { dl.close(); const c = rewindTo(p, s, n); commit(p); done(); toast(`${n}단부터 다시 떠요. 그 뒤에 뜬 ${c}단 기록을 지웠어요.`, 3500); } } },
+          h("b", { text: "여기서부터 다시 뜨기" }), h("small", { text: `${n}단과 그 뒤에 뜬 기록(${knitAfter}단)을 지우고 ${n}단부터 다시 떠요` }))),
+      h("div", { class: "actions", style: "justify-content:flex-end" }, h("button", { class: "btn ghost", type: "button", text: "취소", on: { click: () => dl.close() } })),
+    ]);
+    return true;
+  }
+  jumpTo(p, s, n);
+  jumped(p, s, n);
+  commit(p, false);
+  done();
+  return true;
 }
 
 function backupCard(p: Pattern) {
@@ -1256,7 +1278,7 @@ function rowList(p: Pattern, s: string) {
       h("span", { class: "n", text: x.n + "단" + (x.side ? " " + x.side : "") }),
       h("span", { class: "t", text: rowText1(x) + (x.st ? `  (${x.st})` : "") }),
       h("span", { class: "when", text: when }));
-    b.onclick = () => { jumpTo(p, s, x.n); jumped(p, s, x.n); view.peek = null; commit(p, false); view.sub = null; render(); window.scrollTo({ top: 0, behavior: "smooth" }); };
+    b.onclick = () => { goToRow(p, s, x.n, () => { view.sub = null; render(); window.scrollTo({ top: 0, behavior: "smooth" }); }); };
     ol.append(h("li", {}, b));
   }
   requestAnimationFrame(() => {

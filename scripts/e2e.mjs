@@ -64,6 +64,11 @@ step("묶음 누르기 → 진행 저장 + 콧수 추정");
 await page.click(".ptab:has-text('몸통')");
 await page.fill("form input[type=number]", "2");
 await page.click("form button[type=submit]");
+// 이미 뜬 단 앞으로 가면 고르기: 여기서부터 다시 뜨기 → 그 뒤 기록이 지워져야 함
+await page.waitForSelector(".back-choice");
+await page.click(".back-choice button:has-text('여기서부터 다시 뜨기')");
+assert.equal(await page.textContent(".rowno b"), "2");
+assert.match(await page.textContent(".ptab[aria-selected=true] small"), /^1\//);
 await page.click(".chunk >> nth=0");
 const meta = await page.textContent(".chunk-meta");
 assert.match(meta, /1\/1 묶음 · 왼바늘에서 약 60코 뜸/); // (겉5, M1L)×12: 왼바늘에서 60코 소모 (M1L은 0)

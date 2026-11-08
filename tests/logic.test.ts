@@ -784,3 +784,16 @@ describe("영어 서술 → 한국어 형식 (약어는 영어 그대로)", () =
     expect(koreanizeRow("겉2, 안2 반복")).toBe("겉2, 안2 반복");
   });
 });
+
+it("n단부터 다시 뜨기: n단과 그 뒤 기록만 지운다", async () => {
+  const { newPattern, key: k, rewindTo } = await import("../src/model");
+  const p = newPattern({ id: "w", name: "w" });
+  p.rows = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({ s: "A", n, t: "겉10", st: null, side: null, pg: null, ch: null, span: null }));
+  p.done = Object.fromEntries([1, 2, 3, 4, 5, 6, 7].map((n) => [k("A", n), n]));
+  p.part = { [k("A", 8)]: { i: 1, t: 9 }, [k("A", 3)]: { i: 0, t: 1 } };
+  p.pos = { A: 8 }; p.fin = { A: 10 };
+  expect(rewindTo(p, "A", 5)).toBe(3);
+  expect(Object.keys(p.done).sort()).toEqual([k("A", 1), k("A", 2), k("A", 3), k("A", 4)].sort());
+  expect(p.part).toEqual({ [k("A", 3)]: { i: 0, t: 1 } });
+  expect(p.pos.A).toBe(5); expect(p.fin.A).toBeUndefined();
+});
