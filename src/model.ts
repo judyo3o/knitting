@@ -641,3 +641,28 @@ export function markBefore(p: Pattern, s: string, n: number): number {
   for (const r of partRows(p, s)) if (r.n < n && !p.done[key(s, r.n)]) { p.done[key(s, r.n)] = EARLIER; c++; }
   return c;
 }
+
+/** 진행(뜨는 사람 쪽) 필드: 도안 내용과 따로 합친다 */
+const PROGRESS_KEYS = ["pos", "done", "fin", "part", "log", "work", "tab"] as const;
+/**
+ * 이 기기 도안과 계정 저장소 도안 맞추기.
+ * - 저장소 쪽 rev가 더 크면(다른 기기·Claude가 단 서술을 바꿈): 도안 내용은 저장소 것, 진행은 이 기기 것 → 합쳐서 올림
+ * - 저장소 쪽이 더 최근이면: 저장소 것을 받고(보던 탭만 유지) 올리지 않음
+ * - 아니면 이 기기 것을 올림
+ */
+export function reconcile(local: Pattern, remote: Pattern): { pattern: Pattern; push: boolean } {
+  if ((remote.rev || 0) > (local.rev || 0)) {
+    const merged: Pattern = { ...remote };
+    for (const k of PROGRESS_KEYS) (merged as any)[k] = (local as any)[k];
+    // 진행이 없던 쪽 기록은 살리고, 도안 내용이 바뀌어 없어진 파트·단은 그대로 둬도 무해
+    if (!Object.keys(local.done || {}).length && Object.keys(remote.done || {}).length) for (const k of PROGRESS_KEYS) (merged as any)[k] = (remote as any)[k];
+    if (!partRows(merged, merged.tab).length) merged.tab = remote.tab;
+    merged.updatedAt = Math.max(local.updatedAt || 0, remote.updatedAt || 0);
+    return { pattern: merged, push: true };
+  }
+  if ((remote.updatedAt || 0) > (local.updatedAt || 0)) {
+    const tab = partRows(remote, local.tab).length ? local.tab : remote.tab;
+    return { pattern: { ...remote, tab }, push: false };
+  }
+  return { pattern: local, push: true };
+}

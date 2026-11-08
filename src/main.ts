@@ -13,7 +13,7 @@ import { blobB64, canvasBlob, renderRegion, textItems } from "./pdf";
 import type { Guide } from "./symbolid";
 import { chartFor, chartsForSize, chartTitle, chartTitleCount, findCharts, findLegend, LEGEND_RE, partTitleScore, rowH, rowY, sizeRange, stitchAxis, type Chart } from "./pdfgeom";
 import { explainCheck, explainDraft, explainHead } from "./prompts";
-import { active, commit, exportJson, importJson, load, pdfOf, pushAllFiles, reloadAi, removePattern, saveNow, setActive, startAutosave, state, syncInfo, syncRemote } from "./store";
+import { active, commit, exportJson, importJson, load, pdfOf, pushAllFiles, reloadAi, removePattern, saveNow, setActive, setOnRemoteChange, startAutosave, state, syncInfo, syncRemote } from "./store";
 import { openSettings, manualHandler, openViewer } from "./dialogs";
 import { openUpload } from "./upload";
 import { openEditor, type DrawSize } from "./drawui";
@@ -1470,6 +1470,7 @@ document.addEventListener("visibilitychange", () => { if (wantWake && document.v
   // 다른 기기에서 바뀐 진행 기록을 받고, 이 기기에만 있는 원본 파일은 올린다
   // (모바일 앱처럼 Claude 연결이 조금 늦게 생기면 기다렸다가)
   const doSync = () => syncRemote().then((changed) => { if (changed || view.home) render(); else renderMeta(active()); }).catch(() => {});
+  setOnRemoteChange(() => { if (!document.querySelector(".dlg, .editor, #uploadView")) render(); });
   whenArtifact().then(async (ok) => {
     if (!ok) return;
     await reloadAi();

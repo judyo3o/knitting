@@ -1,7 +1,7 @@
 /** 앱 상태 · 즉시 기기 저장 · 10분 간격 스냅샷 */
 import { AUTOSAVE_MS } from "./config";
 import * as db from "./db";
-import { applyDrawing, expand, mergeSections, newPattern, normalize } from "./model";
+import { applyDrawing, expand, mergeSections, newPattern, normalize, reconcile } from "./model";
 import { openPdf, type Pdf } from "./pdf";
 import { migrateSettings, type AiSettings } from "./ai";
 import { getAssets, inArtifact, myCollection } from "./artifact";
@@ -74,7 +74,23 @@ function queueRemote(p: Pattern) {
     remoteTimers.delete(p.id);
     const col = await myCollection();
     if (!col) return;
-    const body = JSON.parse(JSON.stringify(state.patterns[p.id] || p));
+    // 올리기 전에 저장소 쪽이 더 새 도안인지 확인 (다른 기기·Claude가 바꾼 걸 예전 사본으로 덮어쓰지 않게)
+    let cur = state.patterns[p.id] || p;
+    try {
+      const snap = await col.doc(p.id).get();
+      const v = snap?.exists ? snap.data() : null;
+      if (v && Array.isArray(v.rows)) {
+        const r = reconcile(cur, normalize({ ...JSON.parse(JSON.stringify(v)), id: p.id }));
+        if (r.pattern !== cur) {
+          state.patterns[p.id] = cur = r.pattern;
+          db.savePattern(cur).catch(() => {});
+          pdfCache.delete(p.id);
+          onRemoteChange?.();
+        }
+        if (!r.push) return;
+      }
+    } catch {}
+    const body = JSON.parse(JSON.stringify(cur));
     if (JSON.stringify(body).length > MAX_DOC) {
       if (!remoteFail) toast("도안이 커서 이 브라우저에만 저장했어요.", 3600);
       remoteFail = true;
@@ -88,6 +104,9 @@ function queueRemote(p: Pattern) {
     }
   }, 1200));
 }
+/** 저장소에서 받은 내용으로 이 기기 도안이 바뀌었을 때 (화면 다시 그리기) */
+export let onRemoteChange: (() => void) | null = null;
+export const setOnRemoteChange = (f: () => void) => { onRemoteChange = f; };
 /** Claude 연결이 늦게 생겼으면 AI 설정을 다시 맞춘다 (기본: 이 아티팩트의 Claude) */
 export async function reloadAi() {
   try { state.ai = migrateSettings(await db.getSetting("ai")); } catch {}
@@ -112,7 +131,15 @@ export async function syncRemote(): Promise<boolean> {
       // 저장소가 주는 data()는 얼려진(수정 불가) 객체라 깊은 복사 후에 맞춘다
       try { rp = normalize({ ...JSON.parse(JSON.stringify(v)), id: d.id }); } catch (e) { console.warn("도안 받기 실패", d.id, e); continue; } // 한 도안이 깨져도 나머지는 받는다
       const lp = state.patterns[d.id];
-      if (!lp || (rp.updatedAt || 0) > (lp.updatedAt || 0)) {
+      if (lp && (rp.rev || 0) > (lp.rev || 0)) {
+        // 다른 기기·Claude가 도안 내용을 바꿈: 내용은 저장소 것, 진행은 이 기기 것
+        const r = reconcile(lp, rp);
+        state.patterns[d.id] = r.pattern;
+        db.savePattern(r.pattern).catch(() => {});
+        pdfCache.delete(d.id);
+        if (r.push) queueRemote(r.pattern);
+        changed = true;
+      } else if (!lp || (rp.updatedAt || 0) > (lp.updatedAt || 0)) {
         state.patterns[d.id] = rp;
         db.savePattern(rp).catch(() => {});
         changed = true;

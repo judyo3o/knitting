@@ -754,3 +754,21 @@ it("n단을 떴거나 n단으로 건너뛰면 그 앞 단은 다 뜬 것", async
   q.rows = p.rows;
   expect(markBefore(q, "A", 3)).toBe(2);
 });
+
+it("기기 사본과 저장소 도안 맞추기 (예전 사본이 새 도안을 덮어쓰지 않게)", async () => {
+  const { newPattern, reconcile } = await import("../src/model");
+  const mk = (rev: number, at: number, t: string) => { const p = newPattern({ id: "k", name: "k" }); p.rows = [{ s: "A", n: 1, t, st: null, side: null, pg: null, ch: null, span: null }]; p.rev = rev; p.updatedAt = at; p.tab = "A"; return p; };
+  // 저장소가 새 서술(rev 큼), 이 기기는 진행만 더 최근
+  const local = mk(1, 200, "old"); local.done = { "A#1": 150 }; local.pos = { A: 1 };
+  const remote = mk(2, 100, "new");
+  let r = reconcile(local, remote);
+  expect(r.pattern.rows[0].t).toBe("new");
+  expect(r.pattern.done).toEqual({ "A#1": 150 });
+  expect(r.push).toBe(true);
+  // 저장소가 더 최근(같은 rev): 받기만
+  r = reconcile(mk(1, 100, "a"), mk(1, 200, "b"));
+  expect(r.pattern.rows[0].t).toBe("b"); expect(r.push).toBe(false);
+  // 이 기기가 더 최근: 올리기
+  r = reconcile(mk(1, 300, "a"), mk(1, 200, "b"));
+  expect(r.pattern.rows[0].t).toBe("a"); expect(r.push).toBe(true);
+});
