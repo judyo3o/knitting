@@ -13,6 +13,9 @@ import { b64, blobB64, canvasBlob, extractPages, openPdf, renderWidth, sha256, t
 import { autoPick, findCharts, normSize, pageInfo, toLines, type PageInfo } from "./pdfgeom";
 import { STRUCTURE_SCHEMA, structurePrompt } from "./prompts";
 import { commit, fileOf, forgetPdf, saveFile, setActive, state } from "./store";
+import { koreanizeRow } from "./koreanize";
+/** 기기에서 읽은 영어 서술을 한국어 형식으로 (약어는 영어 그대로) */
+const koreanizeSections = (secs: AiSection[]): AiSection[] => secs.map((x) => ({ ...x, rows: x.rows.map((r) => ({ ...r, text: koreanizeRow(r.text) })) }));
 import { $, dialog, h, toast } from "./ui";
 import type { AiResult, AiSection, Pattern, Yarn } from "./types";
 import { clearBitmaps } from "./chart";
@@ -213,7 +216,7 @@ export function openUpload(o: Opts) {
         if (!text) return say("도안 텍스트를 붙여넣어 주세요.");
         const order = sizeOrder(text);
         const lines = text.split(/\r?\n/).map((t) => ({ t: size ? resolveSizes(t, size, order) : t, pg: null }));
-        const local = localParseLines(lines, size);
+        const local = koreanizeSections(localParseLines(lines, size));
         localText = lines.map((x) => x.t).join("\n");
         const good = localGoodEnough(local, text);
         if (useClaude.checked || !good.ok) {
@@ -407,7 +410,7 @@ async function readLocally(pdf: Pdf, pages: number[], size: string, info: PageIn
   const text = perPage.map((x) => x.lines.join("\n")).join("\n");
   const order = sizeOrder(text);
   const lines = perPage.flatMap((x) => x.lines.map((t) => ({ t: size ? resolveSizes(t, size, order) : t, pg: x.n })));
-  let sections = localParseLines(lines, size);
+  let sections = koreanizeSections(localParseLines(lines, size));
   // 도안 정보: 고른 쪽 + 사이즈·게이지가 적힌 쪽 (치수·실·바늘은 보통 앞쪽에 따로 있다)
   const infoPages = [...new Set([...info.filter((i) => i.gauge || i.sizes.size).map((i) => i.n).slice(0, 6), ...pages])].sort((a, b) => a - b);
   const infoLines: string[] = [];

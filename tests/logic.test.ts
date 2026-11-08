@@ -772,3 +772,15 @@ it("기기 사본과 저장소 도안 맞추기 (예전 사본이 새 도안을 
   r = reconcile(mk(1, 300, "a"), mk(1, 200, "b"));
   expect(r.pattern.rows[0].t).toBe("a"); expect(r.push).toBe(true);
 });
+
+describe("영어 서술 → 한국어 형식 (약어는 영어 그대로)", () => {
+  it("흔한 지시", async () => {
+    const { koreanizeRow } = await import("../src/koreanize");
+    expect(koreanizeRow("Inc Row 1 (RS): K4, [k1, M1L, k1] to last 3 sts, k3—127 sts.")).toBe("Inc Row 1: 겉4, [겉1, M1L, 겉1]을 끝 3코 전까지 반복, 겉3 (바늘에 127코)");
+    expect(koreanizeRow("Row 1 (WS): P1, [k1, p1] to end.")).toBe("안1, [겉1, 안1]을 끝까지 반복.");
+    expect(koreanizeRow("K2, [k2, yo, k9, yo, k1] 17 times across, k3")).toBe("겉2, [겉2, yo, 겉9, yo, 겉1] 17번 반복, 겉3");
+    expect(koreanizeRow("Dec Rnd: Ssk, knit to last 2 sts, k2tog")).toBe("Dec Rnd: Ssk, 끝 2코 전까지 겉뜨기, k2tog");
+    expect(koreanizeRow("Short Row 1 (RS): Knit to m, sm, knit to m, rm, turn work.")).toBe("Short Row 1: 마커까지 겉뜨기, sm, 마커까지 겉뜨기, rm, 턴.");
+    expect(koreanizeRow("겉2, 안2 반복")).toBe("겉2, 안2 반복");
+  });
+});
