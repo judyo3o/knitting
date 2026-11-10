@@ -168,9 +168,50 @@ export function directionText(p: Pattern, r: Row): string {
 }
 
 export function partProgress(p: Pattern, s: string) {
+  const list = partRows(p, s).filter((r) => !isSkipped(p, s, r.n));
+  const rp = repOf(p, s);
+  const extra = rp && rp.times > 0 ? rp.times * (rp.to - rp.from + 1) : 0;
+  const done = list.filter((r) => p.done[key(s, r.n)]).length + repExtraDone(p, s);
+  return { done: Math.min(done, list.length + extra), total: list.length + extra, finished: !!p.fin[s] };
+}
+
+/* ---------- 기장 조절 구간 (한 번 더 뜨기 · 빼기) ---------- */
+/** 파트의 기장 조절 구간 (단 번호가 실제로 있을 때만) */
+export function repOf(p: Pattern, s: string) {
+  const r = p.rep?.[s];
+  if (!r || !r.times || r.from > r.to) return null;
+  const ns = partRows(p, s).map((x) => x.n);
+  return ns.includes(r.from) && ns.includes(r.to) ? r : null;
+}
+/** 빼기로 정한 구간의 단인가 */
+export const isSkipped = (p: Pattern, s: string, n: number) => { const r = repOf(p, s); return !!r && r.times < 0 && n >= r.from && n <= r.to; };
+/** 한 번 더 뜨는 중인가 (추가 반복 회차 안) */
+export function inExtraPass(p: Pattern, s: string): boolean {
+  const r = repOf(p, s);
+  const n = p.pos[s];
+  return !!r && r.times > 0 && (r.pass || 0) > 0 && n != null && n >= r.from && n <= r.to;
+}
+/** 추가 반복으로 이미 뜬 단 수 */
+export function repExtraDone(p: Pattern, s: string): number {
+  const r = repOf(p, s);
+  if (!r || r.times <= 0 || !r.pass) return 0;
+  const len = r.to - r.from + 1;
+  return inExtraPass(p, s) ? (r.pass - 1) * len + ((p.pos[s] ?? r.from) - r.from) : r.pass * len;
+}
+/** 다음에 뜰 단 (빼기 구간은 건너뜀) */
+function nextAfter(p: Pattern, s: string, list: Row[], k: number): Row | undefined {
+  let i = k + 1;
+  while (i < list.length && isSkipped(p, s, list[i].n)) i++;
+  return list[i];
+}
+/** 다음 단 미리보기용: 지금 단 다음에 실제로 뜰 단 (반복 구간 끝이면 시작 단) */
+export function upcomingRow(p: Pattern, s: string): Row | undefined {
   const list = partRows(p, s);
-  const done = list.filter((r) => p.done[key(s, r.n)]).length;
-  return { done, total: list.length, finished: !!p.fin[s] };
+  const cur = currentRow(p, s);
+  if (!cur) return undefined;
+  const r = repOf(p, s);
+  if (r && r.times > 0 && cur.n === r.to && (r.pass || 0) < r.times) return list.find((x) => x.n === r.from);
+  return nextAfter(p, s, list, list.indexOf(cur));
 }
 
 /** 같은 파트에서 30분 안에 이어진 이동은 한 세션 (§1-5) */
@@ -202,8 +243,16 @@ export function stepNext(p: Pattern, now = Date.now()): StepResult {
   }
   markBefore(p, s, cur.n); // 이 단을 떴으면 그 앞 단은 다 뜬 것
   p.done[key(s, cur.n)] = now;
-  if (k < list.length - 1) {
-    const nx = list[k + 1];
+  // 기장 늘리기: 반복 구간 끝이면 구간 처음으로 (정한 횟수만큼)
+  const rp = repOf(p, s);
+  if (rp && rp.times > 0 && cur.n === rp.to && (rp.pass || 0) < rp.times) {
+    rp.pass = (rp.pass || 0) + 1;
+    p.pos[s] = rp.from;
+    logMove(p, s, cur.n, rp.from, now);
+    return "moved";
+  }
+  const nx = nextAfter(p, s, list, k); // 빼기 구간은 건너뜀
+  if (nx) {
     p.pos[s] = nx.n;
     logMove(p, s, cur.n, nx.n, now);
     return "moved";
@@ -225,8 +274,18 @@ export function stepPrev(p: Pattern, now = Date.now()): StepResult {
     return "moved";
   }
   const k = list.indexOf(cur);
-  if (k <= 0) return "none";
-  const pv = list[k - 1];
+  // 한 번 더 뜨는 회차의 첫 단이면: 앞 회차의 끝 단으로
+  const rp = repOf(p, s);
+  if (rp && rp.times > 0 && cur.n === rp.from && inExtraPass(p, s)) {
+    rp.pass = (rp.pass || 1) - 1;
+    p.pos[s] = rp.to;
+    logMove(p, s, cur.n, rp.to, now);
+    return "moved";
+  }
+  let j = k - 1;
+  while (j >= 0 && isSkipped(p, s, list[j].n)) j--; // 빼기 구간은 건너뜀
+  if (j < 0) return "none";
+  const pv = list[j];
   p.pos[s] = pv.n;
   delete p.done[key(s, pv.n)];
   logMove(p, s, cur.n, pv.n, now);
@@ -274,7 +333,7 @@ export function newPattern(init: Partial<Pattern> & { id: string; name: string }
 export function normalize(p: Partial<Pattern> & { id: string }): Pattern {
   const base = newPattern({ id: p.id, name: p.name || "도안" });
   const out = { ...base, ...p } as Pattern;
-  for (const k of ["secs", "pos", "done", "fin", "part", "draw"] as const) if (!out[k] || typeof out[k] !== "object") (out as any)[k] = {};
+  for (const k of ["secs", "pos", "done", "fin", "part", "draw", "rep"] as const) if (!out[k] || typeof out[k] !== "object") (out as any)[k] = {};
   if (!Array.isArray(out.log)) out.log = [];
   if (!Array.isArray(out.rows)) out.rows = [];
   if (!Array.isArray(out.readPages)) out.readPages = [];
@@ -510,7 +569,13 @@ export function etaText(p: Pattern, s: string): string | null {
     const list = partRows(p, part).filter((r) => !r.castOn);
     const sts = rowStitchCounts(list);
     let rows = 0, st = 0;
-    list.forEach((r, i) => { if (p.done[key(part, r.n)]) return; rows++; st += sts[i] ?? avg; });
+    list.forEach((r, i) => { if (p.done[key(part, r.n)] || isSkipped(p, part, r.n)) return; rows++; st += sts[i] ?? avg; });
+    // 한 번 더 뜨기로 정한 구간의 남은 단
+    const rp = repOf(p, part);
+    if (rp && rp.times > 0) {
+      const left = rp.times * (rp.to - rp.from + 1) - repExtraDone(p, part);
+      if (left > 0) { rows += left; st += left * avg; }
+    }
     return { rows, st, ms: st / pace };
   };
   const here = rem(s);
@@ -622,6 +687,7 @@ export function resetPart(p: Pattern, s: string) {
   for (const k of Object.keys(p.part)) if (k.startsWith(pre)) delete p.part[k];
   delete p.fin[s];
   p.log = p.log.filter((l) => l.s !== s);
+  if (p.rep?.[s]) p.rep[s].pass = 0;
   const first = partRows(p, s)[0];
   if (first) p.pos[s] = first.n;
 }
@@ -631,7 +697,7 @@ export const EARLIER = 1;
 /** 파트에서 n단 앞의 안 뜬 단을 모두 뜬 것으로 (시각 모름). 표시한 단 수 */
 export function markBefore(p: Pattern, s: string, n: number): number {
   let c = 0;
-  for (const r of partRows(p, s)) if (r.n < n && !p.done[key(s, r.n)]) { p.done[key(s, r.n)] = EARLIER; c++; }
+  for (const r of partRows(p, s)) if (r.n < n && !p.done[key(s, r.n)] && !isSkipped(p, s, r.n)) { p.done[key(s, r.n)] = EARLIER; c++; }
   return c;
 }
 
@@ -671,8 +737,42 @@ export function rewindTo(p: Pattern, s: string, n: number, now = Date.now()): nu
   }
   const from = p.pos[s];
   delete p.fin[s];
+  const rp = p.rep?.[s];
+  if (rp && n <= rp.to) rp.pass = 0; // 반복 구간이나 그 앞으로 되돌리면 반복 횟수도 처음부터
   p.tab = s;
   p.pos[s] = n;
   if (from != null && from !== n) logMove(p, s, from, n, now);
   return c;
+}
+
+/**
+ * 기장 조절에 쓸 반복 구간 추천 (어느 도안이든): 파트의 단 서술에서 P단마다 똑같이 되풀이되는 가장 긴 구간을 찾아
+ * 그 한 주기(P단)를 추천한다. 핀·안내 같은 덧붙인 말은 빼고 비교. 모든 단이 같은 말(예: '차트를 따라')이면 추천하지 않음.
+ */
+export function suggestReps(p: Pattern): { s: string; from: number; to: number; label: string }[] {
+  const out: { s: string; from: number; to: number; label: string }[] = [];
+  const norm = (t: string) => (t || "").split("\n")[0].replace(/\s*·\s*(양쪽|10단마다)[^·]*$/g, "").replace(/\s+/g, " ").trim();
+  for (const s of partNames(p)) {
+    const list = partRows(p, s).filter((r) => !r.castOn);
+    const t = list.map((r) => norm(r.t));
+    if (t.length < 6 || new Set(t).size < 2) continue;
+    let best: { P: number; start: number; len: number } | null = null;
+    for (let P = 2; P <= Math.min(24, Math.floor(t.length / 2)); P++) {
+      let i = 0;
+      while (i + P < t.length) {
+        if (t[i] !== t[i + P]) { i++; continue; }
+        let j = i;
+        while (j + P < t.length && t[j] === t[j + P]) j++;
+        const len = j - i + P; // 되풀이가 이어지는 단 수
+        if (len >= 2 * P && (!best || len > best.len || (len === best.len && P < best.P))) best = { P, start: i, len };
+        i = j + 1;
+      }
+    }
+    if (!best) continue;
+    // 한 주기가 사실 더 짧은 주기의 반복이면 그 짧은 주기로 (예: 4단 = 2단 × 2)
+    const a = list[best.start + best.P], b = list[best.start + 2 * best.P - 1];
+    if (!a || !b) continue;
+    out.push({ s, from: a.n, to: b.n, label: `${best.P}단 반복 무늬` });
+  }
+  return out;
 }

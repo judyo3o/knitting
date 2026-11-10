@@ -45,7 +45,8 @@ export type Pattern = {
   colors: Yarn[];
   draw: Record<string, Drawing>; // 파트별 직접 그린 배색 격자
   gauges: GaugeSet[]; // 무늬별 게이지 (도안 · 세탁 전 · 세탁 후)
-  work?: { on: number | null; spans: [number, number][] }; // 뜨개 시작·중지 버튼: 켜 둔 시간만 뜬 시간
+  work?: { on: number | null; spans: [number, number][] };
+  rep?: Record<string, Rep>; // 파트별 기장 조절 구간: 한 번 더 뜨기(times>0) · 빼기(times<0) // 뜨개 시작·중지 버튼: 켜 둔 시간만 뜬 시간
   src: "pdf" | "images" | "text" | null;
   srcPages: number | null;
   readPages: number[];
@@ -87,6 +88,9 @@ export type DrawOpt = {
   numEvery?: number; // 번호 간격 (기본: 칸 크기에 따라)
   colsFromLeft?: boolean; // 코 번호 왼쪽부터 (기본 오른쪽부터)
 };
+
+/** 기장 조절 구간: from~to단을 times번 더 뜨거나(+) 뺀다(-1). pass: 지금까지 시작한 추가 반복 횟수 */
+export type Rep = { from: number; to: number; times: number; pass?: number; label?: string };
 
 /** 10cm(기본) 안 콧수·단수 */
 export type Gauge = { st: number; rows: number };

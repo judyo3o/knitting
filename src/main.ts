@@ -7,7 +7,7 @@ import { cellKeyColor, chartBitmap, chartKey, clearBitmaps, splitChartByGap, lab
 import { getFile, putFile } from "./db";
 import { getCell, longestFloat, rowColors } from "./drawing";
 import {
-  applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, spanParts, finishText, etaText, continuousKnitMs, castLabel, flexibleRow, addRowAfter, removeRow, workIn, workStart, workStop, sideOf, stepNext, stepPrev, resetPart, markBefore, rewindTo, EARLIER, fmtDur,
+  applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, spanParts, finishText, etaText, continuousKnitMs, castLabel, flexibleRow, addRowAfter, removeRow, workIn, workStart, workStop, sideOf, stepNext, stepPrev, resetPart, markBefore, rewindTo, EARLIER, repOf, isSkipped, inExtraPass, upcomingRow, fmtDur,
 } from "./model";
 import { blobB64, canvasBlob, renderRegion, textItems } from "./pdf";
 import type { Guide } from "./symbolid";
@@ -187,7 +187,7 @@ export function render() {
   // 다음 단 버튼 아래에 다음 단 미리보기 (예: "5단 · A 2코, B 3코…")
   const nb = $("#nextBtn");
   nb.innerHTML = "";
-  const nx = list[list.indexOf(r) + 1];
+  const nx = r === currentRow(p, s) ? upcomingRow(p, s) : list[list.indexOf(r) + 1];
   const pv = nx && !prog.finished ? `${nx.n}단 · ${(splitNarrative(nx.t || "").chunks.slice(0, 3).join(", ") || spanParts(nx.t, nx.span).each).slice(0, 28)}…` : "";
   nb.append(h("span", { text: prog.finished ? "다음 파트로 →" : isLast ? "이 파트 완료 ✓" : "다음 단 →" }), pv ? h("small", { text: pv }) : "");
 }
@@ -295,6 +295,14 @@ function nowCard(p: Pattern, r: Row) {
       p.done[key(prevRow.s, prevRow.n)] ? null : h("button", { class: "link", type: "button", text: " 그 탭으로", on: { click: () => { p.tab = prevRow.s; commit(p, false); render(); } } })));
   }
   if (r.ln) card.append(h("p", { class: "span-note", text: r.ln }));
+  // 기장 조절 구간 (게이지 화면에서 정함)
+  const rp = repOf(p, s);
+  if (rp && rp.times > 0 && r.n >= rp.from && r.n <= rp.to) {
+    const nowPass = inExtraPass(p, s) ? `한 번 더 뜨는 중 ${rp.pass}/${rp.times}회차` : `처음 회차 — ${rp.to}단을 뜨면 ${rp.from}단으로 돌아가 ${rp.times}번 더 떠요`;
+    card.append(h("p", { class: "span-note rep-note", text: `기장 늘리기 구간 ${rp.from}~${rp.to}단${rp.label ? ` (${rp.label})` : ""} · ${nowPass}` }));
+  }
+  if (rp && rp.times < 0 && r.n === rp.from - 1) card.append(h("p", { class: "span-note rep-note", text: `기장 줄이기: 이 단 다음은 ${rp.to + 1}단이에요 (${rp.from}~${rp.to}단 빼기)` }));
+  if (isSkipped(p, s, r.n)) card.append(h("p", { class: "span-note rep-note", text: `이 단은 기장 줄이기로 빼기로 한 구간(${rp!.from}~${rp!.to}단)이에요.` }));
   // 원하는 만큼 뜨는 단: 게이지로 정한 단 수는 추정이라 직접 늘리고 줄인다
   if (flexibleRow(r)) card.append(h("div", { class: "actions flex-rows" },
     h("span", { class: "gen", text: "원하는 길이만큼 뜨는 단이에요." }),
@@ -1274,8 +1282,9 @@ function rowList(p: Pattern, s: string) {
   for (const x of partRows(p, s)) {
     const t = p.done[key(s, x.n)];
     const when = t === EARLIER ? "앞서 뜸" : t ? fmtShort(t) : "";
-    const b = h("button", { type: "button", class: (x === cur ? "on" : "") + (t ? " done" : "") },
-      h("span", { class: "n", text: x.n + "단" + (x.side ? " " + x.side : "") }),
+    const rp = repOf(p, s), inRep = !!rp && x.n >= rp.from && x.n <= rp.to;
+    const b = h("button", { type: "button", class: (x === cur ? "on" : "") + (t ? " done" : "") + (inRep && rp!.times < 0 ? " skip" : "") },
+      h("span", { class: "n", text: x.n + "단" + (x.side ? " " + x.side : "") + (inRep ? (rp!.times < 0 ? " · 빼기" : ` · 반복 +${rp!.times}`) : "") }),
       h("span", { class: "t", text: rowText1(x) + (x.st ? `  (${x.st})` : "") }),
       h("span", { class: "when", text: when }));
     b.onclick = () => { goToRow(p, s, x.n, () => { view.sub = null; render(); window.scrollTo({ top: 0, behavior: "smooth" }); }); };

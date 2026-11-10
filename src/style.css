@@ -493,3 +493,8 @@ body.peeking #nextBtn { background: var(--lav-l); color: var(--lav-ink); border-
 
 /* 남은 시간 안내: 항목마다 한 줄, 항목 안에서는 줄바꿈 없이 */
 .work-eta .eta-seg{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* 기장 조절 구간 */
+.rep-note{color:var(--lav-ink);background:var(--lav-bg);border-radius:10px;padding:6px 10px}
+.rep-row{display:flex;flex-direction:column;gap:4px;padding:8px 0;border-top:1px dashed var(--dash)}
+.rows2 button.skip{opacity:.45;text-decoration:line-through}

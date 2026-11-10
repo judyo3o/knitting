@@ -1,12 +1,13 @@
 /** 게이지 입력 화면: 무늬별로 도안 · 세탁 전 · 세탁 후 */
 import { compare, convertRows, convertSt, findEase, gaugeToSwatch, myGauge, needleMm, recommendSize, rowsToCm, sizeAdvice, stToCm, swatchToGauge, washChange } from "./gauge";
 import { getSetting, setSetting } from "./db";
-import { sizeTable, type SizeRow } from "./parse";
+import { sizeChart, type SizeRow } from "./parse";
 import { toLines } from "./pdfgeom";
 import { textItems } from "./pdf";
 import { commit, pdfOf } from "./store";
 import { ask, dialog, fmtShort, h } from "./ui";
-import type { Gauge, GaugeSet, Pattern, Swatch } from "./types";
+import type { Gauge, GaugeSet, Pattern, Rep, Swatch } from "./types";
+import { partNames, partRows, suggestReps } from "./model";
 
 const num = (v: string) => {
   const n = parseFloat(v.replace(",", "."));
@@ -36,7 +37,7 @@ export function openGauge(p: Pattern, onSaved: () => void, onResize?: (size: str
 
   // 사이즈 추천: 내 몸 치수 + 여유 → 도안 사이즈별 완성 치수(내 게이지로 뜬 크기)와 비교
   const sizeBox = h("section", { class: "gauge-set", hidden: true });
-  let table: { order: string[]; rows: SizeRow[] } | null = null;
+  let table: { order: string[]; rows: SizeRow[]; body?: boolean } | null = null;
   let patEase: number | null = null;
   let body: { chest?: number; ease?: number } = {};
   getSetting<{ chest?: number; ease?: number }>("body").then((b) => { if (b) { body = b; updateSize(); } }).catch(() => {});
@@ -84,11 +85,13 @@ export function openGauge(p: Pattern, onSaved: () => void, onResize?: (size: str
     const out: (Node | null)[] = [
       h("b", { text: "사이즈 추천" }),
       h("div", { class: "gauge-row" }, h("span", { class: "gauge-lab", text: "내 가슴둘레" }), chestIn, h("span", { text: "cm" }), h("span", { class: "gauge-lab", style: "margin-left:8px", text: "여유" }), easeIn!, h("span", { text: "cm" })),
-      h("p", { class: "gen", style: "margin:0", text: (patEase != null ? `도안 권장 여유 +${patEase}cm. ` : "여유: 몸에 붙게 0~5, 보통 10, 넉넉하게 20 이상. ") + (set && mine ? `'${set.label}' 내 게이지(${mine.st}코)로 뜬 크기로 비교해요.` : "스와치를 재서 적으면 내 게이지로 뜬 크기까지 반영해요.") }),
+      h("p", { class: "gen", style: "margin:0", text: table.body
+        ? "이 도안은 사이즈를 '몸 치수(To fit)'로 정해요 — 디자이너가 여유를 이미 넣어 뒀으니 내 가슴둘레가 들어가는 사이즈를 골라요 (여유 칸은 쓰지 않아요)."
+        : (patEase != null ? `도안 권장 여유 +${patEase}cm. ` : "여유: 몸에 붙게 0~5, 보통 10, 넉넉하게 20 이상. ") + (set && mine ? `'${set.label}' 내 게이지(${mine.st}코)로 뜬 크기로 비교해요.` : "스와치를 재서 적으면 내 게이지로 뜬 크기까지 반영해요.") }),
     ];
     if (body.chest) {
-      const ease = num(easeIn!.value) || (parseFloat(easeIn!.value) === 0 ? 0 : patEase ?? 10);
-      const rec = recommendSize(table.order, row.values, body.chest, ease, f, half);
+      const ease = table.body ? 0 : num(easeIn!.value) || (parseFloat(easeIn!.value) === 0 ? 0 : patEase ?? 10);
+      const rec = recommendSize(table.order, row.values, body.chest, ease, table.body ? 1 : f, half);
       out.push(
         h("p", { style: "margin:0", text: rec.best ? `원하는 완성 ${half ? "품" : "가슴둘레"} ${rec.want}cm에 가장 가까운 건 ${rec.best} 사이즈예요. 더 넉넉하게나 딱 맞게 입고 싶으면 다른 사이즈를 골라도 돼요.` : "도안 치수를 읽지 못했어요." }),
         h("div", { class: "size-pick" }, ...rec.list.map((x) => {
@@ -121,7 +124,7 @@ export function openGauge(p: Pattern, onSaved: () => void, onResize?: (size: str
     if (!pdf) return;
     const lines: string[] = [];
     for (let n = 1; n <= Math.min(6, pdf.numPages); n++) { const t = await textItems(pdf, n); lines.push(...toLines(t.items, t.w)); }
-    table = sizeTable(lines.join("\n"));
+    table = sizeChart(lines.join("\n")) || sizeChart(p.info || "");
     patEase = findEase(lines.join("\n")) ?? findEase(p.info || "");
     updateSize();
   })().catch(() => {});
@@ -193,15 +196,57 @@ export function openGauge(p: Pattern, onSaved: () => void, onResize?: (size: str
   };
   render();
 
+  // 기장 조절: 파트의 한 구간을 한 번 더 뜨거나 뺀다 (저장할 때 적용)
+  const reps: Record<string, Rep> = JSON.parse(JSON.stringify(p.rep || {}));
+  const repBox = h("section", { class: "gauge-set" });
+  const renderRep = () => {
+    repBox.innerHTML = "";
+    const rowsPer10 = (sets.map((x) => myGauge(x)).find(Boolean) || sets.find((x) => x.pattern)?.pattern)?.rows || null;
+    const cm = (n: number) => (rowsPer10 ? `약 ${Math.round(((n * 10) / rowsPer10) * 10) / 10}cm` : `${n}단`);
+    repBox.append(h("b", { text: "기장 조절 (구간 한 번 더 · 빼기)" }),
+      h("p", { class: "gen", style: "margin:0", text: "무늬 한 단위(예: 하트 1개)를 더 뜨거나 빼서 기장을 조절해요. 고르면 '다음 단'이 그대로 따라가요." }));
+    for (const [s, r] of Object.entries(reps)) {
+      const len = r.to - r.from + 1;
+      const pick = (t: number) => h("button", { class: "btn" + (r.times === t ? " primary" : " ghost"), type: "button", "aria-pressed": String(r.times === t), text: t < 0 ? "빼기" : t === 0 ? "그대로" : `+${t}회`, on: { click: () => { r.times = t; r.pass = Math.min(r.pass || 0, Math.max(t, 0)); renderRep(); } } });
+      repBox.append(h("div", { class: "rep-row" },
+        h("div", {}, h("b", { text: `${s} ${r.from}~${r.to}단` }), h("span", { class: "gen", text: ` ${r.label ? r.label + " · " : ""}${len}단 · ${cm(len)}` })),
+        h("div", { class: "actions" }, pick(-1), pick(0), pick(1), pick(2),
+          h("button", { class: "link", type: "button", text: "구간 지우기", on: { click: () => { delete reps[s]; renderRep(); } } })),
+        h("span", { class: "gen", text: r.times < 0 ? `기장 ${cm(len)} 짧게 — ${r.from - 1}단 다음에 ${r.to + 1}단으로 건너뛰어요` : r.times > 0 ? `기장 ${cm(len * r.times)} 길게 — ${r.to}단을 뜨면 ${r.from}단으로 돌아가 ${r.times}번 더 떠요` : "원래 도안대로" })));
+    }
+    // 도안에서 찾은 반복 구간 추천 (아직 정하지 않은 파트만)
+    const sug = suggestReps(p).filter((x) => !reps[x.s]);
+    if (sug.length) repBox.append(h("div", { class: "actions", style: "align-items:center" }, h("span", { class: "gen", text: "도안에서 찾은 반복 구간:" }),
+      ...sug.map((x) => h("button", { class: "btn ghost", type: "button", text: `${x.s} ${x.from}~${x.to}단 (${x.label})`, on: { click: () => { reps[x.s] = { from: x.from, to: x.to, times: 0, pass: 0, label: x.label }; renderRep(); } } }))));
+    if (!Object.keys(reps).length && !sug.length) repBox.append(h("p", { class: "gen", style: "margin:0", text: "되풀이되는 구간을 찾지 못했어요. 차트만 따르는 도안은 아래에 직접 구간을 적어 주세요 (예: 무늬 한 단위의 시작·끝 단)." }));
+    // 구간 새로 정하기
+    const names = partNames(p);
+    const sel = h("select", { "aria-label": "파트" }, ...names.map((n) => new Option(n, n)));
+    const a = h("input", { type: "number", min: 1, inputmode: "numeric", placeholder: "시작 단", style: "width:5.5em", "aria-label": "구간 시작 단" });
+    const b = h("input", { type: "number", min: 1, inputmode: "numeric", placeholder: "끝 단", style: "width:5.5em", "aria-label": "구간 끝 단" });
+    const lb = h("input", { type: "text", placeholder: "이름 (예: 하트 1개)", style: "flex:1;min-width:7em", "aria-label": "구간 이름" });
+    const add = h("button", { class: "btn", type: "button", text: "구간 추가", on: { click: () => {
+      const from = parseInt(a.value, 10), to = parseInt(b.value, 10), ns = partRows(p, sel.value).map((x) => x.n);
+      if (!(from <= to) || !ns.includes(from) || !ns.includes(to)) { a.focus(); return; }
+      reps[sel.value] = { from, to, times: 0, pass: 0, label: lb.value.trim() || undefined };
+      renderRep();
+    } } });
+    repBox.append(h("div", { class: "actions", style: "align-items:center" }, sel, a, h("span", { text: "~" }), b, lb, add));
+  };
+  renderRep();
+
   const dl = dialog("게이지 (10cm 기준)", [
     h("p", { class: "hint", text: "무늬마다 도안 게이지와 내 스와치(세탁 전·후)를 적으면 차이와 바늘 조정, 콧수·단수 환산을 보여줘요." }),
     list,
     sizeBox,
+    repBox,
     h("div", { class: "actions" },
       h("button", { class: "btn", type: "button", text: "+ 무늬 게이지 추가", on: { click: () => { sets.push({ label: "무늬", pattern: null, before: null, after: null }); render(); } } })),
     h("div", { class: "actions" },
       h("button", { class: "btn primary", type: "button", text: "저장", on: { click: () => {
         p.gauges = sets.filter((s) => s.pattern || s.before || s.after || s.label.trim());
+        p.rep = reps;
+        p.rev = (p.rev || 0) + 1; // 다른 기기에도 도안 내용(구간)이 바뀐 걸로 전해지게
         commit(p);
         dl.close();
         onSaved();

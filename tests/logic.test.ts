@@ -802,3 +802,66 @@ it("n단부터 다시 뜨기: n단과 그 뒤 기록만 지운다", async () => 
   expect(p.part).toEqual({ [k("A", 3)]: { i: 0, t: 1 } });
   expect(p.pos.A).toBe(5); expect(p.fin.A).toBeUndefined();
 });
+
+describe("여러 형식의 사이즈별 가슴둘레 (추천 사이즈용)", () => {
+  it("인치·cm 함께, 숫자 사이즈, 글자 사이즈, 두 줄, 몸 치수 범위", async () => {
+    const { sizeChart } = await import("../src/parse");
+    const a = sizeChart("SIZES XS (S, M, L)\nCHEST Approx. 34 (37, 41, 44) in / 86 (94, 104, 112) cm");
+    expect(a?.order).toEqual(["XS", "S", "M", "L"]); expect(a?.rows[0].values).toEqual([86, 94, 104, 112]);
+    const b = sizeChart("Final bust measurements: (80, 90) 100, 110 (120, 130)\n{140, 150} cm [(31, 35) …]");
+    expect(b?.order).toEqual(["80", "90", "100", "110", "120", "130", "140", "150"]);
+    const c = sizeChart("Size: A (B) C (D), E (F)\nChest measurement (cm): 70-75 (75-80) 80-85 (85-90), 90-95 (95-100)\nActual circumference of garment (cm): 80 (85) 90 (95),\n100 (105)\nSleeve circumference (cm): 25 (26) 27 (28), 29 (30)");
+    expect(c?.order).toEqual(["A", "B", "C", "D", "E", "F"]); expect(c?.rows[0].values).toEqual([80, 85, 90, 95, 100, 105]);
+    const d = sizeChart("To fit bust measurement\nS 32-34\" [81-86 cm]\nM 36-38\" [91.5-96.5 cm]\nL 40-42\" [101.5-106.5 cm]");
+    expect(d?.body).toBe(true); expect(d?.order).toEqual(["S", "M", "L"]); expect(d?.rows[0].values).toEqual([83.5, 94, 104]);
+  });
+});
+
+describe("기장 조절 구간 (한 번 더 · 빼기)", () => {
+  const mk = async () => {
+    const m = await import("../src/model");
+    const p = m.newPattern({ id: "r", name: "r" });
+    p.rows = Array.from({ length: 10 }, (_, i) => ({ s: "A", n: i + 1, t: "겉10", st: null, side: null, pg: null, ch: null, span: null }));
+    p.tab = "A"; p.pos = { A: 1 };
+    return { m, p };
+  };
+  it("한 번 더: 끝 단에서 시작 단으로 돌아가고, 정한 횟수 뒤엔 다음 단으로", async () => {
+    const { m, p } = await mk();
+    p.rep = { A: { from: 4, to: 6, times: 1 } };
+    const seq: number[] = [];
+    for (let i = 0; i < 9; i++) { seq.push(p.pos.A); m.stepNext(p, 1000 + i); }
+    expect(seq).toEqual([1, 2, 3, 4, 5, 6, 4, 5, 6]);
+    expect(p.pos.A).toBe(7);
+    expect(m.partProgress(p, "A").total).toBe(13);
+    expect(m.partProgress(p, "A").done).toBe(9);
+    m.stepPrev(p); expect(p.pos.A).toBe(6); // 7 → 6
+  });
+  it("뒤로: 한 번 더 회차 첫 단에서 앞 회차 끝 단으로", async () => {
+    const { m, p } = await mk();
+    p.rep = { A: { from: 4, to: 6, times: 1 } };
+    for (let i = 0; i < 6; i++) m.stepNext(p, 1000 + i); // 6단까지 → 4단(한 번 더)
+    expect(p.pos.A).toBe(4); expect(m.inExtraPass(p, "A")).toBe(true);
+    m.stepPrev(p); expect(p.pos.A).toBe(6); expect(p.rep!.A.pass).toBe(0);
+  });
+  it("빼기: 구간을 건너뛰고, 건너뛴 단은 뜬 것으로 치지 않음", async () => {
+    const { m, p } = await mk();
+    p.rep = { A: { from: 4, to: 6, times: -1 } };
+    const seq: number[] = [];
+    for (let i = 0; i < 4; i++) { seq.push(p.pos.A); m.stepNext(p, 1000 + i); }
+    expect(seq).toEqual([1, 2, 3, 7]);
+    expect(m.partProgress(p, "A").total).toBe(7);
+    m.stepNext(p, 2000); expect(Object.keys(p.done)).not.toContain("A#5");
+    m.stepPrev(p); m.stepPrev(p); m.stepPrev(p); expect(p.pos.A).toBe(3); // 9 → 8 → 7 → 3 (빼기 구간 건너뜀)
+  });
+});
+
+it("기장 조절 구간 추천: 서술이 되풀이되는 주기를 찾는다", async () => {
+  const { newPattern, suggestReps } = await import("../src/model");
+  const p = newPattern({ id: "g", name: "g" });
+  const txt = ["겉2, 안2", "안2, 겉2", "2/2 LC, 안2", "안2, 겉2"];
+  p.rows = [{ s: "몸판", n: 1, t: "코잡기 40코", st: null, side: null, pg: null, ch: null, span: null, castOn: true } as any]
+    .concat(Array.from({ length: 16 }, (_, i) => ({ s: "몸판", n: i + 2, t: txt[i % 4], st: null, side: null, pg: null, ch: null, span: null })))
+    .concat([{ s: "몸판", n: 18, t: "덮어씌우기", st: null, side: null, pg: null, ch: null, span: null }]);
+  const r = suggestReps(p);
+  expect(r).toEqual([{ s: "몸판", from: 6, to: 9, label: "4단 반복 무늬" }]);
+});

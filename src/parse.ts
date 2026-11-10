@@ -197,6 +197,64 @@ export function sizeTable(text: string): { order: string[]; rows: SizeRow[] } | 
   return rows.length ? { order, rows } : null;
 }
 
+/**
+ * 사이즈별 가슴둘레 찾기 (여러 도안 형식). sizeTable(하트 체인 형식)로 못 찾으면:
+ *  - "CHEST Approx. 34¾ (37¾, …) in / 88 (96, …) cm" — 인치·cm가 함께 (cm 쪽), 콜론 없어도
+ *  - "Final bust measurements: (90, 100) 110, 120 (130, 140)\n{150, 160} cm" — 숫자 사이즈, 중괄호, 두 줄
+ *  - "To fit bust … L 40-42" [101.5-106.5 cm]" — 몸 치수 범위 (body: true, 값은 범위 가운데)
+ */
+export function sizeChart(text: string): { order: string[]; rows: SizeRow[]; body?: boolean } | null {
+  const t1 = sizeTable(text);
+  if (t1) return t1;
+  // 다음 줄이 '{'·'('로 시작하는 숫자 묶음이면 이어 붙인다
+  const lines: string[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const l = raw.replace(/\s+/g, " ").trim();
+    const prev = lines[lines.length - 1] || "";
+    if (lines.length && ((/^[{(]\s*\d/.test(l) && !/cm|"|″/.test(prev.split(/[:：]/).pop() || "")) || (/^\d/.test(l) && /[,\-–]$/.test(prev)))) lines[lines.length - 1] += " " + l;
+    else lines.push(l);
+  }
+  const nums = (seg: string) => (seg.replace(/\(\s*(\d+)\s+(\d+)\s*\)/g, "(NaN)").match(/NaN|\d+(?:\.\d+)?/g) || []).map((x) => (x === "NaN" ? NaN : +x));
+  const LABEL = /chest|bust|가슴|품\b|가슴둘레|circumference/i;
+  const NOT = /\b(?:sleeves?|biceps?|upper arm|arms?|head|wrist|neck|hips?)\b|소매|팔|목/i; // 가슴 말고 다른 둘레 ("garment"의 arm은 아님)
+  // 1) 몸 치수 범위 줄 ("To fit bust" 아래 "L 40-42" [101.5-106.5 cm]")
+  const fit = [...text.matchAll(/(?:^|\n|\s{2,})((?:XS\/S|\d\/\dXL|\d?XL|XXXL|XXL|XS|S|M|L))\s+[\d.\-–]+["″]?\s*\[\s*([\d.]+)\s*[-–]\s*([\d.]+)\s*cm\]/g)];
+  if (/to fit|fits? bust|몸 치수|실제 가슴/i.test(text) && fit.length >= 3) {
+    const seen = new Set<string>();
+    const order: string[] = [], values: number[] = [];
+    for (const m of fit) { const sz = normS(m[1]); if (seen.has(sz)) continue; seen.add(sz); order.push(sz); values.push((+m[2] + +m[3]) / 2); }
+    return { order, rows: [{ label: "몸 가슴둘레(맞는 범위 가운데)", values, unit: "cm" }], body: true };
+  }
+  // 2) 글자 사이즈 + 라벨 줄 (콜론 없어도, 인치·cm 함께여도 cm 쪽). 완성 치수(actual·finished)를 몸 치수(measurement)보다 먼저
+  let order = sizeOrder(text);
+  // "Size: A (B) C (D), E (F) …" 같은 글자 사이즈 (콧수가 맞는 쪽을 쓴다)
+  const lm = text.match(/\b[Ss]izes?\s*[:：]\s*((?:[({]?\s*[A-Z](?![A-Za-z])\s*[)}]?\s*,?\s*){3,})/);
+  const letters = lm ? lm[1].match(/[A-Z]/g) || [] : [];
+  const orders = [order, ...(letters.length >= 3 && new Set(letters).size === letters.length ? [letters] : [])].filter((o) => o !== DEFAULT_SIZES);
+  const cand = lines.filter((l) => LABEL.test(l) && !NOT.test(l.split(/[:：]/)[0]));
+  cand.sort((a, b) => Number(/actual|finished|완성/i.test(b)) - Number(/actual|finished|완성/i.test(a)) || Number(/measurement|to fit/i.test(a)) - Number(/measurement|to fit/i.test(b)));
+  for (const l of cand) {
+    if (/\(\s*in(?:ches)?\s*\)/i.test(l)) continue; // 인치 줄은 건너뛴다
+    let seg = l;
+    const head = l.split(/[:：]/)[0];
+    const cmPart = l.match(/(?:in(?:ches)?|["″])\s*\/\s*([^\n]*?)\s*cm/i);
+    if (/\(\s*cm\s*\)/i.test(head)) seg = l.slice(head.length + 1); // "Actual circumference of garment (cm): 85 (90) …"
+    else if (cmPart) seg = cmPart[1];
+    else if (/cm/i.test(l)) seg = l.split(/cm/i)[0];
+    if (/\d\s*[-–]\s*\d/.test(seg)) continue; // "75-80 (80-85)" 같은 범위(몸 치수)는 건너뛴다
+    seg = seg.replace(/^[^\d({]*/, "");
+    const v = nums(seg);
+    const o = orders.find((x) => x.length === v.length);
+    if (o) return { order: o, rows: [{ label: "가슴둘레", values: v, unit: "cm" }] };
+    // 3) 숫자 사이즈 (사이즈 이름이 곧 가슴둘레: "Final bust measurements: (90, 100) 110 …")
+    if (!orders.length && v.length >= 3 && v.every((x) => x >= 60 && x <= 200)) {
+      order = v.map((x) => String(x));
+      return { order, rows: [{ label: "가슴둘레", values: v, unit: "cm" }] };
+    }
+  }
+  return null;
+}
+
 /** 도안 정보 줄 (사이즈별 치수·여유분, 실·바늘, 게이지, 재료) — 단 목록이 아니라 '도안 정보'로 따로 */
 const INFO_RE = /사이즈|가슴\s*둘레|품|총\s*장|기장|어깨\s*(?:너비|폭)|소매\s*(?:길이|기장)|진동|암홀|완성\s*(?:치수|크기)|실제\s*치수|여유|권장|실\s*[:：]|사용\s*실|바늘|게이지|부자재|단추|\b(?:finished|measurements?|chest|bust|ease|yarns?|needles?|hooks?|gauge|tension|notions)\b/i;
 export function extractInfo(text: string, size = "", max = 900): string {
