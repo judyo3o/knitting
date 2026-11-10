@@ -498,3 +498,7 @@ body.peeking #nextBtn { background: var(--lav-l); color: var(--lav-ink); border-
 .rep-note{color:var(--lav-ink);background:var(--lav-bg);border-radius:10px;padding:6px 10px}
 .rep-row{display:flex;flex-direction:column;gap:4px;padding:8px 0;border-top:1px dashed var(--dash)}
 .rows2 button.skip{opacity:.45;text-decoration:line-through}
+.rep-row.cur{background:var(--lav-l);border-radius:8px;padding:8px}
+.rep-row.set{flex-direction:row;align-items:center;justify-content:space-between;gap:8px}
+.rep-row .badge{color:var(--lav-ink);background:var(--lav-l);margin-left:6px}
+.len-now{font-size:.92rem}

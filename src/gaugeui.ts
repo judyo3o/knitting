@@ -6,8 +6,15 @@ import { toLines } from "./pdfgeom";
 import { textItems } from "./pdf";
 import { commit, pdfOf } from "./store";
 import { ask, dialog, fmtShort, h } from "./ui";
-import type { Gauge, GaugeSet, Pattern, Rep, Swatch } from "./types";
-import { partNames, partRows, suggestReps } from "./model";
+import type { Gauge, GaugeSet, PartShape, Pattern, Rep, Swatch } from "./types";
+
+/** 차트에서 무늬 단위 찾기 (main.ts가 기기 차트 읽기로 채워 줌) */
+let shapeAnalyzer: ((p: Pattern, s: string, prog: (i: number, n: number) => void) => Promise<PartShape | null>) | null = null;
+export const setShapeAnalyzer = (f: typeof shapeAnalyzer) => (shapeAnalyzer = f);
+/** 단 서술에 코 지시가 있나 */
+const STITCHY = /(?:겉|안)\s*\d|\b[kp]\d|\b(?:LC|RC|LPC|RPC|k2tog|ssk|p2tog|M1[LR]?)\b|메리야스|고무단|겉뜨기|안뜨기/i;
+import { partNames, partProgress, partRows } from "./model";
+import { lengthNow, lengthOptions, rowGaugeFor, SHAPING_RE, textUnits } from "./period";
 
 const num = (v: string) => {
   const n = parseFloat(v.replace(",", "."));
@@ -196,42 +203,111 @@ export function openGauge(p: Pattern, onSaved: () => void, onResize?: (size: str
   };
   render();
 
-  // 기장 조절: 파트의 한 구간을 한 번 더 뜨거나 뺀다 (저장할 때 적용)
+  // 기장 조절: "몇 cm 줄이기/늘리기"를 묻고, 무늬 단위에 맞춘 추천 옵션 중에서 고른다 (저장할 때 적용)
   const reps: Record<string, Rep> = JSON.parse(JSON.stringify(p.rep || {}));
+  const shapes: Record<string, PartShape> = { ...(p.shape || {}) };
   const repBox = h("section", { class: "gauge-set" });
+  const names = partNames(p).filter((n) => partRows(p, n).filter((r) => !r.castOn).length >= 2);
+  let part = names.includes(p.tab) ? p.tab : names[0] || "";
+  let dir: -1 | 1 = -1;
+  let amount = 5;
+  let busy = "";
+  // 짝 파트 (오른쪽 소매 ↔ 왼쪽 소매): 단 번호가 같으면 같은 조절을 그대로 쓸 수 있다
+  const twin = (s: string) => {
+    const t = s.includes("오른쪽") ? s.replace("오른쪽", "왼쪽") : s.includes("왼쪽") ? s.replace("왼쪽", "오른쪽") : /\bright\b/i.test(s) ? s.replace(/\bright\b/i, "Left") : /\bleft\b/i.test(s) ? s.replace(/\bleft\b/i, "Right") : null;
+    if (!t || !names.includes(t)) return null;
+    const a = partRows(p, s).map((r) => r.n).join(), b = partRows(p, t).map((r) => r.n).join();
+    return a === b ? t : null;
+  };
+  const hasChart = (s: string) => p.src === "pdf" && (!!p.secs[s]?.ch || partRows(p, s).some((r) => r.ch));
+  const shapeOf = (s: string): PartShape | null => {
+    if (shapes[s]) return shapes[s];
+    const list = partRows(p, s).filter((r) => !r.castOn);
+    const tu = textUnits(list);
+    if (tu.length) return { units: tu, shaping: list.filter((r) => SHAPING_RE.test(r.t || "")).map((r) => r.n), src: "text" };
+    if (hasChart(s) && list.some((r) => r.span || !STITCHY.test(r.t || ""))) return null; // 차트를 읽어 봐야 앎
+    return { units: [], shaping: list.filter((r) => SHAPING_RE.test(r.t || "")).map((r) => r.n), src: "plain" };
+  };
   const renderRep = () => {
     repBox.innerHTML = "";
-    const rowsPer10 = (sets.map((x) => myGauge(x)).find(Boolean) || sets.find((x) => x.pattern)?.pattern)?.rows || null;
-    const cm = (n: number) => (rowsPer10 ? `약 ${Math.round(((n * 10) / rowsPer10) * 10) / 10}cm` : `${n}단`);
-    repBox.append(h("b", { text: "기장 조절 (구간 한 번 더 · 빼기)" }),
-      h("p", { class: "gen", style: "margin:0", text: "무늬 한 단위(예: 하트 1개)를 더 뜨거나 빼서 기장을 조절해요. 고르면 '다음 단'이 그대로 따라가요." }));
-    for (const [s, r] of Object.entries(reps)) {
-      const len = r.to - r.from + 1;
-      const pick = (t: number) => h("button", { class: "btn" + (r.times === t ? " primary" : " ghost"), type: "button", "aria-pressed": String(r.times === t), text: t < 0 ? "빼기" : t === 0 ? "그대로" : `+${t}회`, on: { click: () => { r.times = t; r.pass = Math.min(r.pass || 0, Math.max(t, 0)); renderRep(); } } });
-      repBox.append(h("div", { class: "rep-row" },
-        h("div", {}, h("b", { text: `${s} ${r.from}~${r.to}단` }), h("span", { class: "gen", text: ` ${r.label ? r.label + " · " : ""}${len}단 · ${cm(len)}` })),
-        h("div", { class: "actions" }, pick(-1), pick(0), pick(1), pick(2),
-          h("button", { class: "link", type: "button", text: "구간 지우기", on: { click: () => { delete reps[s]; renderRep(); } } })),
-        h("span", { class: "gen", text: r.times < 0 ? `기장 ${cm(len)} 짧게 — ${r.from - 1}단 다음에 ${r.to + 1}단으로 건너뛰어요` : r.times > 0 ? `기장 ${cm(len * r.times)} 길게 — ${r.to}단을 뜨면 ${r.from}단으로 돌아가 ${r.times}번 더 떠요` : "원래 도안대로" })));
+    repBox.append(h("b", { text: "기장 조절" }),
+      h("p", { class: "gen", style: "margin:0", text: "얼마나 줄이거나 늘릴지 정하면, 무늬가 이어지는 단위에 맞춘 옵션을 추천해요. 고르면 '다음 단'·진행률·완성 예상이 그대로 따라가요." }));
+    if (!names.length) return;
+    const shape = shapeOf(part);
+    const motif = !!shape?.units.some((u) => u.P >= 4);
+    const rowsPer10 = rowGaugeFor(sets, motif || shape == null);
+    const cmTxt = (v: number | null, n: number) => (v != null ? `약 ${v}cm` : `${n}단`);
+    // 파트 고르기
+    const sel = h("select", { "aria-label": "파트" }, ...names.map((n) => { const o = new Option(n, n); o.selected = n === part; return o; }));
+    sel.onchange = () => { part = sel.value; renderRep(); };
+    repBox.append(h("div", { class: "actions", style: "align-items:center" }, sel));
+    // 지금 기장
+    const pr = partProgress(p, part);
+    const ln = lengthNow(p, part, partRows(p, part), pr.done, pr.total, rowsPer10);
+    repBox.append(h("p", { class: "len-now", style: "margin:0" },
+      h("b", { text: `지금 ${cmTxt(ln.doneCm, ln.done)}` }), ` (${ln.done}/${ln.total}단)`,
+      ln.fromStartCm != null ? ` · 앞 파트부터 이어서 ${cmTxt(ln.fromStartCm, 0)}` : "",
+      ` · 이 파트 끝까지 ${cmTxt(ln.totalCm, ln.total)}${ln.fullCm != null ? ` (이어서 ${cmTxt(ln.fullCm, 0)})` : ""}`,
+      rowsPer10 ? h("span", { class: "gen", text: ` · 10cm ${rowsPer10}단 기준` }) : h("span", { class: "gen", text: " · 게이지를 적으면 cm로 보여요" })));
+    // 무늬 단위
+    const unitLine = h("div", { class: "actions", style: "align-items:center" });
+    if (busy) unitLine.append(h("span", { class: "gen", text: busy }));
+    else if (shape == null) {
+      unitLine.append(h("span", { class: "gen", text: "이 파트는 차트만 따라요." }));
+      if (shapeAnalyzer) unitLine.append(h("button", { class: "btn", type: "button", text: "차트에서 무늬 단위 찾기", on: { click: () => findShape() } }));
+    } else {
+      const ms = shape.units.filter((u) => u.P >= 4);
+      unitLine.append(h("span", { class: "gen", text: ms.length ? `무늬 단위: ${ms.map((u) => u.P + "단").join(" · ")} (${shape.src === "chart" ? "차트" : "서술"}에서 찾음)` : `되풀이 무늬 없음 — ${p.secs[part]?.round ? "1단" : "2단(겉·안면)"} 단위로 맞춰요` }));
+      if (shape.src === "chart" && shapeAnalyzer) unitLine.append(h("button", { class: "link", type: "button", text: "다시 찾기", on: { click: () => findShape() } }));
     }
-    // 도안에서 찾은 반복 구간 추천 (아직 정하지 않은 파트만)
-    const sug = suggestReps(p).filter((x) => !reps[x.s]);
-    if (sug.length) repBox.append(h("div", { class: "actions", style: "align-items:center" }, h("span", { class: "gen", text: "도안에서 찾은 반복 구간:" }),
-      ...sug.map((x) => h("button", { class: "btn ghost", type: "button", text: `${x.s} ${x.from}~${x.to}단 (${x.label})`, on: { click: () => { reps[x.s] = { from: x.from, to: x.to, times: 0, pass: 0, label: x.label }; renderRep(); } } }))));
-    if (!Object.keys(reps).length && !sug.length) repBox.append(h("p", { class: "gen", style: "margin:0", text: "되풀이되는 구간을 찾지 못했어요. 차트만 따르는 도안은 아래에 직접 구간을 적어 주세요 (예: 무늬 한 단위의 시작·끝 단)." }));
-    // 구간 새로 정하기
-    const names = partNames(p);
-    const sel = h("select", { "aria-label": "파트" }, ...names.map((n) => new Option(n, n)));
+    repBox.append(unitLine);
+    // 얼마나
+    const dirBtn = (d: -1 | 1) => h("button", { class: "btn" + (dir === d ? " primary" : " ghost"), type: "button", "aria-pressed": String(dir === d), text: d < 0 ? "줄이기" : "늘리기", on: { click: () => { dir = d; renderRep(); } } });
+    const amt = h("input", { type: "number", min: 0.5, step: "0.5", inputmode: "decimal", value: String(amount), "aria-label": "몇 cm", style: "width:5em" });
+    amt.onchange = () => { amount = num(amt.value) || amount; renderRep(); };
+    repBox.append(h("div", { class: "actions", style: "align-items:center" }, dirBtn(-1), dirBtn(1), amt, h("span", { text: "cm" })));
+    // 추천 옵션
+    if (shape && rowsPer10) {
+      const opts = lengthOptions(partRows(p, part).filter((r) => !r.castOn), shape, dir * amount, rowsPer10, !!p.secs[part]?.round, p.pos[part] ?? null);
+      if (!opts.length) repBox.append(h("p", { class: "gen", style: "margin:0", text: "남은 단에서 맞는 구간을 찾지 못했어요. 아래에서 직접 정해 주세요." }));
+      for (const o of opts) {
+        const cur = reps[part] && reps[part].from === o.rep.from && reps[part].to === o.rep.to && reps[part].times === o.rep.times;
+        repBox.append(h("div", { class: "rep-row" + (cur ? " cur" : "") },
+          h("div", {}, h("b", { text: o.title }), o.best ? h("span", { class: "badge", text: " 추천" }) : null),
+          h("span", { class: "gen", text: o.note }),
+          h("div", { class: "actions" }, h("button", { class: "btn" + (cur ? " primary" : ""), type: "button", text: cur ? "선택됨" : "이걸로", on: { click: () => { reps[part] = { ...o.rep }; renderRep(); } } }))));
+      }
+    } else if (shape && !rowsPer10) repBox.append(h("p", { class: "gen", style: "margin:0", text: "위에 게이지(단수)를 적으면 cm에 맞는 옵션을 보여 드려요." }));
+    // 정해 둔 조절
+    for (const [s, r] of Object.entries(reps)) {
+      if (!r.times) continue;
+      const len = r.to - r.from + 1;
+      repBox.append(h("div", { class: "rep-row set" },
+        h("span", {}, h("b", { text: `${s}: ` }), r.times < 0 ? `${r.from}~${r.to}단 빼기 (${len}단)` : `${r.from}~${r.to}단을 ${r.times}번 더 (${len * r.times}단)`, r.label ? ` · ${r.label}` : ""),
+        twin(s) && !reps[twin(s)!] ? h("button", { class: "link", type: "button", text: `${twin(s)}도 똑같이`, on: { click: () => { reps[twin(s)!] = { ...r, pass: 0 }; if (shapes[s] && !shapes[twin(s)!]) shapes[twin(s)!] = shapes[s]; renderRep(); } } }) : null,
+        h("button", { class: "link", type: "button", text: "원래대로", on: { click: () => { delete reps[s]; renderRep(); } } })));
+    }
+    // 직접 정하기
     const a = h("input", { type: "number", min: 1, inputmode: "numeric", placeholder: "시작 단", style: "width:5.5em", "aria-label": "구간 시작 단" });
     const b = h("input", { type: "number", min: 1, inputmode: "numeric", placeholder: "끝 단", style: "width:5.5em", "aria-label": "구간 끝 단" });
-    const lb = h("input", { type: "text", placeholder: "이름 (예: 하트 1개)", style: "flex:1;min-width:7em", "aria-label": "구간 이름" });
-    const add = h("button", { class: "btn", type: "button", text: "구간 추가", on: { click: () => {
-      const from = parseInt(a.value, 10), to = parseInt(b.value, 10), ns = partRows(p, sel.value).map((x) => x.n);
+    const tm = h("select", { "aria-label": "어떻게" }, new Option("빼기", "-1"), new Option("한 번 더", "1"), new Option("두 번 더", "2"));
+    const add = h("button", { class: "btn ghost", type: "button", text: "정하기", on: { click: () => {
+      const from = parseInt(a.value, 10), to = parseInt(b.value, 10), ns = partRows(p, part).map((x) => x.n);
       if (!(from <= to) || !ns.includes(from) || !ns.includes(to)) { a.focus(); return; }
-      reps[sel.value] = { from, to, times: 0, pass: 0, label: lb.value.trim() || undefined };
+      reps[part] = { from, to, times: parseInt(tm.value, 10), pass: 0 };
       renderRep();
     } } });
-    repBox.append(h("div", { class: "actions", style: "align-items:center" }, sel, a, h("span", { text: "~" }), b, lb, add));
+    repBox.append(h("details", {}, h("summary", { text: `${part} 구간 직접 정하기` }), h("div", { class: "actions", style: "align-items:center" }, a, h("span", { text: "~" }), b, tm, add)));
+  };
+  const findShape = async () => {
+    if (!shapeAnalyzer) return;
+    const s = part;
+    busy = "차트 읽는 중…";
+    renderRep();
+    try {
+      const sh = await shapeAnalyzer(p, s, (i, n) => { busy = `차트 읽는 중… ${i}/${n}단`; const el = repBox.querySelector(".actions .gen"); if (el) el.textContent = busy; });
+      if (sh) shapes[s] = sh;
+    } finally { busy = ""; renderRep(); }
   };
   renderRep();
 
@@ -246,6 +322,7 @@ export function openGauge(p: Pattern, onSaved: () => void, onResize?: (size: str
       h("button", { class: "btn primary", type: "button", text: "저장", on: { click: () => {
         p.gauges = sets.filter((s) => s.pattern || s.before || s.after || s.label.trim());
         p.rep = reps;
+        p.shape = shapes;
         p.rev = (p.rev || 0) + 1; // 다른 기기에도 도안 내용(구간)이 바뀐 걸로 전해지게
         commit(p);
         dl.close();

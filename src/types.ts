@@ -46,6 +46,7 @@ export type Pattern = {
   draw: Record<string, Drawing>; // 파트별 직접 그린 배색 격자
   gauges: GaugeSet[]; // 무늬별 게이지 (도안 · 세탁 전 · 세탁 후)
   work?: { on: number | null; spans: [number, number][] };
+  shape?: Record<string, PartShape>; // 파트별 무늬 단위 (기장 조절 추천용)
   rep?: Record<string, Rep>; // 파트별 기장 조절 구간: 한 번 더 뜨기(times>0) · 빼기(times<0) // 뜨개 시작·중지 버튼: 켜 둔 시간만 뜬 시간
   src: "pdf" | "images" | "text" | null;
   srcPages: number | null;
@@ -90,6 +91,9 @@ export type DrawOpt = {
 };
 
 /** 기장 조절 구간: from~to단을 times번 더 뜨거나(+) 뺀다(-1). pass: 지금까지 시작한 추가 반복 횟수 */
+/** 파트의 무늬 단위 (기기에서 차트·서술을 읽어 찾음): P단마다 되풀이, shaping = 줄임·늘림 단 */
+export type PartShape = { units: { P: number; cols: number }[]; shaping: number[]; src: "chart" | "text" | "plain"; at?: number };
+
 export type Rep = { from: number; to: number; times: number; pass?: number; label?: string };
 
 /** 10cm(기본) 안 콧수·단수 */

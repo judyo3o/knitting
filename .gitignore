@@ -9,3 +9,4 @@ public/pdfjs/
 .env.*
 .vercel
 dist-artifact/
+.tmp/

@@ -17,7 +17,8 @@ import { active, commit, exportJson, importJson, load, pdfOf, pushAllFiles, relo
 import { openSettings, manualHandler, openViewer } from "./dialogs";
 import { openUpload } from "./upload";
 import { openEditor, type DrawSize } from "./drawui";
-import { gaugeSummary, openGauge } from "./gaugeui";
+import { gaugeSummary, openGauge, setShapeAnalyzer } from "./gaugeui";
+import { gridUnits, lengthNow, rowGaugeFor } from "./period";
 import { $, ask, dialog, download, fmtDay, fmtFull, fmtShort, fmtSmart, fmtTime, h, toast } from "./ui";
 import type { Pattern, Row } from "./types";
 import { rowText, stitchEdgeX, type RowStitch } from "./symbols";
@@ -303,6 +304,16 @@ function nowCard(p: Pattern, r: Row) {
   }
   if (rp && rp.times < 0 && r.n === rp.from - 1) card.append(h("p", { class: "span-note rep-note", text: `기장 줄이기: 이 단 다음은 ${rp.to + 1}단이에요 (${rp.from}~${rp.to}단 빼기)` }));
   if (isSkipped(p, s, r.n)) card.append(h("p", { class: "span-note rep-note", text: `이 단은 기장 줄이기로 빼기로 한 구간(${rp!.from}~${rp!.to}단)이에요.` }));
+  {
+    // 지금 기장 (이 파트에서 뜬 단 → cm)
+    const motif = !!p.shape?.[s]?.units.some((u) => u.P >= 4) || !!chartPage(p, r);
+    const rp10 = rowGaugeFor(p.gauges, motif);
+    const pr = partProgress(p, s);
+    if (rp10 && pr.done > 0) {
+      const ln = lengthNow(p, s, partRows(p, s), pr.done, pr.total, rp10);
+      card.append(h("p", { class: "span-note len-note", text: `지금 기장 약 ${ln.doneCm}cm${ln.fromStartCm != null ? ` (앞 파트부터 약 ${ln.fromStartCm}cm)` : ""} · 이 파트 끝까지 약 ${ln.totalCm}cm${ln.fullCm != null ? ` (이어서 약 ${ln.fullCm}cm)` : ""}` }));
+    }
+  }
   // 원하는 만큼 뜨는 단: 게이지로 정한 단 수는 추정이라 직접 늘리고 줄인다
   if (flexibleRow(r)) card.append(h("div", { class: "actions flex-rows" },
     h("span", { class: "gen", text: "원하는 길이만큼 뜨는 단이에요." }),
@@ -995,6 +1006,19 @@ async function chartRowText(p: Pattern, r: Row): Promise<string | null> {
   return st && st.length ? rowText(st, ws) : null;
 }
 
+/** 기장 조절용: 파트의 차트 단을 모두 기기에서 읽어 무늬 단위(열마다 되풀이 주기)를 찾는다 */
+setShapeAnalyzer(async (p, s, prog) => {
+  const list = partRows(p, s).filter((r) => chartPage(p, r));
+  if (list.length < 6 || p.src !== "pdf") return null;
+  const rows: { n: number; st: RowStitch[] | null }[] = [];
+  for (let i = 0; i < list.length; i++) {
+    prog(i + 1, list.length);
+    rows.push({ n: list[i].n, st: await chartRowStitches(p, list[i]).catch(() => null) });
+  }
+  if (rows.filter((r) => r.st?.length).length < 6) return null;
+  return { ...gridUnits(rows), src: "chart", at: Date.now() };
+});
+
 /* ---------------- 고무단 가이드 라인 (차트 위 따로 그린 한 줄) ---------------- */
 const GUIDE_RE = /가이드\s*라인|가이드\s*선|guide\s*line/i;
 /** 이 파트가 '차트 상단 고무단 가이드 라인을 참고'하라는 파트면, 가이드가 있는 차트 쪽 */
@@ -1087,7 +1111,7 @@ function rowActions(p: Pattern, r: Row, side: "RS" | "WS", round: boolean) {
     box.append(b);
   }
   if (r.pg && p.src && p.src !== "text") box.append(h("button", { class: "btn ghost", type: "button", text: p.src === "pdf" ? `원본 p${r.pg} 보기` : `원본 사진 ${r.pg} 보기`, on: { click: () => openViewer(p, r.pg!, { n: r.n, span: r.span }) } }));
-  if (page && p.src === "pdf") box.append(h("button", { class: "btn ghost", type: "button", text: `차트 p${page} 원본`, on: { click: () => openViewer(p, page) } }));
+  if (page && p.src === "pdf" && page !== r.pg) box.append(h("button", { class: "btn ghost", type: "button", text: `차트 p${page} 원본`, on: { click: () => openViewer(p, page) } }));
   if (inArtifact && state.ai.provider === "artifact") box.append(h("button", { class: "btn", type: "button", text: "이 단 물어보기", on: { click: async () => (await import("./chat")).openChat(p, r) } }));
   box.append(h("button", { class: "btn ghost", type: "button", text: "이 단 서술 수정", on: { click: () => { view.editing = true; render(); } } }));
   return box;

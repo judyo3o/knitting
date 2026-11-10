@@ -865,3 +865,36 @@ it("기장 조절 구간 추천: 서술이 되풀이되는 주기를 찾는다",
   const r = suggestReps(p);
   expect(r).toEqual([{ s: "몸판", from: 6, to: 9, label: "4단 반복 무늬" }]);
 });
+
+it("기장 조절: 무늬 단위 찾기와 cm 추천 옵션", async () => {
+  const { gridUnits, lengthOptions, textUnits } = await import("../src/period");
+  // 열 0~3: 6단마다 교차, 열 4~7: 4단마다 교차, 가장자리 줄임
+  const rows = Array.from({ length: 36 }, (_, i) => {
+    const n = i + 1;
+    const st: any[] = [];
+    for (let c = 0; c < 8; c++) {
+      const cross = c < 4 ? n % 6 === 1 : n % 4 === 1;
+      st.push({ name: cross ? "2/2 LC" : "겉뜨기", sym: "", cells: 1, x0: c * 5, x1: c * 5 + 5 });
+    }
+    if (n % 6 === 3) st.push({ name: "k2tog", sym: "", cells: 1, x0: 40, x1: 45 });
+    return { n, st };
+  });
+  const g = gridUnits(rows);
+  expect(g.units.map((u) => u.P).sort()).toEqual([4, 6]);
+  expect(g.shaping).toContain(3);
+  const list = rows.map((r) => ({ n: r.n, s: "몸판", t: "" })) as any;
+  const opts = lengthOptions(list, { ...g, src: "chart" }, -5, 24, false, null);
+  const best = opts.find((o) => o.best)!;
+  expect(best.rows).toBe(12); // 5cm ≈ 12단, 4·6단 무늬 모두 맞음
+  expect(best.rep.times).toBe(-1);
+  expect(best.rep.to - best.rep.from + 1).toBe(12);
+  // 무늬 없는 평면: 2단 단위
+  const plain = lengthOptions(list, { units: [], shaping: [], src: "plain" }, 3.4, 30, false, null);
+  expect(plain.find((o) => o.best)!.rows).toBe(10);
+  expect(plain.find((o) => o.best)!.rep.times).toBe(1);
+  // 서술: 4단마다 같은 서술, 차트만 가리키는 단은 무시
+  const tl = Array.from({ length: 16 }, (_, i) => ({ n: i + 1, s: "a", t: ["겉2, 안2", "안2, 겉2", "겉2, 안2", "C4F"][i % 4] })) as any;
+  expect(textUnits(tl)[0].P).toBe(4);
+  const sp = Array.from({ length: 16 }, (_, i) => ({ n: i + 1, s: "a", t: "차트를 따라", span: [1, 16] })) as any;
+  expect(textUnits(sp)).toEqual([]);
+});

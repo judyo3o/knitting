@@ -754,7 +754,7 @@ export function suggestReps(p: Pattern): { s: string; from: number; to: number; 
   const norm = (t: string) => (t || "").split("\n")[0].replace(/\s*·\s*(양쪽|10단마다)[^·]*$/g, "").replace(/\s+/g, " ").trim();
   for (const s of partNames(p)) {
     const list = partRows(p, s).filter((r) => !r.castOn);
-    const t = list.map((r) => norm(r.t));
+    const t = list.map((r) => (r.span ? `\u0000${r.n}` : norm(r.t))); // 차트만 가리키는 단끼리는 같은 서술이어도 무늬가 같은 게 아니다
     if (t.length < 6 || new Set(t).size < 2) continue;
     let best: { P: number; start: number; len: number } | null = null;
     for (let P = 2; P <= Math.min(24, Math.floor(t.length / 2)); P++) {

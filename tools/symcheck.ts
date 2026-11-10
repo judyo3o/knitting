@@ -201,3 +201,23 @@ import { newPattern } from "../src/model";
   }
   return out;
 };
+
+/** 단마다 읽은 칸 (위치 포함) — 반복 주기 점검용 */
+(window as any).rowcells = async (b64: string, page: number, rows: number[]) => {
+  const bin = atob(b64);
+  const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  const pdf = await openPdf(new Blob([u]));
+  const p = newPattern({ id: "rc", name: "rc" });
+  for (let n = 1; n <= Math.min(14, pdf.numPages); n++) {
+    const t = await textItems(pdf, n);
+    if (!t.items.some((i) => LEGEND_RE.test(i.str))) continue;
+    const lg = findLegend(t.items);
+    if (lg) { p.legend = { page: n, ...lg }; break; }
+  }
+  const bmp = await chartBitmap(pdf, "rc", page);
+  const { readRow } = await import("../src/symbolid");
+  const out: { n: number; st: any[] | null }[] = [];
+  for (const n of rows) out.push({ n, st: await readRow(p, pdf, page, bmp, n, n % 2 === 0) });
+  return out;
+};
