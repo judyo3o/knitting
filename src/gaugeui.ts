@@ -13,7 +13,7 @@ let shapeAnalyzer: ((p: Pattern, s: string, prog: (i: number, n: number) => void
 export const setShapeAnalyzer = (f: typeof shapeAnalyzer) => (shapeAnalyzer = f);
 /** 단 서술에 코 지시가 있나 */
 const STITCHY = /(?:겉|안)\s*\d|\b[kp]\d|\b(?:LC|RC|LPC|RPC|k2tog|ssk|p2tog|M1[LR]?)\b|메리야스|고무단|겉뜨기|안뜨기/i;
-import { partNames, partProgress, partRows } from "./model";
+import { partNames, partProgress, partRows, reflowLengthRepeats } from "./model";
 import { lengthNow, lengthOptions, rowGaugeFor, SHAPING_RE, textUnits } from "./period";
 
 const num = (v: string) => {
@@ -322,6 +322,7 @@ export function openGauge(p: Pattern, onSaved: () => void, onResize?: (size: str
       h("button", { class: "btn primary", type: "button", text: "저장", on: { click: () => {
         p.gauges = sets.filter((s) => s.pattern || s.before || s.after || s.label.trim());
         p.rep = reps;
+        reflowLengthRepeats(p); // '36cm가 될 때까지' 같은 단을 바뀐 게이지로 다시 풀기
         p.shape = shapes;
         p.rev = (p.rev || 0) + 1; // 다른 기기에도 도안 내용(구간)이 바뀐 걸로 전해지게
         commit(p);

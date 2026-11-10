@@ -1,3 +1,4 @@
+import { rowGaugeFor } from "./period";
 import { swatchFromLabel } from "./gauge";
 import { MAX_LOG, SESSION_GAP_MS } from "./config";
 import type { AiSection, Pattern, Row, SecInfo, Side } from "./types";
@@ -461,41 +462,108 @@ export function spanParts(t: string, span: [number, number] | null): { each: str
  * 뒤에 오는 단 번호는 늘어난 만큼 민다. 한 번 푼 단(ln)은 다시 풀지 않는다.
  */
 export function expandLengthRepeats(p: Pattern): void {
-  const g = p.gauges.find((x) => x.after || x.before || x.pattern);
-  const per10 = g ? (g.after || g.before || g.pattern)!.rows : 0;
-  if (!per10) return;
+  const per10 = rowGaugeFor(p.gauges, false) || 0;
   const LEN = /(?:for|until[^.]*?measures?)\s*(\d+(?:\.\d+)?)\s*(?:"|”|in(?:ches)?\b)\s*(?:\[\s*(\d+(?:\.\d+)?)\s*cm\s*\])?|(\d+(?:\.\d+)?)\s*cm\s*(?:가\s*될\s*때까지|까지|만큼)/i;
   const REP = /rep(?:eat)?\s+(?:the\s+)?last\s+(\d+)\s+rows|(\d+)\s*단\s*(?:을|를)?\s*(?:반복|되풀이)|반복/i;
+  // "36cm가 될 때까지 메리야스로" 같은 무늬 없는 길이 지시: 겉면 겉뜨기 · 안면 안뜨기 (원통은 모두 겉뜨기)
+  const PLAIN = /메리야스|stockinette|st(?:ockinette)?\s*st\b|겉뜨기로|겉뜨기만|knit\s+every\s+(?:rnd|round)/i;
+  // "줄임단을 … 18단마다, 모두 5번" / "Rep dec rnd every 18th rnd 4 more times"
+  const EVERY = /(\d+)\s*단마다\s*,?\s*(?:모두|총)\s*(\d+)\s*번|every\s+(\d+)(?:st|nd|rd|th)?\s+(?:rows?|rnds?|rounds?)\s*,?\s*(\d+)\s+times/i;
   for (const s of partNames(p)) {
-    const list = partRows(p, s);
-    const r = list.find((x) => !x.ln && !x.span && REP.test(x.t) && LEN.test(x.t));
-    if (!r) continue;
-    const m = r.t.match(LEN)!;
-    const cm = m[2] ? +m[2] : m[1] ? +m[1] * 2.54 : +m[3];
-    const rm = r.t.match(REP)!;
-    const k = Math.max(1, Math.min(4, +(rm[1] || rm[2] || 2)));
-    let total = Math.round((cm * per10) / 10);
-    // "ending on a 2nd row / WS row"면 짝수 단에서 끝나게, "1st row / RS row"면 홀수
-    if (k === 2 && /ending (?:on|with) (?:a |the )?(?:2nd|second|wrong side|ws)\b|안면\s*단?에서\s*끝/i.test(r.t) && total % 2) total++;
-    if (k === 2 && /ending (?:on|with) (?:a |the )?(?:1st|first|right side|rs)\b|겉면\s*단?에서\s*끝/i.test(r.t) && total % 2 === 0) total++;
-    if (total <= r.n) continue;
-    // 반복할 서술: "(홀수 단: … / 짝수 단: …)" > 바로 앞 k단
-    const odd = r.t.match(/홀수\s*단\s*[:：]\s*([^/]+?)\s*\/\s*짝수\s*단\s*[:：]\s*([^)]+)\)/);
-    const prev = list.filter((x) => x.n < r.n).slice(-k);
-    const textFor = (n: number) => {
-      if (odd) return (n % 2 ? odd[1] : odd[2]).trim();
-      const src = prev.find((x) => (x.n - n) % k === 0);
-      return src ? src.t.replace(/^.*?\d+(?:st|nd|rd|th)\s+row\s*:\s*(?:\((?:RS|WS)\)\.?\s*)?/i, "").trim() : r.t;
-    };
-    const add = total - r.n;
-    // 뒤 단 번호 밀기 (진행 기록 키도 같이)
-    shiftRows(p, s, r.n, add);
-    const note = `${m[0].trim()} → 단 게이지 ${per10}단/10cm로 약 ${total}단까지 (실제 길이를 재서 맞춰요)`;
-    const orig = r.t;
-    const made: Row[] = [];
-    for (let n = r.n; n <= total; n++) made.push({ ...r, n, t: n === total ? `${textFor(n)}\n${orig}` : textFor(n), side: null, st: n === total ? r.st : null, ln: note });
-    const at = p.rows.indexOf(r);
-    p.rows.splice(at, 1, ...made);
+    const round = !!p.secs[s]?.round;
+    const seen = new Set<Row>();
+    for (let guard = 0; guard < 20; guard++) {
+      const list = partRows(p, s);
+      const r = list.find((x) => !x.ln && !x.span && !seen.has(x) && (EVERY.test(x.t) || (per10 && (REP.test(x.t) || PLAIN.test(x.t)) && LEN.test(x.t))));
+      if (!r) break;
+      seen.add(r);
+      const plainText = (n: number) => (round ? "모두 겉뜨기" : sideOf(p, { ...r, n, side: null }) === "WS" ? "끝까지 안뜨기" : "끝까지 겉뜨기");
+      const ev = r.t.match(EVERY);
+      if (ev && !(per10 && LEN.test(r.t) && !/줄임|늘림|dec|inc/i.test(r.t))) {
+        // N단마다 M번: 줄임(늘림)단 + 사이 메리야스 단으로 푼다 (마지막 줄임단에서 끝)
+        const k = +(ev[1] || ev[3]), times = +(ev[2] || ev[4]);
+        if (!(k >= 2 && k <= 60 && times >= 2 && times <= 40)) continue;
+        const label = r.t.split(/(?:을|를)\s|\s*—\s*every|,?\s*(?:\d+\s*단마다)/)[0].replace(/\s*\(바늘에[^)]*\)/, "").trim();
+        const totalRows = (times - 1) * k + 1;
+        shiftRows(p, s, r.n, totalRows - 1);
+        const note = `"${ev[0].trim()}"을 단마다 풀어 놓았어요`;
+        const made: Row[] = [];
+        for (let i = 0; i < totalRows; i++) {
+          const n = r.n + i, dec = i % k === 0;
+          const t = i === 0 ? r.t : dec ? `${label} · ${i / k + 1}/${times}번째` : plainText(n);
+          made.push({ ...r, n, t: i === totalRows - 1 ? `${t}\n${r.t}` : t, side: null, st: i === totalRows - 1 ? r.st : null, ln: note, lnFrom: r.n });
+        }
+        p.rows.splice(p.rows.indexOf(r), 1, ...made);
+        continue;
+      }
+      const m = r.t.match(LEN)!;
+      const cm = m[2] ? +m[2] : m[1] ? +m[1] * 2.54 : +m[3];
+      const rm = r.t.match(REP);
+      const plain = !rm && PLAIN.test(r.t);
+      const k = plain ? (round ? 1 : 2) : Math.max(1, Math.min(4, +(rm![1] || rm![2] || 2)));
+      let total = Math.round((cm * per10) / 10);
+      // "ending on a 2nd row / WS row"면 짝수 단에서 끝나게, "1st row / RS row"면 홀수
+      const wsEnd = /ending (?:on|with) (?:a |the )?(?:2nd|second|wrong side|ws)\b|안면\s*단?(?:에서|으로)\s*끝/i.test(r.t);
+      const rsEnd = /ending (?:on|with) (?:a |the )?(?:1st|first|right side|rs)\b|겉면\s*단?(?:에서|으로)\s*끝/i.test(r.t);
+      if (k === 2 && (wsEnd || rsEnd)) {
+        const endSide = sideOf(p, { ...r, n: total, side: null });
+        if ((wsEnd && endSide !== "WS") || (rsEnd && endSide !== "RS")) total++;
+      }
+      if (total <= r.n) continue;
+      // "10단마다 … 잠금 핀" 같은 주기 표시
+      const every = r.t.match(/(\d+)\s*단마다\s*([^.·(]+?)(?:\s*계속)?\s*(?:[.·(]|$)/);
+      // 반복할 서술: "(홀수 단: … / 짝수 단: …)" > 무늬 없는 메리야스 > 바로 앞 k단
+      const odd = r.t.match(/홀수\s*단\s*[:：]\s*([^/]+?)\s*\/\s*짝수\s*단\s*[:：]\s*([^)]+)\)/);
+      const prev = list.filter((x) => x.n < r.n).slice(-k);
+      const textFor = (n: number) => {
+        let t: string;
+        if (odd) t = (n % 2 ? odd[1] : odd[2]).trim();
+        else if (plain) t = plainText(n);
+        else {
+          const src = prev.find((x) => (x.n - n) % k === 0);
+          t = src ? src.t.replace(/^.*?\d+(?:st|nd|rd|th)\s+row\s*:\s*(?:\((?:RS|WS)\)\.?\s*)?/i, "").trim() : r.t;
+        }
+        if (every && n % +every[1] === 0) t += ` · ${every[2].trim()}`;
+        return t;
+      };
+      shiftRows(p, s, r.n, total - r.n);
+      const note = `${m[0].trim()} → 단 게이지 ${per10}단/10cm로 약 ${total}단까지 (실제 길이를 재서 맞춰요)`;
+      const made: Row[] = [];
+      for (let n = r.n; n <= total; n++) made.push({ ...r, n, t: n === total ? `${textFor(n)}\n${r.t}` : textFor(n), side: null, st: n === total ? r.st : null, ln: note, lnFrom: r.n });
+      p.rows.splice(p.rows.indexOf(r), 1, ...made);
+    }
+  }
+}
+
+/** 게이지가 바뀌면 길이로 푼 단을 원래 한 단으로 되돌린 뒤 새 게이지로 다시 푼다 (진행 기록은 같은 단 번호에 유지) */
+export function reflowLengthRepeats(p: Pattern): void {
+  const keep: { s: string; done: Record<number, number>; pos: number | null }[] = [];
+  for (const s of partNames(p)) {
+    const gen = partRows(p, s).filter((r) => r.ln && r.lnFrom != null);
+    if (!gen.length) continue;
+    const done: Record<number, number> = {};
+    for (const r of gen) { const k = key(s, r.n); if (p.done[k]) { done[r.n] = p.done[k]; delete p.done[k]; } delete p.part[k]; }
+    const pos: number | null = p.pos[s] ?? null;
+    // 묶음(같은 lnFrom·ln)마다 뒤에서부터 한 단으로 되돌린다
+    const groups = new Map<string, Row[]>();
+    for (const r of gen) { const g = `${r.ln}|${r.lnFrom}`; groups.set(g, [...(groups.get(g) || []), r]); }
+    const list = [...groups.values()].sort((a, b) => b[0].n - a[0].n);
+    for (const g of list) {
+      const first = g[0], last = g[g.length - 1];
+      if (g.length < 2) { Object.assign(first, { ln: undefined, lnFrom: undefined }); continue; }
+      const orig = last.t.includes("\n") ? last.t.slice(last.t.indexOf("\n") + 1) : last.t;
+      const start = first.lnFrom ?? first.n;
+      p.rows = p.rows.filter((r) => !(r.s === s && g.includes(r) && r !== first));
+      Object.assign(first, { n: start, t: orig, st: last.st, ln: undefined, lnFrom: undefined });
+      shiftRows(p, s, last.n, -(last.n - start));
+    }
+    keep.push({ s, done, pos });
+  }
+  expandLengthRepeats(p);
+  for (const k of keep) {
+    const ns = new Set(partRows(p, k.s).map((r) => r.n));
+    for (const [n, t] of Object.entries(k.done)) if (ns.has(+n)) p.done[key(k.s, +n)] = t;
+    if (k.pos != null) p.pos[k.s] = ns.has(k.pos) ? k.pos : Math.max(...ns);
   }
 }
 
@@ -657,7 +725,7 @@ export function shiftRows(p: Pattern, s: string, after: number, d: number) {
 }
 
 /** 원하는 만큼 뜨는 단인가 (길이로 푼 반복, "원하는 길이만큼", "until desired length") */
-export const flexibleRow = (r: Row) => !!r.ln || /원하는\s*(?:길이|만큼)|원하는\s*만큼|desired\s+length|as\s+long\s+as\s+(?:you\s+)?(?:like|want)|until\s+(?:piece|work)\s+measures/i.test(r.t);
+export const flexibleRow = (r: Row) => (!!r.ln && !/단마다 풀어 놓았어요/.test(r.ln)) || /원하는\s*(?:길이|만큼)|원하는\s*만큼|desired\s+length|as\s+long\s+as\s+(?:you\s+)?(?:like|want)|until\s+(?:piece|work)\s+measures/i.test(r.t);
 
 /** 이 단 뒤에 한 단 더: 두 단 반복이면 앞 단 서술을, 아니면 이 단 서술을 이어 쓴다 */
 export function addRowAfter(p: Pattern, s: string, n: number) {

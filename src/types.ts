@@ -13,6 +13,7 @@ export type Row = {
   castOn?: boolean; // 코잡기 자체가 이 단 ("코잡기가 1단") — 뜨는 단이 아님
   auto?: boolean; // 그린 배색에서 자동으로 만든 서술 (격자를 고치면 다시 만든다)
   co?: string[]; // 배색: 이 단에 쓰는 색 기호 (예: ["A","B"])
+  lnFrom?: number; // 길이로 푼 단: 원래 한 단이던 번호
   ln?: string; // 길이로 정한 반복("for 2\" [5 cm]")을 게이지로 단 수로 푼 단: 그 안내
 };
 

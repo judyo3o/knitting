@@ -898,3 +898,58 @@ it("기장 조절: 무늬 단위 찾기와 cm 추천 옵션", async () => {
   const sp = Array.from({ length: 16 }, (_, i) => ({ n: i + 1, s: "a", t: "차트를 따라", span: [1, 16] })) as any;
   expect(textUnits(sp)).toEqual([]);
 });
+
+it("길이 지시(36cm가 될 때까지 메리야스로)를 게이지로 단을 풀고, 게이지가 바뀌면 다시 푼다", async () => {
+  const { newPattern, expandLengthRepeats, reflowLengthRepeats, partRows } = await import("../src/model");
+  const p = newPattern({ id: "k", name: "k" });
+  p.secs["몸판"] = { odd: "RS" } as any;
+  p.rows = [
+    ...Array.from({ length: 20 }, (_, i) => ({ n: i + 1, s: "몸판", t: i % 2 ? "끝까지 안뜨기" : "끝까지 겉뜨기" })),
+    { n: 21, s: "몸판", t: "몸판 나눈 단에서 36cm가 될 때까지 메리야스로 뜹니다 (안면 단으로 끝내기) · 10단마다 양쪽 앞단 끝 코에 잠금 핀 계속. 다음은 아이코드.", st: "188코" },
+    { n: 22, s: "몸판", t: "아이코드 마감" },
+  ] as any;
+  p.gauges = [{ label: "메리야스", pattern: { st: 19, rows: 29 }, before: { st: 21.4, rows: 30.8 }, after: null }];
+  expandLengthRepeats(p);
+  p.done["몸판#25"] = 5;
+  let rows = partRows(p, "몸판");
+  expect(rows.find((r) => r.n === 111)).toBeTruthy(); // 36 × 3.08 = 110.9 → 111, 안면(짝수)에서 끝나게 112
+  const last = rows.filter((r) => r.ln).pop()!;
+  expect(last.n).toBe(112);
+  expect(last.t).toContain("다음은 아이코드");
+  expect(rows.find((r) => r.n === 22)!.t).toBe("끝까지 안뜨기");
+  expect(rows.find((r) => r.n === 30)!.t).toContain("잠금 핀");
+  expect(rows.find((r) => r.n === 113)!.t).toBe("아이코드 마감");
+  // 게이지 바뀜 → 다시 풀기 (진행 기록 유지)
+  p.gauges[0].after = { st: 21, rows: 25 };
+  reflowLengthRepeats(p);
+  rows = partRows(p, "몸판");
+  expect(rows.filter((r) => r.ln).pop()!.n).toBe(90);
+  expect(rows.find((r) => r.n === 91)!.t).toBe("아이코드 마감");
+  expect(p.done["몸판#25"]).toBe(5);
+});
+
+it("N단마다 M번 줄임과 이어진 길이 지시를 차례로 푼다 (원통 소매)", async () => {
+  const { newPattern, expandLengthRepeats, partRows, flexibleRow } = await import("../src/model");
+  const p = newPattern({ id: "s", name: "s" });
+  p.secs["소매"] = { odd: "RS", round: true } as any;
+  p.rows = [
+    { n: 1, s: "소매", t: "코 줍기", castOn: true },
+    { n: 2, s: "소매", t: "겨드랑이에서 10cm가 될 때까지 원통 메리야스(겉뜨기만)" },
+    { n: 3, s: "소매", t: "줄임단(ssk, 끝 2코 전까지 겉뜨기, k2tog)을 18단마다, 모두 5번 (바늘에 48코)", st: "48코" },
+    { n: 4, s: "소매", t: "겨드랑이에서 49cm가 될 때까지 원통 메리야스. 다음은 아이코드." },
+    { n: 5, s: "소매", t: "아이코드" },
+  ] as any;
+  p.gauges = [{ label: "메리야스", pattern: null, before: { st: 21.4, rows: 30.8 }, after: null }];
+  expandLengthRepeats(p);
+  const rows = partRows(p, "소매");
+  const at = (n: number) => rows.find((r) => r.n === n)!;
+  expect(at(31).t).toContain("10cm"); // 10cm ≈ 31단
+  expect(at(32).t).toContain("18단마다");
+  expect(at(50).t).toContain("2/5번째");
+  expect(at(104).t).toContain("5/5번째");
+  expect(at(104).st).toBe("48코");
+  expect(at(151).t).toContain("49cm");
+  expect(at(152).t).toBe("아이코드");
+  expect(flexibleRow(at(50))).toBe(false);
+  expect(flexibleRow(at(140))).toBe(true);
+});
