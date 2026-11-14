@@ -477,7 +477,14 @@ export function expandLengthRepeats(p: Pattern): void {
       const r = list.find((x) => !x.ln && !x.span && !seen.has(x) && (EVERY.test(x.t) || (per10 && (REP.test(x.t) || PLAIN.test(x.t)) && LEN.test(x.t))));
       if (!r) break;
       seen.add(r);
-      const plainText = (n: number) => (round ? "모두 겉뜨기" : sideOf(p, { ...r, n, side: null }) === "WS" ? "끝까지 안뜨기" : "끝까지 겉뜨기");
+      // 양 끝 3코를 뜨면서 아이코드로 만드는 가장자리 (겉면: 끝 3코 sl3 wyif · 안면: 겉3으로 시작, 끝 3코 sl3 wyif)
+      const edge = /아이코드\s*가장자리|i-?cord\s+edge/i.test(r.t);
+      const plainText = (n: number) => {
+        if (round) return "모두 겉뜨기";
+        const ws = sideOf(p, { ...r, n, side: null }) === "WS";
+        if (edge) return ws ? "겉3, 끝 3코 전까지 안뜨기, sl3 wyif" : "끝 3코 전까지 겉뜨기, sl3 wyif";
+        return ws ? "끝까지 안뜨기" : "끝까지 겉뜨기";
+      };
       const ev = r.t.match(EVERY);
       if (ev && !(per10 && LEN.test(r.t) && !/줄임|늘림|dec|inc/i.test(r.t))) {
         // N단마다 M번: 줄임(늘림)단 + 사이 메리야스 단으로 푼다 (마지막 줄임단에서 끝)

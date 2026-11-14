@@ -953,3 +953,15 @@ it("N단마다 M번 줄임과 이어진 길이 지시를 차례로 푼다 (원�
   expect(flexibleRow(at(50))).toBe(false);
   expect(flexibleRow(at(140))).toBe(true);
 });
+
+it("아이코드 가장자리 메리야스를 길이로 풀면 단마다 가장자리 3코 지시가 붙는다", async () => {
+  const { newPattern, expandLengthRepeats, partRows } = await import("../src/model");
+  const p = newPattern({ id: "e", name: "e" });
+  p.secs["요크"] = { odd: "RS" } as any;
+  p.rows = [{ n: 1, s: "요크", t: "끝 3코 전까지 겉뜨기, sl3 wyif" }, { n: 2, s: "요크", t: "5cm가 될 때까지 아이코드 가장자리 메리야스로 뜹니다 (안면 단으로 끝내기)" }] as any;
+  p.gauges = [{ label: "메리야스", pattern: null, before: { st: 20, rows: 30 }, after: null }];
+  expandLengthRepeats(p);
+  const rows = partRows(p, "요크");
+  expect(rows.find((r) => r.n === 3)!.t).toBe("끝 3코 전까지 겉뜨기, sl3 wyif");
+  expect(rows.find((r) => r.n === 4)!.t).toBe("겉3, 끝 3코 전까지 안뜨기, sl3 wyif");
+});
