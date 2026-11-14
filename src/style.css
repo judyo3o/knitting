@@ -510,3 +510,4 @@ body.peeking #nextBtn { background: var(--lav-l); color: var(--lav-ink); border-
   .now-head .prog-col .work-eta{text-align:left;max-width:none}
   .now-head .prog-col .work .btn{order:2;flex:none}
 }
+.work-eta .eta-seg.sub{color:var(--ink-2);font-size:.68rem}

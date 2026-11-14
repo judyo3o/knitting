@@ -216,6 +216,16 @@ function renderMeta(p: Pattern) {
 
 const refreshWork = (p: Pattern) => document.querySelector(".work")?.replaceWith(workButtons(p));
 
+/** 남은 시간 안내를 두 줄로: 이 파트(남은 단·시간) / 도안 전체·페이스 (작게) */
+function etaLines(text: string): HTMLElement[] {
+  const seg = text.split(" · ").filter(Boolean);
+  if (seg.length < 2) return seg.map((t) => h("span", { class: "eta-seg", text: t }));
+  const short = (t: string) => t.replace(/^이 파트 /, "").replace(/\s*\([\d,]+코\)/, "").replace(/^지금 페이스로 /, "").replace(/^도안 전체 /, "전체 ").replace(/^시간당 약 /, "시간당 ");
+  const main = seg.filter((t) => /^이 파트|^지금 페이스/.test(t)).map(short);
+  const sub = seg.filter((t) => !/^이 파트|^지금 페이스/.test(t)).map(short);
+  return [main.length ? h("span", { class: "eta-seg", text: main.join(" · ") }) : null, sub.length ? h("span", { class: "eta-seg sub", text: sub.join(" · ") }) : null].filter(Boolean) as HTMLElement[];
+}
+
 /** 뜨개 시작·중지: 켜 둔 동안만 뜬 시간으로 센다 (페이스·스트레칭 알림) */
 let workTick: number | undefined;
 function workButtons(p: Pattern) {
@@ -228,7 +238,7 @@ function workButtons(p: Pattern) {
   let etaAt = 0;
   const tick = () => {
     clock.textContent = on ? `뜨는 중 ${hms(Date.now() - p.work!.on!)} · 오늘 ${hms(today())}` : today() > 0 ? `오늘 뜬 시간 ${hms(today())}` : "";
-    if (Date.now() - etaAt > 15000) { etaAt = Date.now(); eta.replaceChildren(...(etaText(p, currentTab(p)) || (p.work?.spans.length || p.work?.on ? "" : "스톱워치를 켜고 뜬 단만 · 페이스·남은 시간에 들어가요")).split(" · ").filter(Boolean).map((t) => h("span", { class: "eta-seg", text: t }))); } // 항목마다 한 줄 (숫자 중간에서 끊기지 않게)
+    if (Date.now() - etaAt > 15000) { etaAt = Date.now(); eta.replaceChildren(...etaLines(etaText(p, currentTab(p)) || (p.work?.spans.length || p.work?.on ? "" : "스톱워치를 켜고 뜬 단만 · 페이스·남은 시간에 들어가요"))); }
   };
   clearInterval(workTick);
   tick();
@@ -271,7 +281,7 @@ function nowCard(p: Pattern, r: Row) {
         r.castOn ? null : h("span", { class: "chip dir", text: directionText(p, r) }),
         fin && h("span", { class: "chip fin", text: "이 파트 완료 ✓" }),
       ),
-      h("div", { class: "prog-col" }, h("span", { class: "prog", text: `파트 ${k + 1}/${list.length}` }), p.example ? null : workButtons(p)),
+      h("div", { class: "prog-col" }, h("span", { class: "prog", text: `${list.length}단 중 ${k + 1}번째` }), p.example ? null : workButtons(p)),
     ),
     h("div", { class: "rowno" }, h("b", { text: String(r.n) }), h("span", { class: "unit", text: "단" }), h("span", { class: "st", text: r.st || "" })),
   );
