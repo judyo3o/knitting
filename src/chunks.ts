@@ -148,7 +148,11 @@ export function stitchesThrough(chunks: string[], i: number): number | null {
   let sum = 0;
   for (let k = 0; k <= i && k < chunks.length; k++) {
     const c = countChunk(chunks[k]);
-    if (c == null) return null;
+    if (c == null) {
+      // "마커" "PM" 같은 코를 쓰지 않는 묶음은 0코
+      if (/^(?:마커\s*(?:옮기기|걸기|빼기)?|pm|sm|rm)$/i.test(chunks[k].trim())) continue;
+      return null;
+    }
     sum += c;
   }
   return sum;

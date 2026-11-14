@@ -974,3 +974,8 @@ it("한 줄 안의 안내 문장과 코 지시를 나눈다", async () => {
   // (겉1, 안1) 4번 반복 같은 괄호는 그대로
   expect(splitNarrative("DS, 안2, 2/1RPC, (겉1, 안1) 4번 반복, 2/1LC, 턴").chunks).toContain("(겉1, 안1) 4번 반복");
 });
+
+it("묶음까지 뜬 코 수: 마커 묶음은 0코로 건너뛴다", async () => {
+  const { stitchesThrough } = await import("../src/chunks");
+  expect(stitchesThrough(["안4", "겉2", "마커", "안2", "SM", "겉3"], 5)).toBe(11);
+});
