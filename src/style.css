@@ -502,3 +502,11 @@ body.peeking #nextBtn { background: var(--lav-l); color: var(--lav-ink); border-
 .rep-row.set{flex-direction:row;align-items:center;justify-content:space-between;gap:8px}
 .rep-row .badge{color:var(--lav-ink);background:var(--lav-l);margin-left:6px}
 .len-now{font-size:.92rem}
+/* 좁은 화면: 칩 아래로 내려간 진행·스톱워치는 가로 한 줄로 (오른쪽에 좁게 몰리지 않게) */
+@media (max-width:600px){
+  .now-head .prog-col{width:100%;flex-direction:row;align-items:center;justify-content:space-between;gap:10px;border-top:1px dashed var(--dash);padding-top:8px}
+  .now-head .prog-col .work{flex-direction:row;align-items:center;justify-content:space-between;flex:1;gap:10px}
+  .now-head .prog-col .work-txt{align-items:flex-start}
+  .now-head .prog-col .work-eta{text-align:left;max-width:none}
+  .now-head .prog-col .work .btn{order:2;flex:none}
+}
