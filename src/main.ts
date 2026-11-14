@@ -481,7 +481,10 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
         return;
       }
       cv.append(c);
-      scrollStart(cv, res.startX === "right", range && res.chart ? ((res.startX === "right" ? range[1] : range[0]) - res.x0) * res.k : null);
+      const kept = keptChartScroll && keptChartScroll.k === p.id + ":" + key(r.s, r.n) ? keptChartScroll : null;
+      keptChartScroll = null;
+      if (kept) { cv.scrollLeft = kept.left; cv.scrollTop = kept.top; requestAnimationFrame(() => { cv.scrollLeft = kept.left; cv.scrollTop = kept.top; }); }
+      else scrollStart(cv, res.startX === "right", range && res.chart ? ((res.startX === "right" ? range[1] : range[0]) - res.x0) * res.k : null);
       scrollToProgress(p, r, cv, c, res).catch(() => {});
       symbolTap(p, pdf, page, bmp, cv, c, res, range);
       if (range) cv.append(h("div", { class: "size-note", text: `${p.size} 사이즈 범위만 표시 (점선 사이)` }));
@@ -676,6 +679,8 @@ async function bmpForSize(p: Pattern, pdf: any, page: number, bmp: any, part = "
   return charts.length === bmp.charts.length && charts.every((c, i) => c === bmp.charts[i]) ? bmp : { ...bmp, charts };
 }
 
+/** 묶음을 눌러 다시 그릴 때 차트 스크롤 위치를 이어 가기 위한 값 */
+let keptChartScroll: { k: string; left: number; top: number } | null = null;
 function scrollStart(cv: HTMLElement, right: boolean, startPx: number | null = null) {
   requestAnimationFrame(() => {
     cv.scrollLeft = startPx != null ? (right ? startPx - cv.clientWidth + 40 : startPx - 40) : right ? cv.scrollWidth : 0;
@@ -935,6 +940,9 @@ function chunkBox(p: Pattern, r: Row, chunks: string[]) {
         if (i === 0) delete p.part[k];
         else p.part[k] = { i: i - 1, t: Date.now() };
       } else p.part[k] = { i, t: Date.now() };
+      // 다시 그려도 차트가 처음 위치로 돌아갔다 오지 않게, 지금 보던 자리에서 이어서 움직인다
+      const cvNow = document.querySelector<HTMLElement>(".chartview");
+      keptChartScroll = cvNow ? { k: p.id + ":" + k, left: cvNow.scrollLeft, top: cvNow.scrollTop } : null;
       commit(p);
       render();
     };
