@@ -54,12 +54,23 @@ export function chunksOf(text: string): string[] {
  * 코 지시 사이의 " / "는 마커 자리라 "마커" 묶음으로 남긴다.
  */
 export function splitNarrative(text: string): { notes: string[]; chunks: string[] } {
-  const lines = (text || "").split(/\n+/).map((l) => l.trim()).filter(Boolean);
   const isStitchLine = (l: string) => {
     const parts = splitTop(l.replace(/\s\/\s/g, ", "));
     const ok = parts.filter((x) => countChunk(x) != null || ST_MARK.test(x)).length;
     return parts.length >= 2 && ok / parts.length >= 0.6;
   };
+  // 한 줄 안에 안내 문장과 코 지시가 붙어 있으면 ("…걸어줍니다. (… 됩니다) 안4, 겉2, …") 문장 끝에서 나눈다
+  const lines = (text || "").split(/\n+/).map((l) => l.trim()).filter(Boolean).flatMap((l) => {
+    const first = splitTop(l)[0] || "";
+    if (isStitchLine(l) && (countChunk(first) != null || !/[가-힣]{4}/.test(first))) return [l];
+    const re = /[.!?。)）]\s+/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(l))) {
+      const head = l.slice(0, m.index + 1).trim(), rest = l.slice(m.index + m[0].length).trim();
+      if (/[가-힣]{2}/.test(head) && countChunk(splitTop(head).pop() || "") == null && isStitchLine(rest) && countChunk(splitTop(rest)[0] || "") != null) return [head, rest];
+    }
+    return [l];
+  });
   const stitch = lines.filter(isStitchLine);
   if (!stitch.length) return { notes: [], chunks: chunksOf(text) };
   return {

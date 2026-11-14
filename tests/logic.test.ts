@@ -965,3 +965,12 @@ it("아이코드 가장자리 메리야스를 길이로 풀면 단마다 가장�
   expect(rows.find((r) => r.n === 3)!.t).toBe("끝 3코 전까지 겉뜨기, sl3 wyif");
   expect(rows.find((r) => r.n === 4)!.t).toBe("겉3, 끝 3코 전까지 안뜨기, sl3 wyif");
 });
+
+it("한 줄 안의 안내 문장과 코 지시를 나눈다", async () => {
+  const { splitNarrative } = await import("../src/chunks");
+  const r = splitNarrative("2단 진행시 초록색칸에서 위 시작코에 마커(/)를 각 1개씩 양쪽에 총 2개를 걸어줍니다. (앞판 진행시 코 줍는 가이드가 됩니다) 안4, 겉2, 안2 / 안2, 겉9 / 안1, 턴");
+  expect(r.notes).toEqual(["2단 진행시 초록색칸에서 위 시작코에 마커(/)를 각 1개씩 양쪽에 총 2개를 걸어줍니다. (앞판 진행시 코 줍는 가이드가 됩니다)"]);
+  expect(r.chunks).toEqual(["안4", "겉2", "안2", "마커", "안2", "겉9", "마커", "안1", "턴"]);
+  // (겉1, 안1) 4번 반복 같은 괄호는 그대로
+  expect(splitNarrative("DS, 안2, 2/1RPC, (겉1, 안1) 4번 반복, 2/1LC, 턴").chunks).toContain("(겉1, 안1) 4번 반복");
+});
