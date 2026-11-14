@@ -342,3 +342,122 @@ export function rowsForWidth(w: number, imgW: number, imgH: number, gauge?: { st
   const ratio = gauge && gauge.st > 0 ? gauge.rows / gauge.st : 1;
   return Math.max(1, Math.round((w * imgH * ratio) / imgW));
 }
+
+/* ---------- 사진 속 차트의 격자 찾기 ---------- */
+
+/** 가장자리 세기 → 주기(칸 크기)·시작점 */
+function periodOf(profile: Float64Array, minP: number, maxP: number): { p: number; score: number } | null {
+  const n = profile.length;
+  const mean = profile.reduce((s, v) => s + v, 0) / n;
+  const z = profile.map((v) => v - mean);
+  let best: { p: number; score: number } | null = null;
+  const ac = (p: number) => {
+    let s = 0;
+    for (let i = 0; i + p < n; i++) s += z[i] * z[i + p];
+    return s / (n - p);
+  };
+  const ac0 = ac(0) || 1;
+  const scores: number[] = [];
+  for (let p = minP; p <= maxP; p++) {
+    const s = ac(p) / ac0;
+    // 주기의 배수(2p)도 강해야 진짜 격자
+    const s2 = 2 * p < n ? ac(2 * p) / ac0 : s;
+    scores[p] = s + 0.5 * s2;
+  }
+  const top = Math.max(...scores.filter((v) => v != null));
+  // 칸 몇 개 묶음(배수)이 아니라 가장 작은 주기: 최고점에 가까운 첫 봉우리
+  for (let p = minP; p <= maxP; p++) {
+    const v = scores[p];
+    const peak = v >= (scores[p - 1] ?? -Infinity) && v >= (scores[p + 1] ?? -Infinity);
+    if (peak && v >= top * 0.7) { best = { p, score: v }; break; }
+  }
+  if (!best) return null;
+  // 정수 주기 근처를 소수점까지 다듬기 (칸 수가 많으면 오차가 쌓임)
+  let fine = best.p, fs = -Infinity;
+  for (let q = best.p - 0.9; q <= best.p + 0.9; q += 0.05) {
+    let s = 0;
+    for (let k = 1; k * q < n - 1; k++) {
+      const i = Math.round(k * q);
+      for (let i0 = 0; i0 + i < n; i0 += Math.max(1, Math.floor(n / 64))) s += z[i0] * z[i0 + i];
+    }
+    if (s > fs) { fs = s; fine = q; }
+  }
+  return { p: fine, score: best.score };
+}
+
+/** 주기 p인 격자선의 위치(위상)와, 선이 실제로 이어지는 범위 */
+function gridSpan(profile: Float64Array, p: number): { start: number; count: number } {
+  const n = profile.length;
+  let bestPhase = 0, bestS = -Infinity;
+  for (let ph = 0; ph < p; ph += 0.25) {
+    let s = 0;
+    for (let x = ph; x < n; x += p) s += profile[Math.round(x)] || 0;
+    if (s > bestS) { bestS = s; bestPhase = ph; }
+  }
+  // 선마다 세기 → 바깥쪽 약한 선은 버린다 (여백·글자)
+  const lines: { x: number; v: number }[] = [];
+  for (let x = bestPhase; x < n; x += p) {
+    const i = Math.round(x);
+    let v = 0;
+    for (let d = -1; d <= 1; d++) v = Math.max(v, profile[i + d] || 0);
+    lines.push({ x, v });
+  }
+  const sorted = [...lines].map((l) => l.v).sort((a, b) => a - b);
+  const med = sorted[Math.floor(sorted.length * 0.6)] || 0;
+  const strong = lines.map((l) => l.v >= med * 0.45);
+  // 가장 긴 연속 구간
+  let bs = 0, bl = 0;
+  for (let i = 0; i < lines.length; ) {
+    if (!strong[i]) { i++; continue; }
+    let j = i;
+    while (j + 1 < lines.length && strong[j + 1]) j++;
+    if (j - i + 1 > bl) { bl = j - i + 1; bs = i; }
+    i = j + 1;
+  }
+  return { start: lines[bs]?.x ?? 0, count: Math.max(1, bl - 1) };
+}
+
+/**
+ * 사진(밝기 함수)에서 차트 격자 찾기: 가로·세로 가장자리 세기의 주기로 칸 크기를, 선이 이어지는 범위로 칸 수를.
+ * 찾으면 {x, y, w, h, cols, rows} (원본 픽셀), 못 찾으면 null.
+ */
+export function detectGrid(lum: (x: number, y: number) => number, W: number, H: number): { x: number; y: number; w: number; h: number; cols: number; rows: number } | null {
+  if (W < 20 || H < 20) return null;
+  const px = new Float64Array(W), py = new Float64Array(H);
+  const sy = Math.max(1, Math.floor(H / 400)), sx = Math.max(1, Math.floor(W / 400));
+  for (let y = 0; y < H; y += sy)
+    for (let x = 1; x < W; x++) {
+      const d = Math.abs(lum(x, y) - lum(x - 1, y));
+      px[x] += d;
+    }
+  for (let x = 0; x < W; x += sx)
+    for (let y = 1; y < H; y++) {
+      const d = Math.abs(lum(x, y) - lum(x, y - 1));
+      py[y] += d;
+    }
+  const cx = periodOf(px, 4, Math.floor(W / 3)), cy = periodOf(py, 4, Math.floor(H / 3));
+  if (!cx || !cy || cx.score < 0.15 || cy.score < 0.15) return null;
+  const gx = gridSpan(px, cx.p), gy = gridSpan(py, cy.p);
+  if (gx.count < 2 || gy.count < 2) return null;
+  return { x: gx.start, y: gy.start, w: gx.count * cx.p, h: gy.count * cy.p, cols: gx.count, rows: gy.count };
+}
+
+/** 색 수 자동: 2~8색 중, 색을 하나 더 늘려도 오차가 별로 안 줄면 거기서 멈춘다 */
+export function quantizeAuto(px: [number, number, number][], maxK = 8): string[] {
+  const err = (pal: string[]) => {
+    const cs = pal.map(hexToRgb);
+    let s = 0;
+    for (const p of px) s += Math.sqrt(Math.min(...cs.map((c) => (c[0] - p[0]) ** 2 + (c[1] - p[1]) ** 2 + (c[2] - p[2]) ** 2)));
+    return s / Math.max(1, px.length);
+  };
+  let best = quantize(px, 2), e = err(best);
+  for (let k = 3; k <= maxK; k++) {
+    const pal = quantize(px, k);
+    if (pal.length < k) break;
+    const e2 = err(pal);
+    if (e - e2 < Math.max(4, e * 0.25)) break; // 더 나눠도 별 차이 없음
+    best = pal;
+    e = e2;
+  }
+  return best;
+}

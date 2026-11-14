@@ -10,8 +10,11 @@ export type Row = {
   ch: number | null; // 이 단에 쓰는 차트 PDF 쪽
   span: [number, number] | null; // 범위 지시였으면 원래 범위
   x?: string; // 차트→서술 풀이(점검 결과 포함)
+  castOn?: boolean; // 코잡기 자체가 이 단 ("코잡기가 1단") — 뜨는 단이 아님
   auto?: boolean; // 그린 배색에서 자동으로 만든 서술 (격자를 고치면 다시 만든다)
   co?: string[]; // 배색: 이 단에 쓰는 색 기호 (예: ["A","B"])
+  lnFrom?: number; // 길이로 푼 단: 원래 한 단이던 번호
+  ln?: string; // 길이로 정한 반복("for 2\" [5 cm]")을 게이지로 단 수로 푼 단: 그 안내
 };
 
 /** 배색 도안의 색 (도안 표기 그대로) */
@@ -22,14 +25,15 @@ export type SecInfo = { ch?: number | null; round?: boolean; odd?: Side };
 export type LogEntry = { a: number; b: number; s: string; from: number; to: number };
 
 export type Legend =
-  | { page: number; x0: number; y0: number; x1: number; y1: number; auto?: boolean }
+  | { page: number; x0: number; y0: number; x1: number; y1: number; auto?: boolean; v?: number }
   | { none: true };
 
 export type Pattern = {
   id: string;
   name: string;
   size: string;
-  notes: string;
+  notes: string; // 앱이 남기는 안내 (어떻게 읽었는지 등)
+  info: string; // 도안 정보: 사이즈별 치수·여유분, 실·바늘, 게이지, 주의 사항 (단 목록과 따로)
   rows: Row[];
   secs: Record<string, SecInfo>;
   tab: string;
@@ -42,10 +46,14 @@ export type Pattern = {
   colors: Yarn[];
   draw: Record<string, Drawing>; // 파트별 직접 그린 배색 격자
   gauges: GaugeSet[]; // 무늬별 게이지 (도안 · 세탁 전 · 세탁 후)
+  work?: { on: number | null; spans: [number, number][] };
+  shape?: Record<string, PartShape>; // 파트별 무늬 단위 (기장 조절 추천용)
+  rep?: Record<string, Rep>; // 파트별 기장 조절 구간: 한 번 더 뜨기(times>0) · 빼기(times<0) // 뜨개 시작·중지 버튼: 켜 둔 시간만 뜬 시간
   src: "pdf" | "images" | "text" | null;
   srcPages: number | null;
   readPages: number[];
   pdfHash?: string;
+  remote?: { type: "pdf" | "images"; ids: string[]; sig: string }; // 원본 파일을 아티팩트 저장소에 올린 것 (같은 계정 다른 기기에서 받기)
   rev: number;
   updatedAt: number;
   example?: boolean;
@@ -83,13 +91,23 @@ export type DrawOpt = {
   colsFromLeft?: boolean; // 코 번호 왼쪽부터 (기본 오른쪽부터)
 };
 
+/** 기장 조절 구간: from~to단을 times번 더 뜨거나(+) 뺀다(-1). pass: 지금까지 시작한 추가 반복 횟수 */
+/** 파트의 무늬 단위 (기기에서 차트·서술을 읽어 찾음): P단마다 되풀이, shaping = 줄임·늘림 단 */
+export type PartShape = { units: { P: number; cols: number }[]; shaping: number[]; src: "chart" | "text" | "plain"; at?: number };
+
+export type Rep = { from: number; to: number; times: number; pass?: number; label?: string };
+
 /** 10cm(기본) 안 콧수·단수 */
 export type Gauge = { st: number; rows: number };
 export type GaugeSet = {
   label: string; // 예: "메리야스", "무늬"
-  needle?: string; // 예: "4.5mm"
+  needle?: string; // 도안 바늘 예: "4.5mm"
+  myNeedle?: string; // 내가 스와치를 뜬 바늘
   pattern: Gauge | null; // 도안 게이지
   before: Gauge | null; // 내 스와치 세탁 전
   after: Gauge | null; // 내 스와치 세탁 후
   at?: number; // 마지막 수정 시각
+  swatch?: Swatch; // 무늬 스와치: 이 콧수·단수로 떠서 전체 크기를 잰다 (예: 42코 30단 → 19×13cm)
 };
+/** 스와치를 정해진 콧수·단수로 뜨고 전체 너비·길이(cm)를 재는 게이지 */
+export type Swatch = { st: number; rows: number; w: number; h: number };

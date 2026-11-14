@@ -54,6 +54,7 @@ export type Chart = {
   axes: number[]; // 축 열의 x 중심들
   x0: number;
   x1: number;
+  split?: boolean; // 붙어 있는 두 차트를 빈 틈에서 나눈 것 (범위를 이 안으로만)
 };
 
 type Pt = { x: number; y: number; n: number; w: number };
@@ -151,6 +152,31 @@ function splitByGap(col: Pt[]): Pt[][] {
 }
 
 /** 단 n에 맞는 차트 (범위 안 우선, 없으면 2단 여유, 그래도 없으면 가장 가까운 것) */
+/**
+ * 코 번호 축: 차트 아래(또는 위)의 숫자 줄("38 34 … 5 1") → 가장 왼쪽·오른쪽 숫자의 가운데 x(pt)와 가장 큰 번호(= 콧수)
+ */
+export function stitchAxis(items: TItem[], c: Chart): { x0: number; x1: number; max: number; a: number; b: number } | null {
+  const h = rowH(c);
+  const yBot = rowY(c, c.nMin) + h / 2, yTopC = rowY(c, c.nMax) - h / 2;
+  const nearAxis = (x: number) => c.axes.some((a) => Math.abs(a - x) < h * 1.5);
+  const pick = (lo: number, hi: number) => items.filter((i) => /^\s*\d{1,3}\s*$/.test(i.str) && i.y > lo && i.y < hi && i.x >= c.x0 - 2 && i.x + i.w <= c.x1 + 2 && !nearAxis(i.x + i.w / 2));
+  for (const nums of [pick(yBot, yBot + h * 3.5), pick(yTopC - h * 3, yTopC)]) {
+    if (nums.length < 3) continue;
+    const pts = nums.map((i) => ({ x: i.x + i.w / 2, v: +i.str.trim() })).sort((a, b) => a.x - b.x);
+    // 숫자가 한 방향으로만 늘거나 줄어야 코 번호 축
+    const up = pts.every((q, j) => j === 0 || q.v > pts[j - 1].v), down = pts.every((q, j) => j === 0 || q.v < pts[j - 1].v);
+    if (!up && !down) continue;
+    // 코 번호라면 번호 1 차이 = 칸 하나: x가 번호에 정비례하고(어긋남 < 칸 0.4개), 칸 너비가 단 높이와 비슷해야 한다
+    const n = pts.length, mv = pts.reduce((a, q) => a + q.v, 0) / n, mx = pts.reduce((a, q) => a + q.x, 0) / n;
+    const b = pts.reduce((a, q) => a + (q.v - mv) * (q.x - mx), 0) / Math.max(1e-9, pts.reduce((a, q) => a + (q.v - mv) ** 2, 0));
+    const cell = Math.abs(b);
+    if (cell < h * 0.4 || cell > h * 2.5) continue;
+    if (pts.some((q) => Math.abs(mx + b * (q.v - mv) - q.x) > cell * 0.4)) continue;
+    return { x0: pts[0].x, x1: pts[pts.length - 1].x, max: Math.max(...pts.map((q) => q.v)), a: mx - b * mv, b }; // x = a + b × 코 번호
+  }
+  return null;
+}
+
 export function chartFor(charts: Chart[], n: number): Chart | null {
   if (!charts.length) return null;
   const inside = charts.find((c) => n >= c.nMin && n <= c.nMax);
@@ -171,13 +197,26 @@ export const LEGEND_RE = /기법\s*설명|기호\s*(설명|표|안내|보는)|�
 export function findLegend(items: TItem[]): { x0: number; y0: number; x1: number; y1: number } | null {
   const title = items.find((i) => LEGEND_RE.test(i.str) && i.str.trim().length <= 30);
   if (!title) return null;
+  // 제목 아래 줄들: 같은 높이끼리 한 줄로 묶고, 줄 간격이 갑자기 벌어지거나 다른 제목(대문자 머리말)이 나오면 거기서 끝
   const below = items.filter((i) => i.y > title.y + 1 && i.str.trim()).sort((p, q) => p.y - q.y);
+  const lines: { y: number; h: number; its: TItem[] }[] = [];
+  for (const i of below) {
+    const l = lines[lines.length - 1];
+    if (l && Math.abs(i.y - l.y) < Math.max(2, Math.min(l.h, i.h) * 0.5)) l.its.push(i);
+    else lines.push({ y: i.y, h: i.h, its: [i] });
+  }
   const take: TItem[] = [];
   let lastY = title.y;
-  for (const i of below) {
-    if (i.y - lastY > 60) break;
-    take.push(i);
-    lastY = i.y;
+  const gaps: number[] = [];
+  const HEAD = /^[A-Z][A-Z0-9 &'’()-]{3,}:?$/;
+  for (const l of lines) {
+    const gap = l.y - lastY;
+    const med = gaps.length >= 3 ? [...gaps].sort((x, y) => x - y)[gaps.length >> 1] : 0;
+    if (gap > 60 || (med && gap > Math.max(med * 2.2, l.h * 2.4))) break;
+    if (take.length && l.its.length <= 2 && l.its.every((i) => HEAD.test(i.str.trim())) && !LEGEND_RE.test(l.its[0].str)) break; // 다음 머리말
+    take.push(...l.its);
+    if (take.length > l.its.length) gaps.push(gap);
+    lastY = l.y;
   }
   if (!take.length) return null;
   const x0 = Math.min(title.x, ...take.map((i) => i.x)) - 40;
@@ -239,4 +278,127 @@ export function toLines(items: TItem[], pageW = 0): string[] {
   }
   const left = segs.filter((s) => s.x <= W * 0.38), right = segs.filter((s) => s.x > W * 0.38);
   return [...left, ...right].map(clean);
+}
+
+/**
+ * 원본 쪽에서 이 단 서술이 있는 자리 (내 사이즈 구역 안에서). 한 쪽에 여러 사이즈가 섞여 있어도 내 사이즈 줄을 찾는다.
+ * 반환: 강조할 세로 범위 (pt, 위에서부터)
+ */
+export function findRowSpot(items: TItem[], n: number, span: [number, number] | null, size: string): { y0: number; y1: number } | null {
+  const SZ = /^\s*(\d?XL|XXXL|XXL|XS|S|M|L)\s*사이즈/i;
+  const norm = (x: string) => x.toUpperCase().replace(/^XXL$/, "2XL").replace(/^XXXL$/, "3XL");
+  const heads = items.filter((i) => SZ.test(i.str)).map((i) => ({ sz: norm(i.str.match(SZ)![1]), y: i.y })).sort((a, b) => a.y - b.y);
+  let lo = -Infinity, hi = Infinity;
+  if (size && heads.length) {
+    const mine = heads.find((x) => x.sz === norm(size));
+    if (mine) { lo = mine.y - 1; hi = heads.find((x) => x.y > mine.y + 1)?.y ?? Infinity; }
+    else hi = heads[0].y; // 내 사이즈 제목이 없으면 앞쪽에서 이어지는 부분만 (첫 사이즈 제목 전까지)
+  }
+  const ROW = /^\s*\(?\s*(\d{1,3})\s*단?\s*(?:[~\-–]\s*(\d{1,3})\s*)?단/;
+  const labels = items.filter((i) => i.y > lo && i.y < hi && ROW.test(i.str)).sort((a, b) => a.y - b.y);
+  const want = span ? span[0] : n;
+  const hit = labels.find((i) => { const m = i.str.match(ROW)!; const a = +m[1], b = m[2] ? +m[2] : a; return (want >= a && want <= b) || (n >= a && n <= b); });
+  if (!hit) return null;
+  const next = labels.find((i) => i.y > hit.y + hit.h * 0.8);
+  const y1 = Math.min(next ? next.y - next.h : hit.y + hit.h * 3, hi === Infinity ? Infinity : hi - hit.h);
+  return { y0: hit.y - hit.h - 2, y1: Math.max(hit.y + 3, y1) };
+}
+
+/**
+ * 사이즈별 시작·끝 선: 차트 아래(또는 위)의 사이즈 이름("XL", "2/3XL", "4/5XL", "S/M")과 그 x 위치.
+ * 이름 하나가 여러 사이즈를 묶기도 한다 ("2/3XL" = 2XL, 3XL).
+ */
+export function sizeMarks(items: TItem[], c: Chart): { sizes: string[]; x: number }[] {
+  const h = rowH(c);
+  const yBot = rowY(c, c.nMin) + h / 2, yTopC = rowY(c, c.nMax) - h / 2;
+  const LBL = /^\s*(?:(\d)\s*\/\s*(\d)\s*(XL)|(\d?)\s*(XS|XL|S|M|L|X)(?:\s*\/\s*(\d?)\s*(XS|XL|S|M|L))?)\s*$/i;
+  const norm = (n: string, t: string) => { t = t.toUpperCase(); if (t === "X") t = "XL"; return (n && n !== "1" ? n : "") + t; };
+  const out: { sizes: string[]; x: number }[] = [];
+  for (const i of items) {
+    const inBand = (i.y > yBot && i.y < yBot + h * 5) || (i.y < yTopC && i.y > yTopC - h * 4);
+    if (!inBand || i.x < c.x0 - h * 2 || i.x > c.x1 + h * 2) continue;
+    const m = i.str.match(LBL);
+    if (!m) continue;
+    const sizes = m[3] ? [norm(m[1], "XL"), norm(m[2], "XL")] : [norm(m[4], m[5]), ...(m[7] ? [norm(m[6] || "", m[7])] : [])];
+    const x = i.x + i.w / 2;
+    // 굵게 보이려고 같은 글자를 겹쳐 찍은 PDF: 같은 이름이 3pt 안에 또 있으면 하나로
+    if (out.some((o) => o.sizes.join() === sizes.join() && Math.abs(o.x - x) < 3)) continue;
+    out.push({ sizes, x });
+  }
+  return out;
+}
+
+/** 내 사이즈의 차트 범위 [왼쪽 x, 오른쪽 x] (pt). 양쪽에 표시가 있으면 그 사이, 한쪽만 있으면 그 선부터 차트 반대쪽 끝까지 */
+export function sizeRange(items: TItem[], c: Chart, size: string): [number, number] | null {
+  if (!size) return null;
+  const want = size.toUpperCase().replace(/^XXXL$/, "3XL").replace(/^XXL$/, "2XL").replace(/^1XL$/, "XL");
+  const marks = sizeMarks(items, c);
+  if (marks.length < 2) return null; // 사이즈 표시가 하나뿐이면 사이즈별 선이 아님
+  const mine = marks.filter((m) => m.sizes.includes(want)).map((m) => m.x).sort((a, b) => a - b);
+  if (!mine.length) return null;
+  if (mine.length >= 2) return [mine[0], mine[mine.length - 1]];
+  const mid = (c.x0 + c.x1) / 2;
+  // 축 숫자 칸을 뺀 격자 끝
+  const left = c.axes.filter((a) => a < mid);
+  const right = c.axes.filter((a) => a >= mid);
+  const gl = left.length ? Math.max(...left) + rowH(c) * 0.8 : c.x0;
+  const gr = right.length ? Math.min(...right) - rowH(c) * 0.8 : c.x1;
+  // 선이 격자 오른쪽 끝에 더 가까우면 그 선이 오른쪽 경계, 왼쪽 끝에 가까우면 왼쪽 경계
+  return mine[0] - gl > gr - mine[0] ? [gl, mine[0]] : [mine[0], gr];
+}
+
+/** 사이즈 이름 목록 풀기: "XL/2/3XL/4/5XL" → XL, 2XL, 3XL, 4XL, 5XL · "XS/S/M/L" → XS, S, M, L */
+export function sizeList(text: string): string[] {
+  const toks = text.toUpperCase().replace(/\s+/g, "").split("/").filter(Boolean);
+  const out: string[] = [];
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i];
+    if (/^\d$/.test(t) && /^\d?X+L$/.test(toks[i + 1] || "")) out.push(t + "XL");
+    else if (/^(?:\d?XL|XXXL|XXL|XS|S|M|L)$/.test(t)) out.push(t.replace(/^XXXL$/, "3XL").replace(/^XXL$/, "2XL"));
+  }
+  return out;
+}
+
+/** 차트 제목("CHART II BACK - XL/2/3XL/4/5XL")에 적힌 사이즈: 차트 위쪽, 가로로 겹치는 글자에서 */
+export function chartSizes(items: TItem[], c: Chart): string[] {
+  const top = rowY(c, c.nMax) - rowH(c) / 2, bot = rowY(c, Math.min(c.nMax, c.nMin + 10));
+  const near = items.filter((i) => i.y > top - 280 && i.y < bot && i.x + i.w > c.x0 - 40 && i.x < c.x1 && !/^\s*\d{1,3}\s*$/.test(i.str));
+  const best = near.filter((i) => /(?:^|[\s/])(?:\d?XL|XS|S|M|L)(?:$|[\s/])/i.test(i.str) && /\//.test(i.str)).sort((a, b) => b.y - a.y)[0];
+  return best ? sizeList(best.str.replace(/^.*?([\dA-Z/]*\/[\dA-Z/]*).*$/i, "$1")) : [];
+}
+
+/** 한 쪽에 사이즈별 차트가 여럿이면 내 사이즈 차트만 (제목에 사이즈가 없는 차트는 그대로) */
+export function chartsForSize(items: TItem[], charts: Chart[], size: string): Chart[] {
+  if (!size || charts.length < 2) return charts;
+  const want = sizeList(size)[0] || size.toUpperCase();
+  const tagged = charts.map((c) => ({ c, s: chartSizes(items, c) }));
+  if (!tagged.some((t) => t.s.includes(want))) return charts;
+  return tagged.filter((t) => t.s.includes(want)).map((t) => t.c); // 제목에 내 사이즈가 있는 차트만
+}
+
+/** 차트 위 제목 글자("CHART IV LEFT FRONT XL/2/3XL/4/5XL")를 한 줄로 */
+export function chartTitle(items: TItem[], c: Chart): string {
+  // 제목은 차트 위나, 모양 낸 차트(뾰족한 꼭대기)면 차트 높이 안 빈 곳에 있다 — 단 번호 숫자는 빼고
+  const top = rowY(c, c.nMax) - rowH(c) / 2, bot = rowY(c, Math.min(c.nMax, c.nMin + 10));
+  return items.filter((i) => i.y > top - 280 && i.y < bot && i.x + i.w > c.x0 && i.x < c.x1 && !/^\s*\d{1,3}\s*$/.test(i.str)).sort((a, b) => a.y - b.y || a.x - b.x).map((i) => i.str).join(" ");
+}
+/** 차트 제목 낱말이 몇 개 들어 있나 (CHART/차트) — 둘 이상이면 차트 두 개가 붙어 있다 */
+export function chartTitleCount(items: TItem[], c: Chart): number {
+  const top = rowY(c, c.nMax) - rowH(c) / 2, bot = rowY(c, Math.min(c.nMax, c.nMin + 10));
+  const xs = items.filter((i) => /^\s*(?:chart|차트)\b/i.test(i.str) && i.y > top - 280 && i.y < bot && i.x + i.w > c.x0 && i.x < c.x1).map((i) => i.x).sort((a, b) => a - b);
+  let n = 0, last = -1e9;
+  for (const x of xs) { if (x - last > 40) n++; last = x; }
+  return n;
+}
+
+/** 파트 이름과 차트 제목이 맞나: 왼쪽/left, 오른쪽/right, 앞/front, 뒤/back, 소매/sleeve */
+export function partTitleScore(part: string, title: string): number {
+  const P = part.toLowerCase(), T = title.toLowerCase();
+  const keys: [RegExp, RegExp][] = [
+    [/왼쪽|left/, /left|왼쪽/], [/오른쪽|right/, /right|오른쪽/],
+    [/앞|front/, /front|앞/], [/뒤|뒷|back/, /back|뒤|뒷/], [/소매|sleeve/, /sleeve|소매/],
+  ];
+  let sc = 0;
+  for (const [a, b] of keys) { const pa = a.test(P), tb = b.test(T); if (pa && tb) sc += 2; else if (!pa && tb) sc -= 1; }
+  return sc;
 }

@@ -48,6 +48,37 @@ export function chunksOf(text: string): string[] {
   return out;
 }
 
+/**
+ * 단 서술 → 안내 문장 + 뜨는 묶음. 서술이 여러 줄이면 코 지시 줄(겉2, 안3, 2/1 LC…)만 묶음으로 나누고,
+ * 나머지 문장("…마커를 걸어줍니다", "차트를 따라 진행")은 안내로 따로 보여 준다.
+ * 코 지시 사이의 " / "는 마커 자리라 "마커" 묶음으로 남긴다.
+ */
+export function splitNarrative(text: string): { notes: string[]; chunks: string[] } {
+  const isStitchLine = (l: string) => {
+    const parts = splitTop(l.replace(/\s\/\s/g, ", "));
+    const ok = parts.filter((x) => countChunk(x) != null || ST_MARK.test(x)).length;
+    return parts.length >= 2 && ok / parts.length >= 0.6;
+  };
+  // 한 줄 안에 안내 문장과 코 지시가 붙어 있으면 ("…걸어줍니다. (… 됩니다) 안4, 겉2, …") 문장 끝에서 나눈다
+  const lines = (text || "").split(/\n+/).map((l) => l.trim()).filter(Boolean).flatMap((l) => {
+    const first = splitTop(l)[0] || "";
+    if (isStitchLine(l) && (countChunk(first) != null || !/[가-힣]{4}/.test(first))) return [l];
+    const re = /[.!?。)）]\s+/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(l))) {
+      const head = l.slice(0, m.index + 1).trim(), rest = l.slice(m.index + m[0].length).trim();
+      if (/[가-힣]{2}/.test(head) && countChunk(splitTop(head).pop() || "") == null && isStitchLine(rest) && countChunk(splitTop(rest)[0] || "") != null) return [head, rest];
+    }
+    return [l];
+  });
+  const stitch = lines.filter(isStitchLine);
+  if (!stitch.length) return { notes: [], chunks: chunksOf(text) };
+  return {
+    notes: lines.filter((l) => !stitch.includes(l)),
+    chunks: chunksOf(stitch.map((l) => l.replace(/\s\/\s/g, ", 마커, ")).join(", ")),
+  };
+}
+
 type Tok = { re: RegExp; n: (m: RegExpMatchArray) => number };
 const TOKENS: Tok[] = [
   { re: /^(\d+)\s*\/\s*(\d+)\s*(?:LPC|RPC|LC|RC)/i, n: (m) => +m[1] + +m[2] },
@@ -117,7 +148,11 @@ export function stitchesThrough(chunks: string[], i: number): number | null {
   let sum = 0;
   for (let k = 0; k <= i && k < chunks.length; k++) {
     const c = countChunk(chunks[k]);
-    if (c == null) return null;
+    if (c == null) {
+      // "마커" "PM" 같은 코를 쓰지 않는 묶음은 0코
+      if (/^(?:마커\s*(?:옮기기|걸기|빼기)?|pm|sm|rm)$/i.test(chunks[k].trim())) continue;
+      return null;
+    }
     sum += c;
   }
   return sum;
