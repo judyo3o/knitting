@@ -26,6 +26,7 @@ import { rowText, stitchEdgeX, type RowStitch } from "./symbols";
 const app = $("#app");
 const view = {
   rowPx: 22,
+  chartH: 0, // 차트 창 높이(px, 드래그로 정함 · 0이면 기본)
   full: false,
   legendOpen: true,
   useDrawing: {} as Record<string, boolean>, // 파트별: 그린 배색 보기 (기본: 그린 게 있으면 그것)
@@ -39,7 +40,7 @@ try {
 } catch {}
 const saveView = () => {
   try {
-    localStorage.setItem("view", JSON.stringify({ rowPx: view.rowPx, legendOpen: view.legendOpen, useDrawing: view.useDrawing }));
+    localStorage.setItem("view", JSON.stringify({ rowPx: view.rowPx, chartH: view.chartH, legendOpen: view.legendOpen, useDrawing: view.useDrawing }));
   } catch {}
 };
 
@@ -386,7 +387,8 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
     !!(d && page) && h("button", { class: "btn ghost", type: "button", text: useDraw ? "PDF 차트 보기" : "그린 배색 보기", on: { click: () => { view.useDrawing[r.s] = !useDraw; saveView(); render(); } } }),
     h("button", { class: "btn ghost", type: "button", text: d ? "배색 고치기" : "배색 그리기", on: { click: async () => openEditor(p, r.s, { onSave: () => render(), size: await drawSize(p, r.s).catch(() => null) }) } }),
   );
-  wrap.append(box, t);
+  if (view.chartH) { cv.style.height = view.chartH + "px"; cv.style.maxHeight = "none"; }
+  wrap.append(box, chartResizer(cv), t);
 
   if (useDraw && d) {
     const c = h("canvas", { "aria-label": `${r.s} 배색 격자, ${r.n}단 표시` });
@@ -682,6 +684,33 @@ async function bmpForSize(p: Pattern, pdf: any, page: number, bmp: any, part = "
     if (best > 0 && sc.filter((v) => v === best).length < charts.length) charts = charts.filter((_, i) => sc[i] === best);
   }
   return charts.length === bmp.charts.length && charts.every((c, i) => c === bmp.charts[i]) ? bmp : { ...bmp, charts };
+}
+
+/** 차트 창 아래 손잡이: 위아래로 끌어 창 높이를 바꾼다 (두 번 누르면 기본 높이) */
+function chartResizer(cv: HTMLElement) {
+  const hd = h("div", { class: "chart-resize", role: "separator", "aria-orientation": "horizontal", "aria-label": "차트 창 높이 조절 (끌기, 두 번 누르면 기본)", title: "끌어서 차트 창 높이 조절 · 두 번 누르면 기본" }, h("span"));
+  let y0 = 0, h0 = 0;
+  const move = (e: PointerEvent) => {
+    const hh = Math.max(120, Math.min(window.innerHeight * 0.9, h0 + e.clientY - y0));
+    cv.style.height = hh + "px";
+    cv.style.maxHeight = "none";
+  };
+  const up = () => {
+    hd.classList.remove("on");
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    view.chartH = Math.round(cv.clientHeight);
+    saveView();
+  };
+  hd.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    y0 = e.clientY; h0 = cv.clientHeight;
+    hd.classList.add("on");
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  });
+  hd.addEventListener("dblclick", () => { view.chartH = 0; saveView(); cv.style.height = ""; cv.style.maxHeight = ""; });
+  return hd;
 }
 
 /** 묶음을 눌러 다시 그릴 때 차트 스크롤 위치를 이어 가기 위한 값 */

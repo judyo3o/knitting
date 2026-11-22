@@ -512,3 +512,7 @@ body.peeking #nextBtn { background: var(--lav-l); color: var(--lav-ink); border-
 }
 .work-eta .eta-seg.sub{color:var(--ink-2);font-size:.68rem}
 @media (max-width:600px){ .chartview{max-height:max(260px,46vh)} }
+/* 차트 창 높이 조절 손잡이 */
+.chart-resize{height:18px;margin-top:-4px;display:flex;align-items:center;justify-content:center;cursor:ns-resize;touch-action:none;user-select:none}
+.chart-resize span{width:48px;height:5px;border-radius:3px;background:var(--rule)}
+.chart-resize:hover span,.chart-resize.on span{background:var(--pink)}
