@@ -3,7 +3,7 @@ import { chunksOf, splitNarrative, stitchesThrough } from "./chunks";
 import { MAX_TOKENS } from "./config";
 import { callAi, canCallDirect, errCopy } from "./ai";
 import { inArtifact, whenArtifact } from "./artifact";
-import { cellKeyColor, chartBitmap, chartKey, clearBitmaps, splitChartByGap, labelColor, sharpRows, sizeLabelColors, sizeLineRange, drawGrid, drawPdfFull, drawPdfRows, explainStrip, hitCell, legendCanvas, sampleRowColors, yarnHex } from "./chart";
+import { cellKeyColor, chartBitmap, chartKey, clearBitmaps, splitChartByGap, labelColor, sharpRows, rowWindow, sizeLabelColors, sizeLineRange, drawGrid, drawPdfFull, drawPdfRows, explainStrip, hitCell, legendCanvas, sampleRowColors, yarnHex } from "./chart";
 import { getFile, putFile } from "./db";
 import { getCell, longestFloat, rowColors } from "./drawing";
 import {
@@ -472,7 +472,7 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
       cv.append(c);
       symbolTap(p, pdf, page, bmp, cv, c, { x0: 0, yTop: 0, k: width / bmp.w }, range);
     } else {
-      const vo = { n: r.n, side, round, rowPx: view.rowPx, range, done: doneOnPage(p, page) };
+      const vo = { n: r.n, side, round, rowPx: view.rowPx, range, done: doneOnPage(p, page), ...rowWindow(bmp, r.n, view.rowPx) }; // 위아래로 스크롤해 볼 수 있게 여러 단
       const res = drawPdfRows(c, bmp, vo);
       // 먼저 빠르게 그리고, 보이는 단들만 선명하게 다시
       sharpRows(pdf, page, bmp, vo).then((hi) => { if (hi && seq === renderSeq && c.isConnected) drawPdfRows(c, bmp, vo, hi); }).catch(() => {});
@@ -484,7 +484,12 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
       const kept = keptChartScroll && keptChartScroll.k === p.id + ":" + key(r.s, r.n) ? keptChartScroll : null;
       keptChartScroll = null;
       if (kept) { cv.scrollLeft = kept.left; cv.scrollTop = kept.top; requestAnimationFrame(() => { cv.scrollLeft = kept.left; cv.scrollTop = kept.top; }); }
-      else scrollStart(cv, res.startX === "right", range && res.chart ? ((res.startX === "right" ? range[1] : range[0]) - res.x0) * res.k : null);
+      else {
+        scrollStart(cv, res.startX === "right", range && res.chart ? ((res.startX === "right" ? range[1] : range[0]) - res.x0) * res.k : null);
+        // 지금 단이 가운데 오게 (위아래 단은 스크롤해서 봐요)
+        const midY = (rowY(res.chart, r.n) - res.yTop) * res.k;
+        requestAnimationFrame(() => { cv.scrollTop = midY - cv.clientHeight / 2; });
+      }
       scrollToProgress(p, r, cv, c, res).catch(() => {});
       symbolTap(p, pdf, page, bmp, cv, c, res, range);
       if (range) cv.append(h("div", { class: "size-note", text: `${p.size} 사이즈 범위만 표시 (점선 사이)` }));

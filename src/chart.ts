@@ -34,7 +34,7 @@ export function chartBitmap(pdf: Pdf, pdfKey: string, page: number): Promise<Bit
 }
 export const clearBitmaps = () => bmpCache.clear();
 
-export type ViewOpts = { n: number; side: Side; round: boolean; rowPx: number; below?: number; above?: number; range?: [number, number] | null; done?: Set<number> }; // done: 실제로 뜬 단(없으면 지금 단 아래 전부) // range: 내 사이즈 차트 범위 (pt)
+export type ViewOpts = { n: number; side: Side; round: boolean; rowPx: number; below?: number; above?: number; dpr?: number; range?: [number, number] | null; done?: Set<number> }; // done: 실제로 뜬 단(없으면 지금 단 아래 전부) // range: 내 사이즈 차트 범위 (pt)
 
 /** 화살표가 단 번호를 가리지 않게: 바깥 경계에서 축 숫자 너머까지 (pt) */
 /** 왼쪽·오른쪽 축 숫자 너머 (축이 그쪽에 없으면 작게) */
@@ -59,7 +59,7 @@ export function drawPdfRows(out: HTMLCanvasElement, bmp: Bitmap, o: ViewOpts, hi
   const yBot = Math.min(rowY(c, Math.max(o.n - below, c.nMin - 1)) + h / 2, bmp.h);
   const k = o.rowPx / h; // pt → 화면 px
   const sx = c.x0 * bmp.scale, sy = yTop * bmp.scale, sw = (c.x1 - c.x0) * bmp.scale, sh = (yBot - yTop) * bmp.scale;
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const dpr = o.dpr ?? Math.min(2, window.devicePixelRatio || 1);
   out.width = Math.round((c.x1 - c.x0) * k * dpr);
   out.height = Math.round((yBot - yTop) * k * dpr);
   out.style.width = out.width / dpr + "px";
@@ -71,6 +71,25 @@ export function drawPdfRows(out: HTMLCanvasElement, bmp: Bitmap, o: ViewOpts, hi
   const xr = o.range ? (o.range.map((x) => (x - c.x0) * k * dpr) as [number, number]) : null;
   overlay(ctx, out.width, (n) => [toY(rowY(c, n) - h / 2), toY(rowY(c, n) + h / 2)], o, Math.max(o.n - below, c.nMin - 1), dpr, axisInset(c).map((v) => v * k * dpr) as [number, number], xr);
   return { chart: c, startX: o.side === "RS" || o.round ? "right" : "left", x0: c.x0, yTop, k };
+}
+
+/**
+ * 단 보기에서 위아래로 스크롤할 수 있게 지금 단 위아래로 몇 단까지 그릴지.
+ * 휴대폰 캔버스 크기 한도(약 16M 화소) 안에서 되도록 많이 (차트가 작으면 전부).
+ */
+export function rowWindow(bmp: Bitmap, n: number, rowPx: number): { below: number; above: number; dpr: number } {
+  const dev = Math.min(2, window.devicePixelRatio || 1);
+  const c = chartFor(bmp.charts, n);
+  if (!c) return { below: 3, above: 6, dpr: dev };
+  const wCss = (c.x1 - c.x0) * (rowPx / rowH(c));
+  const total = c.nMax - c.nMin + 3;
+  const want = Math.min(total, 40);
+  const fit = (d: number) => Math.floor(14e6 / Math.max(1, wCss * d) / Math.max(1, rowPx * d));
+  // 넓은 차트는 선명도를 조금 낮춰서라도 위아래 단을 더 보여 준다
+  const dpr = [dev, 1.5, 1].find((d) => d <= dev && fit(d) >= want) ?? 1;
+  const span = Math.max(9, Math.min(total, fit(dpr)));
+  const below = Math.max(3, Math.floor(span * 0.4));
+  return { below, above: Math.max(6, span - below), dpr };
 }
 
 /** 차트 전체(페이지 전체)에 같은 표시 */
@@ -366,7 +385,7 @@ export async function sharpRows(pdf: Pdf, page: number, bmp: Bitmap, o: ViewOpts
   const yTop = Math.max(rowY(c, Math.min(o.n + above, c.nMax + 1)) - h / 2, 0);
   const yBot = Math.min(rowY(c, Math.max(o.n - below, c.nMin - 1)) + h / 2, bmp.h);
   const k = o.rowPx / h;
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const dpr = o.dpr ?? Math.min(2, window.devicePixelRatio || 1);
   const want = k * dpr * 1.1;
   if (want <= bmp.scale * 1.05) return null; // 이미 충분히 선명
   const canvas = await renderRegion(pdf, page, want, yTop, yBot);

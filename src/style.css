@@ -511,3 +511,4 @@ body.peeking #nextBtn { background: var(--lav-l); color: var(--lav-ink); border-
   .now-head .prog-col .work .btn{order:2;flex:none}
 }
 .work-eta .eta-seg.sub{color:var(--ink-2);font-size:.68rem}
+@media (max-width:600px){ .chartview{max-height:max(260px,46vh)} }
