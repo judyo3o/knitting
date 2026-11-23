@@ -7,7 +7,7 @@ import { cellKeyColor, chartBitmap, chartKey, clearBitmaps, splitChartByGap, lab
 import { getFile, putFile } from "./db";
 import { getCell, longestFloat, rowColors } from "./drawing";
 import {
-  applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, spanParts, finishText, etaText, continuousKnitMs, castLabel, flexibleRow, addRowAfter, removeRow, workIn, workStart, workStop, sideOf, stepNext, stepPrev, resetPart, markBefore, rewindTo, EARLIER, repOf, isSkipped, inExtraPass, upcomingRow, fmtDur,
+  applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, spanParts, finishText, etaText, continuousKnitMs, castLabel, flexibleRow, addRowAfter, removeRow, workIn, workStart, workStop, sideOf, stepNext, stepPrev, resetPart, markBefore, rewindTo, EARLIER, repOf, repRowText, isSkipped, inExtraPass, upcomingRow, fmtDur,
 } from "./model";
 import { blobB64, canvasBlob, renderRegion, textItems } from "./pdf";
 import type { Guide } from "./symbolid";
@@ -313,14 +313,16 @@ function nowCard(p: Pattern, r: Row) {
     const nowPass = inExtraPass(p, s) ? `한 번 더 뜨는 중 ${rp.pass}/${rp.times}회차` : `처음 회차 — ${rp.to}단을 뜨면 ${rp.from}단으로 돌아가 ${rp.times}번 더 떠요`;
     card.append(h("p", { class: "span-note rep-note", text: `기장 늘리기 구간 ${rp.from}~${rp.to}단${rp.label ? ` (${rp.label})` : ""} · ${nowPass}` }));
     if (rp.keep && inExtraPass(p, s) && (p.shape?.[s]?.shaping.includes(r.n) || /k2tog|ssk|줄임|줄음/i.test(r.t || "")))
-      card.append(h("p", { class: "span-note rep-note warn", text: "이번 회차에는 이 단의 줄임(ssk·k2tog)을 하지 말고, 그 자리 코를 무늬대로 떠요 (콧수 유지)." }));
+      card.append(h("p", { class: "span-note rep-note warn", text: repRowText(p, s, r.n) ? "이번 회차에는 이 단의 줄임을 하지 않아요 — 아래 서술에 이미 반영했어요 (콧수 유지)." : "이번 회차에는 이 단의 줄임(ssk·k2tog)을 하지 말고, 그 자리 코를 무늬대로 떠요 (콧수 유지)." }));
   }
   // 다른 주기의 무늬(예: 지그재그 20단)는 추가 회차부터 끝까지 차트 n+by단을 보고 떠서 이음매 없이 이어지게
   if (rp && rp.times > 0 && rp.shift && (inExtraPass(p, s) || ((rp.pass || 0) >= rp.times && r.n > rp.to))) {
     const last = Math.max(...list.map((x) => x.n));
     let m = r.n + rp.shift.by;
     while (m > last) m -= rp.shift.P;
-    card.append(h("p", { class: "span-note rep-note warn", text: `${rp.shift.label}만 차트 ${m}단 줄을 보고 떠요 (구간을 더 떠서 생긴 차이를 맞춰 이음매 없이 이어지게). 나머지는 이 단(${r.n}단) 줄대로.` }));
+    card.append(h("p", { class: "span-note rep-note warn", text: repRowText(p, s, r.n)
+      ? `${rp.shift.label}는 차트 ${m}단 줄과 같은 위치예요 — 아래 서술에 이미 맞춰 놨어요.`
+      : `${rp.shift.label}만 차트 ${m}단 줄을 보고 떠요 (구간을 더 떠서 생긴 차이를 맞춰 이음매 없이 이어지게). 나머지는 이 단(${r.n}단) 줄대로.` }));
   }
   if (rp && rp.times < 0 && r.n === rp.from - 1) card.append(h("p", { class: "span-note rep-note", text: `기장 줄이기: 이 단 다음은 ${rp.to + 1}단이에요 (${rp.from}~${rp.to}단 빼기)` }));
   if (isSkipped(p, s, r.n)) card.append(h("p", { class: "span-note rep-note", text: `이 단은 기장 줄이기로 빼기로 한 구간(${rp!.from}~${rp!.to}단)이에요.` }));
@@ -888,6 +890,12 @@ function narrative(p: Pattern, r: Row) {
         h("span", { class: "gen", text: `차트 p${gd.page} 위 가이드 라인에서 ${p.size ? p.size + " 사이즈 " : ""}${gd.g.st.length}코를 읽었어요${ws ? " (안면이라 겉·안을 바꿔 적음)" : ""}.` }),
       );
     }).catch(() => body.isConnected && plain());
+    return wrap;
+  }
+  // 기장 늘리기로 미리 풀어 둔 서술 (추가 회차: 줄임 생략 · 다른 주기 무늬 위치 맞춤)
+  const alt = repRowText(p, r.s, r.n);
+  if (alt) {
+    wrap.append(h("p", { class: "gen", text: "기장 늘리기에 맞춰 풀어 둔 서술이에요 (차트와 무늬 위치가 다를 수 있어요)." }), chunkBox(p, r, chunksOf(alt)));
     return wrap;
   }
   // 서술 없이 '차트를 따라 진행'뿐인 단: 기기에서 차트를 읽어 그 단의 서술을 만들어 보여 준다

@@ -192,6 +192,14 @@ export function inExtraPass(p: Pattern, s: string): boolean {
   const n = p.pos[s];
   return !!r && r.times > 0 && (r.pass || 0) > 0 && n != null && n >= r.from && n <= r.to;
 }
+/** 기장 늘리기로 미리 풀어 둔 서술: 추가 회차 단은 "x37", 추가 회차를 다 뜬 뒤의 단은 "61" */
+export function repRowText(p: Pattern, s: string, n: number): string | null {
+  const r = repOf(p, s);
+  if (!r || r.times <= 0 || !r.text) return null;
+  if (inExtraPass(p, s) && p.pos[s] === n && r.text["x" + n]) return r.text["x" + n];
+  if (n > r.to && (r.pass || 0) >= r.times && r.text[String(n)]) return r.text[String(n)];
+  return null;
+}
 /** 추가 반복으로 이미 뜬 단 수 */
 export function repExtraDone(p: Pattern, s: string): number {
   const r = repOf(p, s);

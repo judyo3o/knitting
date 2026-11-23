@@ -291,7 +291,7 @@ export function openGauge(p: Pattern, onSaved: () => void, onResize?: (size: str
       if (r.times > 0 && sh.length) {
         const cb = h("input", { type: "checkbox", checked: !!r.keep, on: { change: () => { r.keep = cb.checked || undefined; renderRep(); } } });
         repBox.append(h("label", { class: "gen rep-keep" }, cb, ` 더 뜨는 회차에는 줄임·늘림(${sh.join("·")}단) 하지 않기 — 콧수 유지`,
-          r.keep ? ` (소매 끝이 약 ${sh.length * 2 * r.times}코 더 많아져요. 다음 파트 첫 단에서 고르게 줄여 맞춰요)` : ""));
+          r.keep ? " (첫 회차에서 줄인 콧수 그대로 더 떠서, 끝 콧수는 도안과 같아요)" : ` (안 고르면 줄임이 ${sh.length * r.times}번 더 들어가 끝이 약 ${sh.length * 2 * r.times}코 줄어요)`));
       }
     }
     // 직접 정하기
