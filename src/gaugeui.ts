@@ -286,6 +286,13 @@ export function openGauge(p: Pattern, onSaved: () => void, onResize?: (size: str
         h("span", {}, h("b", { text: `${s}: ` }), r.times < 0 ? `${r.from}~${r.to}단 빼기 (${len}단)` : `${r.from}~${r.to}단을 ${r.times}번 더 (${len * r.times}단)`, r.label ? ` · ${r.label}` : ""),
         twin(s) && !reps[twin(s)!] ? h("button", { class: "link", type: "button", text: `${twin(s)}도 똑같이`, on: { click: () => { reps[twin(s)!] = { ...r, pass: 0 }; if (shapes[s] && !shapes[twin(s)!]) shapes[twin(s)!] = shapes[s]; renderRep(); } } }) : null,
         h("button", { class: "link", type: "button", text: "원래대로", on: { click: () => { delete reps[s]; renderRep(); } } })));
+      // 한 번 더 뜨는 구간에 줄임·늘림 단이 있으면: 추가 회차에서 그 줄임을 할지
+      const sh = (shapes[s] || shapeOf(s))?.shaping.filter((n) => n >= r.from && n <= r.to) || [];
+      if (r.times > 0 && sh.length) {
+        const cb = h("input", { type: "checkbox", checked: !!r.keep, on: { change: () => { r.keep = cb.checked || undefined; renderRep(); } } });
+        repBox.append(h("label", { class: "gen rep-keep" }, cb, ` 더 뜨는 회차에는 줄임·늘림(${sh.join("·")}단) 하지 않기 — 콧수 유지`,
+          r.keep ? ` (소매 끝이 약 ${sh.length * 2 * r.times}코 더 많아져요. 다음 파트 첫 단에서 고르게 줄여 맞춰요)` : ""));
+      }
     }
     // 직접 정하기
     const a = h("input", { type: "number", min: 1, inputmode: "numeric", placeholder: "시작 단", style: "width:5.5em", "aria-label": "구간 시작 단" });

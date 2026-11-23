@@ -516,3 +516,5 @@ body.peeking #nextBtn { background: var(--lav-l); color: var(--lav-ink); border-
 .chart-resize{height:18px;margin-top:-4px;display:flex;align-items:center;justify-content:center;cursor:ns-resize;touch-action:none;user-select:none}
 .chart-resize span{width:48px;height:5px;border-radius:3px;background:var(--rule)}
 .chart-resize:hover span,.chart-resize.on span{background:var(--pink)}
+.rep-note.warn{color:#8A3B12;background:#FCEBDD}
+.rep-keep{display:flex;gap:6px;align-items:flex-start;margin:-2px 0 6px}

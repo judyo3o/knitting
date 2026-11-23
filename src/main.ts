@@ -312,6 +312,8 @@ function nowCard(p: Pattern, r: Row) {
   if (rp && rp.times > 0 && r.n >= rp.from && r.n <= rp.to) {
     const nowPass = inExtraPass(p, s) ? `한 번 더 뜨는 중 ${rp.pass}/${rp.times}회차` : `처음 회차 — ${rp.to}단을 뜨면 ${rp.from}단으로 돌아가 ${rp.times}번 더 떠요`;
     card.append(h("p", { class: "span-note rep-note", text: `기장 늘리기 구간 ${rp.from}~${rp.to}단${rp.label ? ` (${rp.label})` : ""} · ${nowPass}` }));
+    if (rp.keep && inExtraPass(p, s) && (p.shape?.[s]?.shaping.includes(r.n) || /k2tog|ssk|줄임|줄음/i.test(r.t || "")))
+      card.append(h("p", { class: "span-note rep-note warn", text: "이번 회차에는 이 단의 줄임(ssk·k2tog)을 하지 말고, 그 자리 코를 무늬대로 떠요 (콧수 유지)." }));
   }
   if (rp && rp.times < 0 && r.n === rp.from - 1) card.append(h("p", { class: "span-note rep-note", text: `기장 줄이기: 이 단 다음은 ${rp.to + 1}단이에요 (${rp.from}~${rp.to}단 빼기)` }));
   if (isSkipped(p, s, r.n)) card.append(h("p", { class: "span-note rep-note", text: `이 단은 기장 줄이기로 빼기로 한 구간(${rp!.from}~${rp!.to}단)이에요.` }));
