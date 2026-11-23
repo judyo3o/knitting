@@ -95,7 +95,7 @@ export type DrawOpt = {
 /** 파트의 무늬 단위 (기기에서 차트·서술을 읽어 찾음): P단마다 되풀이, shaping = 줄임·늘림 단 */
 export type PartShape = { units: { P: number; cols: number }[]; shaping: number[]; src: "chart" | "text" | "plain"; at?: number };
 
-export type Rep = { from: number; to: number; times: number; pass?: number; label?: string; keep?: boolean }; // keep: 추가 회차에는 줄임·늘림을 하지 않고 콧수 유지
+export type Rep = { from: number; to: number; times: number; pass?: number; label?: string; keep?: boolean; shift?: { label: string; by: number; P: number } }; // shift: 추가 회차부터 끝까지 이 무늬는 차트 n+by단(주기 P)을 보고 떠서 이음매 없이 // keep: 추가 회차에는 줄임·늘림을 하지 않고 콧수 유지
 
 /** 10cm(기본) 안 콧수·단수 */
 export type Gauge = { st: number; rows: number };

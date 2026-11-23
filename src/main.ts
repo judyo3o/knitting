@@ -315,6 +315,13 @@ function nowCard(p: Pattern, r: Row) {
     if (rp.keep && inExtraPass(p, s) && (p.shape?.[s]?.shaping.includes(r.n) || /k2tog|ssk|줄임|줄음/i.test(r.t || "")))
       card.append(h("p", { class: "span-note rep-note warn", text: "이번 회차에는 이 단의 줄임(ssk·k2tog)을 하지 말고, 그 자리 코를 무늬대로 떠요 (콧수 유지)." }));
   }
+  // 다른 주기의 무늬(예: 지그재그 20단)는 추가 회차부터 끝까지 차트 n+by단을 보고 떠서 이음매 없이 이어지게
+  if (rp && rp.times > 0 && rp.shift && (inExtraPass(p, s) || ((rp.pass || 0) >= rp.times && r.n > rp.to))) {
+    const last = Math.max(...list.map((x) => x.n));
+    let m = r.n + rp.shift.by;
+    while (m > last) m -= rp.shift.P;
+    card.append(h("p", { class: "span-note rep-note warn", text: `${rp.shift.label}만 차트 ${m}단 줄을 보고 떠요 (구간을 더 떠서 생긴 차이를 맞춰 이음매 없이 이어지게). 나머지는 이 단(${r.n}단) 줄대로.` }));
+  }
   if (rp && rp.times < 0 && r.n === rp.from - 1) card.append(h("p", { class: "span-note rep-note", text: `기장 줄이기: 이 단 다음은 ${rp.to + 1}단이에요 (${rp.from}~${rp.to}단 빼기)` }));
   if (isSkipped(p, s, r.n)) card.append(h("p", { class: "span-note rep-note", text: `이 단은 기장 줄이기로 빼기로 한 구간(${rp!.from}~${rp!.to}단)이에요.` }));
   {
