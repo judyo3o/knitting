@@ -7,7 +7,7 @@ import { cellKeyColor, chartBitmap, chartKey, clearBitmaps, splitChartByGap, lab
 import { getFile, putFile } from "./db";
 import { getCell, longestFloat, rowColors } from "./drawing";
 import {
-  applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, spanParts, finishText, etaText, continuousKnitMs, castLabel, flexibleRow, addRowAfter, removeRow, workIn, workStart, workStop, sideOf, stepNext, stepPrev, resetPart, markBefore, rewindTo, EARLIER, repOf, repRowText, isSkipped, inExtraPass, upcomingRow, fmtDur,
+  applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, spanParts, rowNarrative, stitchesOnNeedle, finishText, etaText, continuousKnitMs, castLabel, flexibleRow, addRowAfter, removeRow, workIn, workStart, workStop, sideOf, stepNext, stepPrev, resetPart, markBefore, rewindTo, EARLIER, repOf, repRowText, isSkipped, inExtraPass, upcomingRow, fmtDur,
 } from "./model";
 import { blobB64, canvasBlob, renderRegion, textItems } from "./pdf";
 import type { Guide } from "./symbolid";
@@ -190,7 +190,7 @@ export function render() {
   const nb = $("#nextBtn");
   nb.innerHTML = "";
   const nx = r === currentRow(p, s) ? upcomingRow(p, s) : list[list.indexOf(r) + 1];
-  const pv = nx && !prog.finished ? `${nx.n}단 · ${(splitNarrative(nx.t || "").chunks.slice(0, 3).join(", ") || spanParts(nx.t, nx.span).each).slice(0, 28)}…` : "";
+  const pv = nx && !prog.finished ? `${nx.n}단 · ${(splitNarrative(rowNarrative(nx), stitchesOnNeedle(p, nx)).chunks.slice(0, 3).join(", ") || spanParts(nx.t, nx.span, nx.n).each).slice(0, 28)}…` : "";
   nb.append(h("span", { text: prog.finished ? "다음 파트로 →" : isLast ? "이 파트 완료 ✓" : "다음 단 →" }), pv ? h("small", { text: pv }) : "");
 }
 
@@ -345,7 +345,7 @@ function nowCard(p: Pattern, r: Row) {
       removeRow(p, s, r.n); p.rev++; commit(p); render(); toast(`${r.n}단을 뺐어요.`);
     } } }) : null));
   if (r.span) {
-    const sp = spanParts(r.t, r.span);
+    const sp = spanParts(r.t, r.span, r.n);
     const last = r.n === r.span[1];
     card.append(h("p", { class: "span-note", text: `${r.span[0]}~${r.span[1]}단 공통: ${sp.each}` + (sp.end ? (last ? ` · 이 단을 다 뜨면 → ${sp.end}` : ` · (${r.span[1]}단까지 다 뜬 뒤에 → ${sp.end})`) : "") }));
   }
@@ -852,7 +852,7 @@ function chartPicker(p: Pattern, r: Row) {
 /* ---------------- 서술 (묶음 단위 진행) ---------------- */
 function narrative(p: Pattern, r: Row) {
   const k = key(r.s, r.n);
-  const chunks = splitNarrative(r.t || "").chunks;
+  const chunks = splitNarrative(rowNarrative(r), stitchesOnNeedle(p, r)).chunks;
   const wrap = h("div", { style: "display:flex;flex-direction:column;gap:6px" });
   if (r.auto) wrap.append(h("span", { class: "gen", text: "그린 배색에서 만든 서술 · " + (sideOf(p, r) === "RS" || p.secs[r.s]?.round ? "오른쪽부터 읽음" : "왼쪽부터 읽음") }));
   if (view.editing) {
@@ -868,7 +868,7 @@ function narrative(p: Pattern, r: Row) {
   }
   // 고무단 가이드 라인을 참고하라는 단: 차트 위 가이드 줄을 기기에서 읽어 내 사이즈 콧수까지
   if (guidePage(p, r)) {
-    const nar = splitNarrative(r.t || "");
+    const nar = splitNarrative(rowNarrative(r), stitchesOnNeedle(p, r));
     const body = h("div", { style: "display:flex;flex-direction:column;gap:6px" });
     const plain = () => {
       body.innerHTML = "";
@@ -917,7 +917,7 @@ function narrative(p: Pattern, r: Row) {
     return wrap;
   }
   // 안내 문장은 위에 따로, 코 지시만 묶음으로
-  const nar = splitNarrative(r.t || "");
+  const nar = splitNarrative(rowNarrative(r), stitchesOnNeedle(p, r));
   for (const n of nar.notes) wrap.append(h("p", { class: "instr note", text: n }));
   if (!nar.chunks.length) {
     if (!nar.notes.length) wrap.append(h("p", { class: "instr", text: "(서술 없음)" }));
@@ -1156,7 +1156,7 @@ async function guideCanvas(p: Pattern, page: number, g: Guide, rowPx: number): P
 async function scrollToProgress(p: Pattern, r: Row, cv: HTMLElement, c: HTMLCanvasElement, res: { chart: any; x0: number; yTop: number; k: number }) {
   const prog = p.part[key(r.s, r.n)];
   if (!prog || !res.chart) return;
-  const chunks = wantsChartText(p, r) ? chunksOf((await chartRowText(p, r)) || "") : splitNarrative(r.t || "").chunks;
+  const chunks = wantsChartText(p, r) ? chunksOf((await chartRowText(p, r)) || "") : splitNarrative(rowNarrative(r), stitchesOnNeedle(p, r)).chunks;
   const count = stitchesThrough(chunks, prog.i);
   if (!count) return;
   const st = await chartRowStitches(p, r);

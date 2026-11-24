@@ -494,6 +494,30 @@ describe("서술 줄 나누기", () => {
   });
 });
 
+describe("단 끝까지 반복 · 공통 단의 준비 문장", () => {
+  it("[…]를 단 끝까지 반복은 바늘 콧수로 횟수를 정해 풀어 쓴다", async () => {
+    const { splitNarrative } = await import("../src/chunks");
+    const r = splitNarrative("큰 줄바늘(5mm)로 바꾸기. [겉6, 안2, 겉2, 안2]를 단 끝까지 반복", 96);
+    expect(r.notes).toEqual(["큰 줄바늘(5mm)로 바꾸기."]);
+    expect(r.chunks.filter((c) => c === "겉6").length).toBe(8);
+    expect(r.chunks[0]).toBe("▸ 1/8회");
+    const d = splitNarrative("[ssk, 겉2, k2tog, 안2, 겉2, 안2]를 단 끝까지 반복 (5~10단과 동일)", 96);
+    expect(d.chunks.filter((c) => c === "ssk").length).toBe(8);
+    // 콧수를 모르거나 나누어떨어지지 않으면 한 묶음 그대로
+    expect(splitNarrative("[겉6, 안2, 겉2, 안2]를 단 끝까지 반복", 90).chunks.length).toBe(1);
+  });
+  it("1~3단 공통의 바늘 바꾸기는 1단에만, 콧수는 앞 단에서", async () => {
+    const { rowNarrative, stitchesOnNeedle, spanParts } = await import("../src/model");
+    const t = "큰 줄바늘(5mm)로 바꾸기. [겉6, 안2, 겉2, 안2]를 단 끝까지 반복";
+    const r1 = { s: "몸통", n: 1, t, st: null, span: [1, 3] } as any, r2 = { ...r1, n: 2 };
+    expect(rowNarrative(r1)).toBe(t);
+    expect(rowNarrative(r2)).toBe("[겉6, 안2, 겉2, 안2]를 단 끝까지 반복");
+    expect(spanParts(t, [1, 3], 2).each).not.toContain("바꾸기");
+    const p = { rows: [{ s: "고무단", n: 1, t: "96코 기초코", st: null }, { s: "몸통", n: 0, t: "", st: "96코" }, r1, r2] } as any;
+    expect(stitchesOnNeedle(p, r2)).toBe(96);
+  });
+});
+
 describe("원본 쪽에서 이 단 자리", () => {
   it("한 쪽에 다른 사이즈가 섞여 있어도 내 사이즈 구역의 그 단", async () => {
     const { findRowSpot } = await import("../src/pdfgeom");
@@ -1024,6 +1048,7 @@ it("교차 모으기(2/2 kRCtog)·겉1 tbl·중첩 없는 8번 반복 콧수", a
   const { countChunk, chunksOf, stitchesThrough } = await import("../src/chunks");
   expect(countChunk("2/2 kRCtog")).toBe(4);
   expect(countChunk("겉1 tbl")).toBe(1);
+  expect(countChunk("C2/2L")).toBe(4);
   const c = chunksOf("[안1, ktbl, 안1, 겉1, k2togk, 겉1, 안1, ktbl, 안1, 2/2 kRCtog, 겉8, 2/2 kLCtog] 4번 반복 (88코)");
   expect(c.length).toBe(4 * 13);
   expect(c.at(-1)).toBe("2/2 kLCtog (88코)");

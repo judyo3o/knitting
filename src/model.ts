@@ -444,11 +444,36 @@ export function partStitches(rows: Row[]): number | null {
   return best ? best[0] : null;
 }
 
+/** 이 단을 시작할 때 바늘에 있는 콧수: 같은 파트 앞 단의 끝 콧수 > 파트 기초코 */
+export function stitchesOnNeedle(p: Pattern, r: Row): number | null {
+  const mine = p.rows.filter((x) => x.s === r.s);
+  const i = mine.indexOf(r);
+  for (let j = (i < 0 ? mine.length : i) - 1; j >= 0; j--) {
+    const m = (mine[j].st || "").match(/\d{1,4}/);
+    if (m) return +m[0];
+  }
+  const own = partStitches(mine);
+  if (own) return own;
+  for (let j = p.rows.indexOf(r) - 1; j >= 0; j--) { const m = (p.rows[j].st || "").match(/\d{1,4}/); if (m) return +m[0]; }
+  return null;
+}
+
+/** 한 번만 하는 준비 문장 (바늘 바꾸기, 원형 연결, 기초코, 마커 걸기) */
+const SETUP_RE = /바늘\S*\s*(?:로|으로)?\s*(?:바꾸|바꿔|교체|갈아)|(?:change|switch)\s+to\b|원형으로\s*연결|\bjoin\b|기초코|코잡기|cast\s*on|\bCO\b|PM\s*(?:후|하고|걸)|마커를?\s*(?:걸|끼)/i;
+
+/** 여러 단 공통 서술에서 첫 단이 아니면 준비 문장은 뺀다 ("1~3단: 큰 바늘로 바꾸기. [겉6, 안2…]" → 2·3단은 무늬만) */
+export function rowNarrative(r: Row): string {
+  const t = r.t || "";
+  if (!r.span || r.n === r.span[0]) return t;
+  return t.split(/\n+/).map((l) => l.split(/(?<=[.。])\s+/).filter((x) => !SETUP_RE.test(x) || /[\[【]/.test(x)).join(" ")).filter((l) => l.trim()).join("\n");
+}
+
 /**
  * 여러 단 공통 지시("16단~58단까지 차트를 따라 진행합니다. 이제 바늘에 96코예요. 실을 자르고 코를 쉼코로 둡니다.")를
  * 매 단 할 일(each)과 다 뜬 뒤에 할 일(end)로 나눈다. 다른 범위("16단~66단", 다른 사이즈)를 가리키는 줄은 뺀다.
  */
-export function spanParts(t: string, span: [number, number] | null): { each: string; end: string } {
+export function spanParts(t: string, span: [number, number] | null, n: number | null = null): { each: string; end: string } {
+  if (span && n != null && n !== span[0]) t = rowNarrative({ t, span, n } as Row);
   const RANGE = /(\d{1,3})\s*단\s*[~\-–]\s*(\d{1,3})\s*단/;
   let lines = (t || "").split(/\n+/).map((l) => l.trim()).filter(Boolean);
   if (span) {
@@ -471,7 +496,7 @@ export function spanParts(t: string, span: [number, number] | null): { each: str
  */
 export function expandLengthRepeats(p: Pattern): void {
   const per10 = rowGaugeFor(p.gauges, false) || 0;
-  const LEN = /(?:for|until[^.]*?measures?)\s*(\d+(?:\.\d+)?)\s*(?:"|”|in(?:ches)?\b)\s*(?:\[\s*(\d+(?:\.\d+)?)\s*cm\s*\])?|(\d+(?:\.\d+)?)\s*cm\s*(?:가\s*될\s*때까지|까지|만큼)/i;
+  const LEN = /(?:for|until[^.]*?measures?)\s*(\d+(?:\.\d+)?)\s*(?:"|”|in(?:ches)?\b)\s*(?:\[\s*(\d+(?:\.\d+)?)\s*cm\s*\])?|(\d+(?:\.\d+)?)\s*cm\s*\)?\s*(?:가\s*될\s*때까지|까지|만큼)/i;
   const REP = /rep(?:eat)?\s+(?:the\s+)?last\s+(\d+)\s+rows|(\d+)\s*단\s*(?:을|를)?\s*(?:반복|되풀이)|반복/i;
   // "36cm가 될 때까지 메리야스로" 같은 무늬 없는 길이 지시: 겉면 겉뜨기 · 안면 안뜨기 (원통은 모두 겉뜨기)
   const PLAIN = /메리야스|stockinette|st(?:ockinette)?\s*st\b|겉뜨기로|겉뜨기만|knit\s+every\s+(?:rnd|round)/i;
@@ -530,7 +555,7 @@ export function expandLengthRepeats(p: Pattern): void {
       // 반복할 서술: "(홀수 단: … / 짝수 단: …)" > 무늬 없는 메리야스 > 바로 앞 k단
       const odd = r.t.match(/홀수\s*단\s*[:：]\s*([^/]+?)\s*\/\s*짝수\s*단\s*[:：]\s*([^)]+)\)/);
       // "[안1, 겉1] 고무뜨기를 10cm가 될 때까지 반복" → 단마다 "[안1, 겉1] 끝까지 반복"
-      const brk = !odd && r.t.match(/([\[(][^\[\]()]*(?:겉|안|[kp]\d)[^\[\]()]*[\])])\s*(?:고무\s*뜨기|고무단|무늬|패턴)?\s*(?:을|를)?\s*[^.,·]*?(?:될\s*때까지|까지)\s*반복/);
+      const brk = !odd && r.t.match(/([\[(][^\[\]()]*(?:겉|안|[kp]\d)[^\[\]()]*[\])])\s*(?:고무\s*뜨기|고무단|무늬|패턴)?\s*(?:을|를)?\s*[^.,·]*?(?:될\s*때까지|까지)\s*반복/) || r.t.match(/([\[(][^\[\]()]*(?:겉|안|[kp]\d)[^\[\]()]*[\])])\s*(?:을|를)?\s*(?:단\s*)?끝까지\s*반복하며[^.]*?(?:될\s*때까지|까지)\s*뜨/);
       const prev = list.filter((x) => x.n < r.n).slice(-k);
       const textFor = (n: number) => {
         let t: string;
