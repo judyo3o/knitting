@@ -53,18 +53,23 @@ export function chunksOf(text: string): string[] {
 }
 
 /** "[안2, ktbl, …] 4번 반복"을 풀어 쓴다 (묶음마다 눌러 진행을 저장할 수 있게). 묶음이 4개 이상이면 회차 표시를 넣는다 */
-function expandRepeat(p: string): string[] {
+function expandRepeat(p0: string): string[] {
+  // 끝의 "(88코)"는 떼었다가 마지막 묶음에 다시 붙인다
+  const stm = p0.match(/\s*([\(\[（【]\s*(?:총\s*)?\d{1,4}\s*코[^\)\]）】]*[\)\]）】])\s*$/);
+  const p = stm ? p0.slice(0, p0.length - stm[0].length) : p0;
   const m = p.match(REP_RE);
+  if (!m) return [p0];
   if (!m) return [p];
   const n = +m[2];
   const inner = chunksOf(m[1]);
-  if (n < 2 || n > 40 || inner.length < 3 || inner.length * n > 400) return [p]; // (겉1, 안1) 같은 짧은 반복은 한 묶음 그대로
+  if (n < 2 || n > 40 || inner.length < 3 || inner.length * n > 400) return [p0]; // (겉1, 안1) 같은 짧은 반복은 한 묶음 그대로
   const mark = inner.length >= 4;
   const out: string[] = [];
   for (let i = 1; i <= n; i++) {
     if (mark) out.push(`▸ ${i}/${n}회`);
     out.push(...inner);
   }
+  if (stm) out[out.length - 1] += " " + stm[1];
   return out;
 }
 
@@ -77,7 +82,7 @@ export function splitNarrative(text: string): { notes: string[]; chunks: string[
   const isStitchLine = (l: string) => {
     const parts = splitTop(l.replace(/\s\/\s/g, ", "));
     const ok = parts.filter((x) => countChunk(x) != null || ST_MARK.test(x)).length;
-    return parts.length >= 2 && ok / parts.length >= 0.6;
+    return parts.length >= 2 ? ok / parts.length >= 0.6 : parts.length === 1 && /[\[(（【]/.test(parts[0]) && countChunk(parts[0]) != null; // "[…] 4번 반복" 한 덩어리 줄도
   };
   // 한 줄 안에 안내 문장과 코 지시가 붙어 있으면 ("…걸어줍니다. (… 됩니다) 안4, 겉2, …") 문장 끝에서 나눈다
   const lines = (text || "").split(/\n+/).map((l) => l.trim()).filter(Boolean).flatMap((l) => {
@@ -103,7 +108,8 @@ type Tok = { re: RegExp; n: (m: RegExpMatchArray) => number };
 const TOKENS: Tok[] = [
   { re: /^(\d+)\s*\/\s*(\d+)\s*(?:LPC|RPC|LC|RC)/i, n: (m) => +m[1] + +m[2] },
   { re: /^(?:k2togk|k2tog\s*k)(?![a-z])/i, n: () => 2 }, // 2코 모아 뜨고 빼지 않은 채 첫 코를 다시 겉뜨기 (2코 → 2코)
-  { re: /^(?:k1?\s*tbl|p1?\s*tbl|꼬아\s*(?:겉|안)\s*뜨기)(?![a-z])/i, n: () => 1 },
+  { re: /^(?:k1?\s*tbl|p1?\s*tbl|(?:겉|안)1?\s*tbl|꼬아\s*(?:겉|안)\s*뜨기)(?![a-z])/i, n: () => 1 },
+  { re: /^(\d+)\s*\/\s*(\d+)\s*k(?:RC|LC|CR|CL)tog(?![a-z])/i, n: (m) => +m[1] + +m[2] }, // 교차하며 2코씩 모으기 (4코 → 2코)
   { re: /^(?:k2tog\s*tbl|k2tog|p2tog|ssk|ssp|2코\s*모아\s*(?:겉|안)?\s*뜨기|왼코\s*겹치기|오른코\s*겹치기)/i, n: () => 2 },
   { re: /^(?:sk2p|s2kp|k3tog|p3tog|중심\s*3코\s*모아\s*뜨기|3코\s*모아\s*(?:겉|안)?\s*뜨기)/i, n: () => 3 },
   { re: /^(?:KDS|PDS|DS)(?![a-z])/i, n: () => 1 },

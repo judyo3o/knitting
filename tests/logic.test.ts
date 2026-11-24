@@ -1019,3 +1019,21 @@ it("[ ] 반복형 길이 단도 게이지가 바뀌면 원문을 살려 다시 �
   expect(rows[0].t).toContain("110코 CO");
   expect(rows.find((r) => r.n === 35)!.t).toBe("다음 단");
 });
+
+it("교차 모으기(2/2 kRCtog)·겉1 tbl·중첩 없는 8번 반복 콧수", async () => {
+  const { countChunk, chunksOf, stitchesThrough } = await import("../src/chunks");
+  expect(countChunk("2/2 kRCtog")).toBe(4);
+  expect(countChunk("겉1 tbl")).toBe(1);
+  const c = chunksOf("[안1, ktbl, 안1, 겉1, k2togk, 겉1, 안1, ktbl, 안1, 2/2 kRCtog, 겉8, 2/2 kLCtog] 4번 반복 (88코)");
+  expect(c.length).toBe(4 * 13);
+  expect(c.at(-1)).toBe("2/2 kLCtog (88코)");
+  expect(stitchesThrough(c, c.length - 1)).toBe(104);
+});
+
+it("안내 줄 + '[…] N번 반복' 한 줄이면 안내는 위에, 반복은 묶음으로", async () => {
+  const { splitNarrative } = await import("../src/chunks");
+  const r = splitNarrative("차트 3 · 1단\n[안1, ktbl, 안1, 겉1, k2togk, 겉1, 안1, ktbl, 안1, 2/2 kRCtog, 겉8, 2/2 kLCtog] 4번 반복 (88코)");
+  expect(r.notes).toEqual(["차트 3 · 1단"]);
+  expect(r.chunks[0]).toBe("▸ 1/4회");
+  expect(r.chunks.length).toBe(52);
+});
