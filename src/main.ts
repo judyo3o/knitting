@@ -1,5 +1,5 @@
 import "./style.css";
-import { chunksOf, splitNarrative, stitchesThrough } from "./chunks";
+import { chunksOf, splitNarrative, stitchesThrough, REP_MARK } from "./chunks";
 import { MAX_TOKENS } from "./config";
 import { callAi, canCallDirect, errCopy } from "./ai";
 import { inArtifact, whenArtifact } from "./artifact";
@@ -985,7 +985,7 @@ function chunkBox(p: Pattern, r: Row, chunks: string[]) {
   chunks.forEach((c, i) => {
     const codes = colorsInText(c, p.colors);
     const dot = codes.length ? h("span", { class: "dot", style: { background: yarnHex(p.colors.find((y) => y.code === codes[0]), p.colors.findIndex((y) => y.code === codes[0])) } }) : null;
-    const b = h("button", { class: "chunk" + (i <= at ? " done" : "") + (i === at ? " last" : ""), type: "button", role: "listitem", "aria-pressed": String(i <= at) }, dot, c);
+    const b = h("button", { class: "chunk" + (REP_MARK.test(c) ? " rep-mark" : "") + (i <= at ? " done" : "") + (i === at ? " last" : ""), type: "button", role: "listitem", "aria-pressed": String(i <= at) }, dot, c);
     b.onclick = () => {
       if (p.part[k] && p.part[k].i === i) {
         if (i === 0) delete p.part[k];

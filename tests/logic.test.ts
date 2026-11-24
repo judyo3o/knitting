@@ -979,3 +979,15 @@ it("묶음까지 뜬 코 수: 마커 묶음은 0코로 건너뛴다", async () =
   const { stitchesThrough } = await import("../src/chunks");
   expect(stitchesThrough(["안4", "겉2", "마커", "안2", "SM", "겉3"], 5)).toBe(11);
 });
+
+it("긴 [ ] N번 반복은 묶음으로 풀어 쓰고 회차 표시를 넣는다 (ktbl, k2togk, N번도 센다)", async () => {
+  const { chunksOf, countChunk, stitchesThrough } = await import("../src/chunks");
+  const c = chunksOf("[안2, ktbl, 안2, k2togk 2번, 안2, ktbl, 안2, 겉4, 2/2 RC, 2/2 LC, 겉4] 4번 반복");
+  expect(c[0]).toBe("▸ 1/4회");
+  expect(c.filter((x) => x.startsWith("▸")).length).toBe(4);
+  expect(c.length).toBe(4 * 12);
+  expect(countChunk("k2togk 2번")).toBe(4);
+  expect(countChunk("ktbl")).toBe(1);
+  expect(stitchesThrough(c, c.length - 1)).toBe(120);
+  expect(chunksOf("(겉1, 안1) 4번 반복")).toEqual(["(겉1, 안1) 4번 반복"]);
+});

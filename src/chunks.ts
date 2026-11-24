@@ -37,13 +37,33 @@ export function splitTop(text: string): string[] {
   return out;
 }
 
+/** 반복 회차 표시 묶음 ("▸ 2/4회") — 코를 쓰지 않는다 */
+export const REP_MARK = /^▸\s*\d+\/\d+회$/;
+const REP_RE = /^[\(\[（【](.*)[\)\]）】]\s*(?:을|를)?\s*(?:총\s*)?(\d+)\s*(?:번|회|x|times)\s*(?:반복)?$/i;
+
 export function chunksOf(text: string): string[] {
   const parts = splitTop(text || "");
   // 맨 끝 "(206코)"는 앞 묶음에 붙여 보여준다
   const out: string[] = [];
   for (const p of parts) {
     if (ST_MARK.test(p) && out.length) out[out.length - 1] += " " + p;
-    else out.push(p);
+    else out.push(...expandRepeat(p));
+  }
+  return out;
+}
+
+/** "[안2, ktbl, …] 4번 반복"을 풀어 쓴다 (묶음마다 눌러 진행을 저장할 수 있게). 묶음이 4개 이상이면 회차 표시를 넣는다 */
+function expandRepeat(p: string): string[] {
+  const m = p.match(REP_RE);
+  if (!m) return [p];
+  const n = +m[2];
+  const inner = chunksOf(m[1]);
+  if (n < 2 || n > 40 || inner.length < 3 || inner.length * n > 400) return [p]; // (겉1, 안1) 같은 짧은 반복은 한 묶음 그대로
+  const mark = inner.length >= 4;
+  const out: string[] = [];
+  for (let i = 1; i <= n; i++) {
+    if (mark) out.push(`▸ ${i}/${n}회`);
+    out.push(...inner);
   }
   return out;
 }
@@ -82,6 +102,8 @@ export function splitNarrative(text: string): { notes: string[]; chunks: string[
 type Tok = { re: RegExp; n: (m: RegExpMatchArray) => number };
 const TOKENS: Tok[] = [
   { re: /^(\d+)\s*\/\s*(\d+)\s*(?:LPC|RPC|LC|RC)/i, n: (m) => +m[1] + +m[2] },
+  { re: /^(?:k2togk|k2tog\s*k)(?![a-z])/i, n: () => 2 }, // 2코 모아 뜨고 빼지 않은 채 첫 코를 다시 겉뜨기 (2코 → 2코)
+  { re: /^(?:k1?\s*tbl|p1?\s*tbl|꼬아\s*(?:겉|안)\s*뜨기)(?![a-z])/i, n: () => 1 },
   { re: /^(?:k2tog\s*tbl|k2tog|p2tog|ssk|ssp|2코\s*모아\s*(?:겉|안)?\s*뜨기|왼코\s*겹치기|오른코\s*겹치기)/i, n: () => 2 },
   { re: /^(?:sk2p|s2kp|k3tog|p3tog|중심\s*3코\s*모아\s*뜨기|3코\s*모아\s*(?:겉|안)?\s*뜨기)/i, n: () => 3 },
   { re: /^(?:KDS|PDS|DS)(?![a-z])/i, n: () => 1 },
@@ -106,6 +128,12 @@ export function countChunk(chunk: string): number | null {
     const inner = splitTop(rep[1]).map(countChunk);
     if (inner.some((v) => v == null)) return null;
     return (inner as number[]).reduce((a, b) => a + b, 0) * +rep[2];
+  }
+  // "k2togk 2번" 같은 한 기법 N번
+  const times = s.match(/^([^\[\(（【]+?)\s*(\d+)\s*번$/);
+  if (times && !/반복$/.test(s)) {
+    const one = countChunk(times[1]);
+    return one == null ? null : one * +times[2];
   }
   if (/^[\(\[（【].*[\)\]）】]$/.test(s)) {
     const inner = splitTop(s.slice(1, -1)).map(countChunk);
@@ -150,7 +178,7 @@ export function stitchesThrough(chunks: string[], i: number): number | null {
     const c = countChunk(chunks[k]);
     if (c == null) {
       // "마커" "PM" 같은 코를 쓰지 않는 묶음은 0코
-      if (/^(?:마커\s*(?:옮기기|걸기|빼기)?|pm|sm|rm)$/i.test(chunks[k].trim())) continue;
+      if (/^(?:마커\s*(?:옮기기|걸기|빼기)?|pm|sm|rm)$/i.test(chunks[k].trim()) || REP_MARK.test(chunks[k].trim())) continue;
       return null;
     }
     sum += c;

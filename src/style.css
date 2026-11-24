@@ -518,3 +518,4 @@ body.peeking #nextBtn { background: var(--lav-l); color: var(--lav-ink); border-
 .chart-resize:hover span,.chart-resize.on span{background:var(--pink)}
 .rep-note.warn{color:#8A3B12;background:#FCEBDD}
 .rep-keep{display:flex;gap:6px;align-items:flex-start;margin:-2px 0 6px}
+.chunk.rep-mark{background:transparent;border-style:dashed;color:var(--lav-ink);font-size:.8rem;padding-inline:8px}
