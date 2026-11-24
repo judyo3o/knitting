@@ -230,5 +230,5 @@ export async function coverPhoto(pdf: Pdf, max = 240): Promise<string | null> {
   c.width = cw; c.height = ch;
   c.getContext("2d")!.drawImage(page, Math.round(best.x0 * k), 0, cw, ch, 0, 0, cw, ch);
   page.width = page.height = 0;
-  return c.toDataURL("image/jpeg", 0.8);
+  return c.toDataURL("image/jpeg", max > 600 ? 0.9 : 0.8);
 }

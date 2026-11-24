@@ -77,7 +77,7 @@ function swatch(p: Pattern, size: number) {
 }
 /** 목록 썸네일: 완성 사진이 있으면 사진, 없으면 실 색 스와치 */
 function thumbOf(p: Pattern, size: number) {
-  if (p.photo) return h("img", { class: "swatch photo", src: p.photo, alt: "", style: { width: size + "px", height: size + "px" } });
+  if (p.photo) return h("img", { class: "swatch photo zoomable", src: p.photo, alt: `${p.name} 완성 사진 크게 보기`, title: "사진 크게 보기", style: { width: size + "px", height: size + "px" }, on: { click: (e: Event) => { e.stopPropagation(); e.preventDefault(); showPhoto(p); } } });
   const el = swatch(p, size);
   el.dataset.pid = p.id;
   return el;
@@ -101,6 +101,14 @@ async function fillPhotos(pats: Pattern[]) {
       });
     }
   } finally { photoBusy = false; }
+}
+/** 완성 사진만 크게 (PDF 도안이면 도안에서 선명하게 다시 뽑는다) */
+function showPhoto(p: Pattern) {
+  if (!p.photo) return;
+  const img = h("img", { class: "photo-big", src: p.photo, alt: `${p.name} 완성 사진` }) as HTMLImageElement;
+  const dl = dialog(p.name, [img]);
+  img.addEventListener("click", () => dl.close());
+  if (p.src === "pdf") pdfOf(p).then((pdf) => (pdf ? coverPhoto(pdf, 1400) : null)).then((url) => { if (url) img.src = url; }).catch(() => {});
 }
 /** 사진 직접 넣기 (도안 정보에서) */
 function pickPhoto(p: Pattern, done: () => void) {
@@ -1325,7 +1333,7 @@ function infoCard(p: Pattern) {
   return h("details", { class: "sheet info" },
     h("summary", { text: `도안 정보${first || " (없음)"}` }),
     lines.length ? h("ul", { class: "info-list" }, ...lines.map((l) => h("li", { text: l }))) : h("p", { class: "notes", style: "padding:0 16px 8px", text: "사이즈 치수·실·바늘 같은 정보가 아직 없어요." }),
-    p.photo ? h("img", { class: "info-photo", src: p.photo, alt: `${p.name} 완성 사진` }) : null,
+    p.photo ? h("img", { class: "info-photo zoomable", src: p.photo, alt: `${p.name} 완성 사진`, title: "사진 크게 보기", on: { click: () => showPhoto(p) } }) : null,
     h("div", { class: "actions", style: "padding:0 16px 8px" }, h("button", { class: "btn ghost", type: "button", text: lines.length ? "정보 수정" : "정보 적기", on: { click: edit } }),
       p.example ? null : h("button", { class: "btn ghost", type: "button", text: p.photo ? "사진 바꾸기" : "완성 사진 넣기", on: { click: () => pickPhoto(p, render) } }),
       p.example || p.src !== "pdf" ? null : h("button", { class: "btn ghost", type: "button", text: "도안에서 사진 찾기", on: { click: async () => {
