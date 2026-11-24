@@ -184,3 +184,51 @@ export async function blobB64(blob: Blob) {
   return b64(new Uint8Array(await blob.arrayBuffer()));
 }
 export const canvasBlob = (c: HTMLCanvasElement, type = "image/jpeg", q = 0.9) => new Promise<Blob>((r) => c.toBlob((b) => r(b!), type, q));
+
+/**
+ * 도안 앞쪽(최대 4쪽)에 들어 있는 사진 중 가장 큰 것을 찾아 썸네일(JPEG data URL)로 만든다.
+ * 그림 그리기 명령(paintImageXObject)의 위치를 변환 행렬로 따라가 쪽 위 사각형을 구하고, 그 부분만 그려 자른다.
+ */
+export async function coverPhoto(pdf: Pdf, max = 240): Promise<string | null> {
+  const O = pdfjs.OPS as Record<string, number>;
+  let best: { n: number; x0: number; y0: number; x1: number; y1: number; score: number } | null = null;
+  for (let n = 1; n <= Math.min(4, pdf.numPages); n++) {
+    const page = await pdf.getPage(n);
+    const vp = page.getViewport({ scale: 1 });
+    const ops = await page.getOperatorList();
+    let ctm = [1, 0, 0, 1, 0, 0];
+    const stack: number[][] = [];
+    for (let i = 0; i < ops.fnArray.length; i++) {
+      const f = ops.fnArray[i], a = ops.argsArray[i];
+      if (f === O.save) stack.push(ctm);
+      else if (f === O.restore) ctm = stack.pop() || [1, 0, 0, 1, 0, 0];
+      else if (f === O.paintFormXObjectBegin) { stack.push(ctm); const m = a?.[0]; if (Array.isArray(m) || ArrayBuffer.isView(m)) { const t = Array.from(m as ArrayLike<number>); ctm = [ctm[0] * t[0] + ctm[2] * t[1], ctm[1] * t[0] + ctm[3] * t[1], ctm[0] * t[2] + ctm[2] * t[3], ctm[1] * t[2] + ctm[3] * t[3], ctm[0] * t[4] + ctm[2] * t[5] + ctm[4], ctm[1] * t[4] + ctm[3] * t[5] + ctm[5]]; } }
+      else if (f === O.paintFormXObjectEnd) ctm = stack.pop() || [1, 0, 0, 1, 0, 0];
+      else if (f === O.transform) ctm = [ctm[0] * a[0] + ctm[2] * a[1], ctm[1] * a[0] + ctm[3] * a[1], ctm[0] * a[2] + ctm[2] * a[3], ctm[1] * a[2] + ctm[3] * a[3], ctm[0] * a[4] + ctm[2] * a[5] + ctm[4], ctm[1] * a[4] + ctm[3] * a[5] + ctm[5]];
+      else if (f === O.paintImageXObject || f === O.paintInlineImageXObject || f === O.paintImageXObjectRepeat) {
+        const pts = [[0, 0], [1, 0], [0, 1], [1, 1]].map((p) => vp.convertToViewportPoint(p[0] * ctm[0] + p[1] * ctm[2] + ctm[4], p[0] * ctm[1] + p[1] * ctm[3] + ctm[5]));
+        const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+        const x0 = Math.max(0, Math.min(...xs)), x1 = Math.min(vp.width, Math.max(...xs));
+        const y0 = Math.max(0, Math.min(...ys)), y1 = Math.min(vp.height, Math.max(...ys));
+        const w = x1 - x0, h = y1 - y0;
+        if (w < vp.width * 0.1 || h < vp.height * 0.05) continue;
+        const frac = (w * h) / (vp.width * vp.height);
+        if (frac < 0.012 || (frac > 0.92 && n > 1)) continue; // 쪽 전체가 그림(스캔)인 건 표지 쪽만
+        if (w / h > 4 || h / w > 4) continue; // 띠 장식
+        const score = frac * (1 - 0.15 * (n - 1));
+        if (!best || score > best.score) best = { n, x0, y0, x1, y1, score };
+      }
+    }
+  }
+  if (!best) return null;
+  const { w } = await pageSize(pdf, best.n);
+  const scale = Math.min(4, (max / Math.max(1, Math.max(best.x1 - best.x0, best.y1 - best.y0))) * 1.0);
+  const page = await renderRegion(pdf, best.n, scale, best.y0, best.y1);
+  const k = page.width / w;
+  const cw = Math.max(1, Math.round((best.x1 - best.x0) * k)), ch = page.height;
+  const c = document.createElement("canvas");
+  c.width = cw; c.height = ch;
+  c.getContext("2d")!.drawImage(page, Math.round(best.x0 * k), 0, cw, ch, 0, 0, cw, ch);
+  page.width = page.height = 0;
+  return c.toDataURL("image/jpeg", 0.8);
+}

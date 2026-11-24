@@ -9,7 +9,7 @@ import { getCell, longestFloat, rowColors } from "./drawing";
 import {
   applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, spanParts, rowNarrative, stitchesOnNeedle, finishText, etaText, continuousKnitMs, castLabel, flexibleRow, addRowAfter, removeRow, workIn, workStart, workStop, sideOf, stepNext, stepPrev, resetPart, markBefore, rewindTo, EARLIER, repOf, repRowText, isSkipped, inExtraPass, upcomingRow, fmtDur,
 } from "./model";
-import { blobB64, canvasBlob, renderRegion, textItems } from "./pdf";
+import { blobB64, canvasBlob, coverPhoto, renderRegion, textItems } from "./pdf";
 import type { Guide } from "./symbolid";
 import { chartFor, chartsForSize, chartTitle, chartTitleCount, findCharts, findLegend, LEGEND_RE, partTitleScore, rowH, rowY, sizeRange, stitchAxis, type Chart } from "./pdfgeom";
 import { explainCheck, explainDraft, explainHead } from "./prompts";
@@ -75,6 +75,49 @@ function swatch(p: Pattern, size: number) {
   const dark = (() => { const m = hex.match(/^#(..)(..)(..)$/); if (!m) return false; return parseInt(m[1], 16) * 0.3 + parseInt(m[2], 16) * 0.59 + parseInt(m[3], 16) * 0.11 < 120; })();
   return h("div", { class: "swatch", style: { width: size + "px", height: size + "px", backgroundColor: hex, backgroundImage: KNIT_V(dark ? "#FFFFFF" : "#3A2A1E", dark ? 0.18 : 0.3), backgroundSize: `${size / 8}px ${size / 7}px` } });
 }
+/** 목록 썸네일: 완성 사진이 있으면 사진, 없으면 실 색 스와치 */
+function thumbOf(p: Pattern, size: number) {
+  if (p.photo) return h("img", { class: "swatch photo", src: p.photo, alt: "", style: { width: size + "px", height: size + "px" } });
+  const el = swatch(p, size);
+  el.dataset.pid = p.id;
+  return el;
+}
+/** 사진이 아직 없는 PDF 도안: 도안 안의 완성 사진을 찾아 썸네일로 (한 번만, 차례로) */
+let photoBusy = false;
+async function fillPhotos(pats: Pattern[]) {
+  if (photoBusy) return;
+  photoBusy = true;
+  try {
+    for (const x of pats) {
+      if (x.example || x.photo !== undefined || x.src !== "pdf") continue;
+      const pdf = await pdfOf(x).catch(() => null);
+      if (!pdf) continue;
+      const url = await coverPhoto(pdf).catch(() => null);
+      x.photo = url;
+      commit(x, false);
+      if (url && view.home) document.querySelectorAll<HTMLElement>(`.swatch[data-pid="${x.id}"]`).forEach((el) => {
+        const w = el.style.width;
+        el.replaceWith(h("img", { class: "swatch photo", src: url, alt: "", style: { width: w, height: w } }));
+      });
+    }
+  } finally { photoBusy = false; }
+}
+/** 사진 직접 넣기 (도안 정보에서) */
+function pickPhoto(p: Pattern, done: () => void) {
+  const inp = h("input", { type: "file", accept: "image/*" }) as HTMLInputElement;
+  inp.onchange = async () => {
+    const f = inp.files?.[0];
+    if (!f) return;
+    const img = await createImageBitmap(f).catch(() => null);
+    if (!img) return toast("사진을 열지 못했어요.");
+    const k = Math.min(1, 240 / Math.max(img.width, img.height));
+    const c = h("canvas", { width: Math.round(img.width * k), height: Math.round(img.height * k) }) as HTMLCanvasElement;
+    c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
+    p.photo = c.toDataURL("image/jpeg", 0.8);
+    commit(p); done(); toast("완성 사진을 넣었어요.");
+  };
+  inp.click();
+}
 function yarnBar(frac: number, done = false) {
   return h("div", { class: "yarnbar" + (done ? " done" : "") }, h("i", { style: { width: Math.max(4, Math.min(100, frac * 100)) + "%" } }));
 }
@@ -115,7 +158,7 @@ function showHome() {
     const pr = partProgress(cont, s);
     root.append(h("section", { class: "home-cont" },
       h("div", { class: "eyebrow", text: "이어서 뜨기" }),
-      h("div", { class: "hc-top" }, swatch(cont, 64), h("div", { class: "hc-name" }, h("b", { text: cont.name }), h("span", { text: `${cont.size ? cont.size + " 사이즈 · " : ""}${st.names.length}개 파트 중 ${st.fin}개 완료` }))),
+      h("div", { class: "hc-top" }, thumbOf(cont, 64), h("div", { class: "hc-name" }, h("b", { text: cont.name }), h("span", { text: `${cont.size ? cont.size + " 사이즈 · " : ""}${st.names.length}개 파트 중 ${st.fin}개 완료` }))),
       r ? h("div", { class: "hc-row" }, h("span", { class: "hc-part", text: s }), h("b", { text: `${r.n}단` }), h("span", { class: "hc-frac", text: `${pr.done}/${pr.total}` })) : null,
       yarnBar(pr.total ? pr.done / pr.total : 0),
       h("button", { class: "btn primary big", type: "button", text: "이어서 뜨기 →", on: { click: () => open(cont.id) } }),
@@ -127,7 +170,7 @@ function showHome() {
     for (const x of others) {
       const st = patStats(x);
       root.append(h("div", { class: "home-row" }, h("button", { class: "home-item", type: "button", on: { click: () => open(x.id) } },
-        swatch(x, 46),
+        thumbOf(x, 46),
         h("div", { class: "hi-body" },
           h("div", { class: "hi-top" }, h("b", { text: x.name }), st.all ? h("span", { class: "badge fin", text: "완료 ✓" }) : x.example ? h("span", { class: "badge ex", text: "예시" }) : null),
           yarnBar(st.total ? st.done / st.total : 0, st.all),
@@ -136,6 +179,7 @@ function showHome() {
   }
   root.append(h("p", { class: "home-foot", text: syncText() }),
     h("div", { class: "home-add" }, h("button", { class: "btn add", type: "button", text: "+ 도안 올리기", on: { click: () => { view.home = false; openUpload({ onDone: render }); } } })));
+  setTimeout(() => fillPhotos(pats), 300);
 }
 
 /* ---------------- 렌더 ---------------- */
@@ -1259,7 +1303,16 @@ function infoCard(p: Pattern) {
   return h("details", { class: "sheet info" },
     h("summary", { text: `도안 정보${first || " (없음)"}` }),
     lines.length ? h("ul", { class: "info-list" }, ...lines.map((l) => h("li", { text: l }))) : h("p", { class: "notes", style: "padding:0 16px 8px", text: "사이즈 치수·실·바늘 같은 정보가 아직 없어요." }),
-    h("div", { class: "actions", style: "padding:0 16px 8px" }, h("button", { class: "btn ghost", type: "button", text: lines.length ? "정보 수정" : "정보 적기", on: { click: edit } })));
+    p.photo ? h("img", { class: "info-photo", src: p.photo, alt: `${p.name} 완성 사진` }) : null,
+    h("div", { class: "actions", style: "padding:0 16px 8px" }, h("button", { class: "btn ghost", type: "button", text: lines.length ? "정보 수정" : "정보 적기", on: { click: edit } }),
+      p.example ? null : h("button", { class: "btn ghost", type: "button", text: p.photo ? "사진 바꾸기" : "완성 사진 넣기", on: { click: () => pickPhoto(p, render) } }),
+      p.example || p.src !== "pdf" ? null : h("button", { class: "btn ghost", type: "button", text: "도안에서 사진 찾기", on: { click: async () => {
+        toast("도안에서 완성 사진을 찾는 중…");
+        const pdf = await pdfOf(p).catch(() => null);
+        const url = pdf ? await coverPhoto(pdf).catch(() => null) : null;
+        if (!url) return toast("도안에서 사진을 찾지 못했어요. '사진 바꾸기'로 직접 넣어 주세요.");
+        p.photo = url; commit(p); render(); toast("도안 속 완성 사진을 넣었어요.");
+      } } })));
 }
 
 /** 단 목록 한 줄: 여러 단 공통 지시는 매 단 할 일만, 다 뜬 뒤 할 일은 마지막 단에만 */

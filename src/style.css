@@ -519,3 +519,5 @@ body.peeking #nextBtn { background: var(--lav-l); color: var(--lav-ink); border-
 .rep-note.warn{color:#8A3B12;background:#FCEBDD}
 .rep-keep{display:flex;gap:6px;align-items:flex-start;margin:-2px 0 6px}
 .chunk.rep-mark{background:transparent;border-style:dashed;color:var(--lav-ink);font-size:.8rem;padding-inline:8px}
+.swatch.photo{object-fit:cover;display:block;background:var(--card,#fff)}
+.info-photo{display:block;max-width:min(100%,280px);max-height:240px;object-fit:contain;border-radius:14px;margin:4px 16px 10px}
