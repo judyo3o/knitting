@@ -41,7 +41,9 @@ export type ViewOpts = { n: number; side: Side; round: boolean; rowPx: number; b
 const axisInset = (c: Chart): [number, number] => {
   const mid = (c.x0 + c.x1) / 2;
   const left = c.axes.filter((x) => x < mid), right = c.axes.filter((x) => x >= mid);
-  return [left.length ? (left[0] - c.x0) * 2 + 3 : 4, right.length ? (c.x1 - right[right.length - 1]) * 2 + 3 : 4];
+  // 숫자는 축 중심 좌우 약 9pt — 차트 테두리가 숫자보다 훨씬 바깥이면(오른쪽 여백까지 잡힌 경우) 2배 하면 격자 한가운데로 간다
+  const past = (d: number) => Math.min(d * 2 + 3, d + 12);
+  return [left.length ? past(left[0] - c.x0) : 4, right.length ? past(c.x1 - right[right.length - 1]) : 4];
 };
 
 /** 현재 단 주변(아래 3단 ~ 위 6단)을 잘라 크게, 띠·음영·화살표 */

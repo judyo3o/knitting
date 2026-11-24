@@ -178,7 +178,7 @@ function showHome() {
     const pr = partProgress(cont, s);
     root.append(h("section", { class: "home-cont" },
       h("div", { class: "eyebrow", text: "이어서 뜨기" }),
-      h("div", { class: "hc-top" }, thumbOf(cont, 64), h("div", { class: "hc-name" }, h("b", { text: cont.name }), h("span", { text: `${cont.size ? cont.size + " 사이즈 · " : ""}${st.names.length}개 파트 중 ${st.fin}개 완료` }))),
+      h("div", { class: "hc-top" }, thumbOf(cont, 96), h("div", { class: "hc-name" }, h("b", { text: cont.name }), h("span", { text: `${cont.size ? cont.size + " 사이즈 · " : ""}${st.names.length}개 파트 중 ${st.fin}개 완료` }))),
       r ? h("div", { class: "hc-row" }, h("span", { class: "hc-part", text: s }), h("b", { text: `${r.n}단` }), h("span", { class: "hc-frac", text: `${pr.done}/${pr.total}` })) : null,
       yarnBar(pr.total ? pr.done / pr.total : 0),
       estLine(cont),
@@ -191,7 +191,7 @@ function showHome() {
     for (const x of others) {
       const st = patStats(x);
       root.append(h("div", { class: "home-row" }, h("button", { class: "home-item", type: "button", on: { click: () => open(x.id) } },
-        thumbOf(x, 46),
+        thumbOf(x, 72),
         h("div", { class: "hi-body" },
           h("div", { class: "hi-top" }, h("b", { text: x.name }), st.all ? h("span", { class: "badge fin", text: "완료 ✓" }) : x.example ? h("span", { class: "badge ex", text: "예시" }) : null),
           yarnBar(st.total ? st.done / st.total : 0, st.all),
