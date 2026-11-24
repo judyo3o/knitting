@@ -521,3 +521,6 @@ body.peeking #nextBtn { background: var(--lav-l); color: var(--lav-ink); border-
 .chunk.rep-mark{background:transparent;border-style:dashed;color:var(--lav-ink);font-size:.8rem;padding-inline:8px}
 .swatch.photo{object-fit:cover;display:block;background:var(--card,#fff)}
 .info-photo{display:block;max-width:min(100%,280px);max-height:240px;object-fit:contain;border-radius:14px;margin:4px 16px 10px}
+.hi-est{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 4px;font-size:12px;color:var(--ink-2,#6b5b50);margin-top:2px}
+.hi-est b{font-weight:700;color:var(--ink,#3a2a1e)}
+.hi-est small{flex-basis:100%;font-size:11px;opacity:.75}

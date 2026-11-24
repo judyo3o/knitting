@@ -7,7 +7,7 @@ import { cellKeyColor, chartBitmap, chartKey, clearBitmaps, splitChartByGap, lab
 import { getFile, putFile } from "./db";
 import { getCell, longestFloat, rowColors } from "./drawing";
 import {
-  applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, spanParts, rowNarrative, stitchesOnNeedle, finishText, etaText, continuousKnitMs, castLabel, flexibleRow, addRowAfter, removeRow, workIn, workStart, workStop, sideOf, stepNext, stepPrev, resetPart, markBefore, rewindTo, EARLIER, repOf, repRowText, isSkipped, inExtraPass, upcomingRow, fmtDur,
+  applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, spanParts, rowNarrative, averagePace, estimateFor, stitchesOnNeedle, finishText, etaText, continuousKnitMs, castLabel, flexibleRow, addRowAfter, removeRow, workIn, workStart, workStop, sideOf, stepNext, stepPrev, resetPart, markBefore, rewindTo, EARLIER, repOf, repRowText, isSkipped, inExtraPass, upcomingRow, fmtDur,
 } from "./model";
 import { blobB64, canvasBlob, coverPhoto, renderRegion, textItems } from "./pdf";
 import type { Guide } from "./symbolid";
@@ -138,6 +138,17 @@ function showHome() {
   const list = Object.values(state.patterns).sort((a, b) => (lastWorked(b) || b.updatedAt || 0) - (lastWorked(a) || a.updatedAt || 0));
   const pats = list.length ? list : [active()];
   const cont = pats.find((x) => !x.example && !patStats(x).all) || pats[0];
+  // 아직 안 뜬 도안: 다른 도안 평균 페이스로 분량·예상 시간 (메인 화면에만)
+  const avgPace = averagePace(pats);
+  const notStarted = (x: Pattern) => !x.example && !Object.keys(x.done || {}).length && x.rows.length > 0;
+  const estLine = (x: Pattern) => {
+    if (!notStarted(x)) return null;
+    const e = estimateFor(x, avgPace);
+    const size = `${e.rows.toLocaleString()}단` + (e.st ? ` · 약 ${(Math.round(e.st / 100) * 100 || e.st).toLocaleString()}코` : "");
+    const time = e.ms ? `예상 약 ${fmtDur(e.ms)}` : null;
+    const why = avgPace ? `다른 도안 ${avgPace.from}개 평균${avgPace.st && e.st ? ` 시간당 ${Math.round(avgPace.st * 3600000).toLocaleString()}코` : ""} 기준` : "스톱워치로 뜬 기록이 생기면 예상 시간도 알려드려요";
+    return h("span", { class: "hi-est" }, time ? h("b", { text: time }) : null, h("span", { text: (time ? " · " : "") + size }), h("small", { text: why }));
+  };
   const open = (id: string) => { setActive(id); view.home = false; view.full = false; render(); window.scrollTo({ top: 0 }); };
   // 도안 지우기 (예시 도안은 지울 게 없음)
   const delBtn = (x: Pattern) => x.example ? null : h("button", { class: "home-del", type: "button", "aria-label": `${x.name} 삭제`, title: "도안 삭제", text: "삭제", on: { click: async (e: Event) => {
@@ -161,6 +172,7 @@ function showHome() {
       h("div", { class: "hc-top" }, thumbOf(cont, 64), h("div", { class: "hc-name" }, h("b", { text: cont.name }), h("span", { text: `${cont.size ? cont.size + " 사이즈 · " : ""}${st.names.length}개 파트 중 ${st.fin}개 완료` }))),
       r ? h("div", { class: "hc-row" }, h("span", { class: "hc-part", text: s }), h("b", { text: `${r.n}단` }), h("span", { class: "hc-frac", text: `${pr.done}/${pr.total}` })) : null,
       yarnBar(pr.total ? pr.done / pr.total : 0),
+      estLine(cont),
       h("button", { class: "btn primary big", type: "button", text: "이어서 뜨기 →", on: { click: () => open(cont.id) } }),
       h("div", { class: "hc-foot" }, lastWorked(cont) ? h("span", { class: "hc-when", text: "마지막 작업 " + fmtFull(lastWorked(cont)) }) : h("span"), delBtn(cont))));
   }
@@ -174,7 +186,8 @@ function showHome() {
         h("div", { class: "hi-body" },
           h("div", { class: "hi-top" }, h("b", { text: x.name }), st.all ? h("span", { class: "badge fin", text: "완료 ✓" }) : x.example ? h("span", { class: "badge ex", text: "예시" }) : null),
           yarnBar(st.total ? st.done / st.total : 0, st.all),
-          h("span", { class: "hi-sub", text: `${st.fin}/${st.names.length} 파트` + (lastWorked(x) ? ` · ${fmtShort(lastWorked(x))}` : "") }))), delBtn(x)));
+          h("span", { class: "hi-sub", text: `${st.fin}/${st.names.length} 파트` + (lastWorked(x) ? ` · ${fmtShort(lastWorked(x))}` : "") }),
+          estLine(x))), delBtn(x)));
     }
   }
   root.append(h("p", { class: "home-foot", text: syncText() }),

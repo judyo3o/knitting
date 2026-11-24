@@ -671,6 +671,50 @@ export function patternPace(p: Pattern): number | null {
   return ms >= 60000 && st ? st / ms : null;
 }
 
+/** 스톱워치로 잰 뜬 시간·콧수·단 합계 (다른 도안 평균 페이스용) */
+function paceTotals(p: Pattern): { ms: number; st: number; rows: number } {
+  const avg = avgRowStitches(p);
+  let ms = 0, st = 0, rows = 0;
+  for (const s of partNames(p)) {
+    const x = partStats(p, s);
+    if (!x.ms || !x.rows) continue;
+    const sts = x.stitches ?? (avg ? x.rows * avg : null);
+    ms += x.ms; rows += x.rows;
+    if (sts != null) st += sts;
+  }
+  return { ms, st, rows };
+}
+
+/** 여러 도안을 합친 평균 페이스 (코/ms, 단/ms). 스톱워치 기록이 1분 넘게 있는 도안만 */
+export function averagePace(pats: Pattern[]): { st: number | null; rows: number | null; from: number } | null {
+  let ms = 0, st = 0, stMs = 0, rows = 0, from = 0;
+  for (const p of pats) {
+    if (p.example) continue;
+    const t = paceTotals(p);
+    if (t.ms < 60000) continue;
+    from++; ms += t.ms; rows += t.rows;
+    if (t.st) { st += t.st; stMs += t.ms; }
+  }
+  if (!from) return null;
+  return { st: stMs ? st / stMs : null, rows: rows / ms, from };
+}
+
+/** 아직 안 뜬 도안의 분량과 예상 시간 (다른 도안 평균 페이스로) */
+export function estimateFor(p: Pattern, pace: ReturnType<typeof averagePace>): { rows: number; st: number | null; ms: number | null } {
+  const avg = avgRowStitches(p);
+  let rows = 0, st = 0, known = true;
+  for (const part of partNames(p)) {
+    const list = partRows(p, part).filter((r) => !r.castOn);
+    const sts = rowStitchCounts(list);
+    list.forEach((r, i) => { if (isSkipped(p, part, r.n)) return; rows++; const v = sts[i] ?? avg; if (v == null) known = false; else st += v; });
+    const rp = repOf(p, part);
+    if (rp && rp.times > 0) { const left = rp.times * (rp.to - rp.from + 1); rows += left; if (avg) st += left * avg; }
+  }
+  const stv = known && st ? st : null;
+  const ms = pace ? (stv != null && pace.st ? stv / pace.st : pace.rows ? rows / pace.rows : null) : null;
+  return { rows, st: stv, ms };
+}
+
 /** 지금 페이스(콧수 기준)로 남은 시간: 이 파트 · 도안 전체 */
 export function etaText(p: Pattern, s: string): string | null {
   const pace = patternPace(p);
