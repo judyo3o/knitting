@@ -529,10 +529,13 @@ export function expandLengthRepeats(p: Pattern): void {
       const every = r.t.match(/(\d+)\s*단마다\s*([^.·(]+?)(?:\s*계속)?\s*(?:[.·(]|$)/);
       // 반복할 서술: "(홀수 단: … / 짝수 단: …)" > 무늬 없는 메리야스 > 바로 앞 k단
       const odd = r.t.match(/홀수\s*단\s*[:：]\s*([^/]+?)\s*\/\s*짝수\s*단\s*[:：]\s*([^)]+)\)/);
+      // "[안1, 겉1] 고무뜨기를 10cm가 될 때까지 반복" → 단마다 "[안1, 겉1] 끝까지 반복"
+      const brk = !odd && r.t.match(/([\[(][^\[\]()]*(?:겉|안|[kp]\d)[^\[\]()]*[\])])\s*(?:고무\s*뜨기|고무단|무늬|패턴)?\s*(?:을|를)?\s*[^.,·]*?(?:될\s*때까지|까지)\s*반복/);
       const prev = list.filter((x) => x.n < r.n).slice(-k);
       const textFor = (n: number) => {
         let t: string;
         if (odd) t = (n % 2 ? odd[1] : odd[2]).trim();
+        else if (brk) t = n === r.n ? r.t : `${brk[1]} 끝까지 반복`;
         else if (plain) t = plainText(n);
         else {
           const src = prev.find((x) => (x.n - n) % k === 0);
@@ -544,7 +547,7 @@ export function expandLengthRepeats(p: Pattern): void {
       shiftRows(p, s, r.n, total - r.n);
       const note = `${m[0].trim()} → 단 게이지 ${per10}단/10cm로 약 ${total}단까지 (실제 길이를 재서 맞춰요)`;
       const made: Row[] = [];
-      for (let n = r.n; n <= total; n++) made.push({ ...r, n, t: n === total ? `${textFor(n)}\n${r.t}` : textFor(n), side: null, st: n === total ? r.st : null, ln: note, lnFrom: r.n });
+      for (let n = r.n; n <= total; n++) made.push({ ...r, n, t: n === total && n !== r.n ? (brk ? textFor(n) : `${textFor(n)}\n${r.t}`) : textFor(n), side: null, st: n === total ? r.st : null, ln: note, lnFrom: r.n });
       p.rows.splice(p.rows.indexOf(r), 1, ...made);
     }
   }
@@ -566,7 +569,7 @@ export function reflowLengthRepeats(p: Pattern): void {
     for (const g of list) {
       const first = g[0], last = g[g.length - 1];
       if (g.length < 2) { Object.assign(first, { ln: undefined, lnFrom: undefined }); continue; }
-      const orig = last.t.includes("\n") ? last.t.slice(last.t.indexOf("\n") + 1) : last.t;
+      const orig = last.t.includes("\n") ? last.t.slice(last.t.indexOf("\n") + 1) : first.t; // [ ] 반복형은 첫 단에 원문
       const start = first.lnFrom ?? first.n;
       p.rows = p.rows.filter((r) => !(r.s === s && g.includes(r) && r !== first));
       Object.assign(first, { n: start, t: orig, st: last.st, ln: undefined, lnFrom: undefined });

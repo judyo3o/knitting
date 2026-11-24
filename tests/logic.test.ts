@@ -991,3 +991,31 @@ it("긴 [ ] N번 반복은 묶음으로 풀어 쓰고 회차 표시를 넣는다
   expect(stitchesThrough(c, c.length - 1)).toBe(120);
   expect(chunksOf("(겉1, 안1) 4번 반복")).toEqual(["(겉1, 안1) 4번 반복"]);
 });
+
+it("[안1, 겉1] 고무뜨기를 10cm가 될 때까지: 첫 단은 원문, 다음 단부터 반복 묶음만", async () => {
+  const { newPattern, expandLengthRepeats, partRows } = await import("../src/model");
+  const p = newPattern({ id: "b", name: "b" });
+  p.secs["고무단"] = { odd: "RS", round: true } as any;
+  p.rows = [{ n: 1, s: "고무단", t: "110코 CO, 원형으로 연결하고 PM. [안1, 겉1] 고무뜨기를 10cm가 될 때까지 반복" }, { n: 2, s: "고무단", t: "겉뜨기하며 10코 늘리기" }] as any;
+  p.gauges = [{ label: "메리야스", pattern: { st: 20, rows: 30 }, before: null, after: null }];
+  expandLengthRepeats(p);
+  const rows = partRows(p, "고무단");
+  expect(rows[0].t).toContain("110코 CO");
+  expect(rows[1].t).toBe("[안1, 겉1] 끝까지 반복");
+  expect(rows.find((r) => r.n === 30)!.t).toBe("[안1, 겉1] 끝까지 반복");
+  expect(rows.find((r) => r.n === 31)!.t).toBe("겉뜨기하며 10코 늘리기");
+});
+
+it("[ ] 반복형 길이 단도 게이지가 바뀌면 원문을 살려 다시 푼다", async () => {
+  const { newPattern, expandLengthRepeats, reflowLengthRepeats, partRows } = await import("../src/model");
+  const p = newPattern({ id: "b2", name: "b2" });
+  p.secs["고무단"] = { odd: "RS", round: true } as any;
+  p.rows = [{ n: 1, s: "고무단", t: "110코 CO. [안1, 겉1] 고무뜨기를 10cm가 될 때까지 반복" }, { n: 2, s: "고무단", t: "다음 단" }] as any;
+  p.gauges = [{ label: "메리야스", pattern: { st: 20, rows: 30 }, before: null, after: null }];
+  expandLengthRepeats(p);
+  p.gauges[0].before = { st: 22, rows: 34 };
+  reflowLengthRepeats(p);
+  const rows = partRows(p, "고무단");
+  expect(rows[0].t).toContain("110코 CO");
+  expect(rows.find((r) => r.n === 35)!.t).toBe("다음 단");
+});
