@@ -715,6 +715,23 @@ export function estimateFor(p: Pattern, pace: ReturnType<typeof averagePace>): {
   return { rows, st: stv, ms };
 }
 
+/** 뜨던 도안의 남은 분량과 시간: 이 도안 자기 페이스로 (스톱워치 기록이 없으면 다른 도안 평균으로) */
+export function remainingFor(p: Pattern, fallback: ReturnType<typeof averagePace>): { rows: number; st: number; ms: number | null; own: boolean } {
+  const own = patternPace(p);
+  const avg = avgRowStitches(p) || 0;
+  let rows = 0, st = 0;
+  for (const part of partNames(p)) {
+    if (p.fin[part]) continue;
+    const list = partRows(p, part).filter((r) => !r.castOn);
+    const sts = rowStitchCounts(list);
+    list.forEach((r, i) => { if (p.done[key(part, r.n)] || isSkipped(p, part, r.n)) return; rows++; st += sts[i] ?? avg; });
+    const rp = repOf(p, part);
+    if (rp && rp.times > 0) { const left = rp.times * (rp.to - rp.from + 1) - repExtraDone(p, part); if (left > 0) { rows += left; st += left * avg; } }
+  }
+  const ms = own ? st / own : fallback ? (fallback.st && st ? st / fallback.st : fallback.rows ? rows / fallback.rows : null) : null;
+  return { rows, st, ms, own: !!own };
+}
+
 /** 지금 페이스(콧수 기준)로 남은 시간: 이 파트 · 도안 전체 */
 export function etaText(p: Pattern, s: string): string | null {
   const pace = patternPace(p);

@@ -7,7 +7,7 @@ import { cellKeyColor, chartBitmap, chartKey, clearBitmaps, splitChartByGap, lab
 import { getFile, putFile } from "./db";
 import { getCell, longestFloat, rowColors } from "./drawing";
 import {
-  applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, spanParts, rowNarrative, averagePace, estimateFor, stitchesOnNeedle, finishText, etaText, continuousKnitMs, castLabel, flexibleRow, addRowAfter, removeRow, workIn, workStart, workStop, sideOf, stepNext, stepPrev, resetPart, markBefore, rewindTo, EARLIER, repOf, repRowText, isSkipped, inExtraPass, upcomingRow, fmtDur,
+  applyDrawing, colorsInText, currentRow, currentTab, directionText, jumpTo, key, lastWorked, partNames, partProgress, partRows, partStitches, spanParts, rowNarrative, averagePace, estimateFor, remainingFor, patternPace, stitchesOnNeedle, finishText, etaText, continuousKnitMs, castLabel, flexibleRow, addRowAfter, removeRow, workIn, workStart, workStop, sideOf, stepNext, stepPrev, resetPart, markBefore, rewindTo, EARLIER, repOf, repRowText, isSkipped, inExtraPass, upcomingRow, fmtDur,
 } from "./model";
 import { blobB64, canvasBlob, coverPhoto, renderRegion, textItems } from "./pdf";
 import type { Guide } from "./symbolid";
@@ -142,7 +142,16 @@ function showHome() {
   const avgPace = averagePace(pats);
   const notStarted = (x: Pattern) => !x.example && !Object.keys(x.done || {}).length && x.rows.length > 0;
   const estLine = (x: Pattern) => {
-    if (!notStarted(x)) return null;
+    if (x.example || patStats(x).all) return null;
+    if (!notStarted(x)) {
+      // 뜨던 도안: 자기 페이스로 남은 시간
+      const e = remainingFor(x, avgPace);
+      if (!e.rows) return null;
+      const own = patternPace(x);
+      const size = `남은 ${e.rows.toLocaleString()}단` + (e.st ? ` · 약 ${(Math.round(e.st / 100) * 100 || Math.round(e.st)).toLocaleString()}코` : "");
+      const why = e.own && own ? `이 도안 페이스 시간당 ${Math.round(own * 3600000).toLocaleString()}코 기준` : avgPace ? "이 도안은 스톱워치 기록이 없어 다른 도안 평균 기준" : "스톱워치를 켜고 뜨면 남은 시간도 알려드려요";
+      return h("span", { class: "hi-est" }, e.ms ? h("b", { text: `남은 시간 약 ${fmtDur(e.ms)}` }) : null, h("span", { text: (e.ms ? " · " : "") + size }), h("small", { text: why }));
+    }
     const e = estimateFor(x, avgPace);
     const size = `${e.rows.toLocaleString()}단` + (e.st ? ` · 약 ${(Math.round(e.st / 100) * 100 || e.st).toLocaleString()}코` : "");
     const time = e.ms ? `예상 약 ${fmtDur(e.ms)}` : null;
