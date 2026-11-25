@@ -452,10 +452,11 @@ export function stitchesOnNeedle(p: Pattern, r: Row): number | null {
     const m = (mine[j].st || "").match(/\d{1,4}/);
     if (m) return +m[0];
   }
-  const own = partStitches(mine);
-  if (own) return own;
+  // 파트 첫 단: 이 파트 기초코 문장 > 앞 파트 마지막 콧수 > 이 파트에서 가장 많이 나온 콧수
+  const co = partStitches(mine.slice(0, 3).map((x) => ({ ...x, st: null })));
+  if (co) return co;
   for (let j = p.rows.indexOf(r) - 1; j >= 0; j--) { const m = (p.rows[j].st || "").match(/\d{1,4}/); if (m) return +m[0]; }
-  return null;
+  return partStitches(mine);
 }
 
 /** 한 번만 하는 준비 문장 (바늘 바꾸기, 원형 연결, 기초코, 마커 걸기) */

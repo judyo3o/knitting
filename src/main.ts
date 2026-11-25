@@ -68,6 +68,9 @@ app.append(
   ),
 );
 
+/** 차트에서 볼 단 번호: 차트 사이에 끼워 넣은 단(둥근 정수리 평단 등)은 cn으로 차트 단을 따로 가리킨다 */
+const cn = (r: Row) => r.cn ?? r.n;
+
 /* ---------------- 도안 목록 (첫 화면) ---------------- */
 const KNIT_V = (c: string, a: number) => `url('data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="12" height="14"><path d="M2.5 2 L6 12 M9.5 2 L6 12" stroke="${c}" stroke-opacity="${a}" stroke-width="3.4" stroke-linecap="round"/></svg>`)}')`;
 function swatch(p: Pattern, size: number) {
@@ -544,22 +547,22 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
     if (seq !== renderSeq) return;
     // 이 단이 차트에 없으면(고무단처럼 차트 없이 서술로만 뜨는 파트) 그냥 '차트 없음'
     // 가이드 라인 파트(고무단)는 차트 단이 아니라 가이드 줄을 보여 준다 (단 번호가 차트와 겹쳐도 — 소매 고무단 1단 ≠ 소매 차트 1단)
-    if (guidePage(p, r)) return showGuide(`차트 없음 (p${page} 차트에 ${r.n}단이 없어요) ·`);
-    if (!chartFor(bmp.charts, r.n)) {
-      const why = `차트 없음 (p${page} 차트에 ${r.n}단이 없어요) ·`;
+    if (guidePage(p, r)) return showGuide(`차트 없음 (p${page} 차트에 ${cn(r)}단이 없어요) ·`);
+    if (!chartFor(bmp.charts, cn(r))) {
+      const why = `차트 없음 (p${page} 차트에 ${cn(r)}단이 없어요) ·`;
       return noChart(why);
     }
-    const range = await sizeRangeOf(p, pdf, page, bmp, r.n);
+    const range = await sizeRangeOf(p, pdf, page, bmp, cn(r));
     if (seq !== renderSeq) return;
     cv.innerHTML = "";
-    const c = h("canvas", { "aria-label": `차트 p${page}, ${r.n}단 표시` });
+    const c = h("canvas", { "aria-label": `차트 p${page}, ${cn(r)}단 표시` });
     if (view.full) {
       const width = Math.max(cv.clientWidth, 320) * (view.rowPx / 22);
-      drawPdfFull(c, bmp, { n: r.n, side, round, rowPx: view.rowPx, range, done: doneOnPage(p, page) }, width);
+      drawPdfFull(c, bmp, { n: cn(r), side, round, rowPx: view.rowPx, range, done: doneOnPage(p, page) }, width);
       cv.append(c);
       symbolTap(p, pdf, page, bmp, cv, c, { x0: 0, yTop: 0, k: width / bmp.w }, range);
     } else {
-      const vo = { n: r.n, side, round, rowPx: view.rowPx, range, done: doneOnPage(p, page), ...rowWindow(bmp, r.n, view.rowPx) }; // 위아래로 스크롤해 볼 수 있게 여러 단
+      const vo = { n: cn(r), side, round, rowPx: view.rowPx, range, done: doneOnPage(p, page), ...rowWindow(bmp, cn(r), view.rowPx) }; // 위아래로 스크롤해 볼 수 있게 여러 단
       const res = drawPdfRows(c, bmp, vo);
       // 먼저 빠르게 그리고, 보이는 단들만 선명하게 다시
       sharpRows(pdf, page, bmp, vo).then((hi) => { if (hi && seq === renderSeq && c.isConnected) drawPdfRows(c, bmp, vo, hi); }).catch(() => {});
@@ -574,7 +577,7 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
       else {
         scrollStart(cv, res.startX === "right", range && res.chart ? ((res.startX === "right" ? range[1] : range[0]) - res.x0) * res.k : null);
         // 지금 단이 가운데 오게 (위아래 단은 스크롤해서 봐요)
-        const midY = (rowY(res.chart, r.n) - res.yTop) * res.k;
+        const midY = (rowY(res.chart, cn(r)) - res.yTop) * res.k;
         requestAnimationFrame(() => { cv.scrollTop = midY - cv.clientHeight / 2; });
       }
       scrollToProgress(p, r, cv, c, res).catch(() => {});
@@ -584,7 +587,7 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
     // 배색 차트면 띠에서 실제 색을 뽑아 보여준다
     // 회색·검정(격자선·기호)은 빼고 채도 있는 색만 → 흑백 차트에선 안 보인다
     // 기호표 색칸(SSK 등)을 실 색으로 오해하지 않게: 배색 도안이거나, 두 색 이상이 넉넉히 칠해진 단만
-    const cols = sampleRowColors(bmp, r.n).filter((c2) => c2.share > 0.04 && chroma(c2.hex) > 40);
+    const cols = sampleRowColors(bmp, cn(r)).filter((c2) => c2.share > 0.04 && chroma(c2.hex) > 40);
     const colorwork = p.colors.length > 0 || cols.filter((c2) => c2.share > 0.15).length >= 2;
     if (cols.length && colorwork) {
       for (const c2 of cols.slice(0, 5)) yarnBox.append(h("span", { class: "yarn sample", title: "차트에서 뽑은 색" }, h("i", { style: { background: c2.hex } }), Math.round(c2.share * 100) + "%"));
@@ -753,7 +756,7 @@ async function sizeRangeOf(p: Pattern, pdf: any, page: number, bmp: any, n: numb
 /** 이 차트 쪽을 쓰는 모든 파트에서 실제로 뜬 단 번호 */
 function doneOnPage(p: Pattern, page: number): Set<number> {
   const out = new Set<number>();
-  for (const r of p.rows) if ((r.ch || p.secs[r.s]?.ch) === page && p.done[key(r.s, r.n)]) out.add(r.n);
+  for (const r of p.rows) if ((r.ch || p.secs[r.s]?.ch) === page && p.done[key(r.s, r.n)]) out.add(cn(r));
   return out;
 }
 
@@ -1125,7 +1128,7 @@ function chartRowStitches(p: Pattern, r: Row): Promise<RowStitch[] | null> {
   const page = chartPage(p, r)!;
   const ws = sideOf(p, r) === "WS" && !p.secs[r.s]?.round;
   const lg = p.legend && "page" in p.legend ? [p.legend.page, p.legend.x0, p.legend.y0].join(",") : "";
-  const ck = [p.id, page, r.n, ws, lg, p.size].join(":");
+  const ck = [p.id, page, cn(r), ws, lg, p.size].join(":");
   let c = rowStitchCache.get(ck);
   if (!c) {
     if (rowStitchCache.size > 40) rowStitchCache.clear();
@@ -1136,7 +1139,7 @@ function chartRowStitches(p: Pattern, r: Row): Promise<RowStitch[] | null> {
       const bmp = await bmpForSize(p, pdf, page, await chartBitmap(pdf, p.id, page), r.s);
       const { readRow } = await import("./symbolid");
       const key = p.colors.length >= 2 ? chartKey(bmp, (await textItems(pdf, page)).items) : [];
-      return readRow(p, pdf, page, bmp, r.n, ws, await sizeRangeOf(p, pdf, page, bmp, r.n), key);
+      return readRow(p, pdf, page, bmp, cn(r), ws, await sizeRangeOf(p, pdf, page, bmp, cn(r)), key);
     })();
     rowStitchCache.set(ck, c);
     c.catch(() => rowStitchCache.delete(ck));
@@ -1239,7 +1242,7 @@ async function scrollToProgress(p: Pattern, r: Row, cv: HTMLElement, c: HTMLCanv
   const x = stitchEdgeX(st, count, ws);
   if (x == null) return;
   const hh = rowH(res.chart);
-  const xPx = (x - res.x0) * res.k, top = (rowY(res.chart, r.n) - hh / 2 - res.yTop) * res.k;
+  const xPx = (x - res.x0) * res.k, top = (rowY(res.chart, cn(r)) - hh / 2 - res.yTop) * res.k;
   cv.querySelector(".prog-mark")?.remove();
   cv.append(h("div", { class: "prog-mark", title: `${count}코 뜸`, style: { left: c.offsetLeft + xPx - 1.5 + "px", top: c.offsetTop + top - 4 + "px", height: hh * res.k + 8 + "px" } }, h("span", { text: `${count}코` })));
   requestAnimationFrame(() => cv.scrollTo({ left: c.offsetLeft + xPx - cv.clientWidth / 2, behavior: "smooth" }));
@@ -1267,7 +1270,7 @@ async function explainRow(p: Pattern, r: Row, side: "RS" | "WS", round: boolean,
   try {
     const pdf = await pdfOf(p);
     if (!pdf) throw Object.assign(new Error(), { code: "nopdf" });
-    const strip = await explainStrip(pdf, page, r.n);
+    const strip = await explainStrip(pdf, page, cn(r));
     if (!strip) {
       toast("이 쪽에서 단 위치를 찾지 못했어요.");
       return;
