@@ -1,5 +1,5 @@
 import "./style.css";
-import { chunksOf, splitNarrative, stitchesThrough, REP_MARK } from "./chunks";
+import { chunksOf, labelParts, splitNarrative, stitchesThrough, SHOW_MARK } from "./chunks";
 import { MAX_TOKENS } from "./config";
 import { callAi, canCallDirect, errCopy } from "./ai";
 import { inArtifact, whenArtifact } from "./artifact";
@@ -929,7 +929,7 @@ function chartPicker(p: Pattern, r: Row) {
 /* ---------------- 서술 (묶음 단위 진행) ---------------- */
 function narrative(p: Pattern, r: Row) {
   const k = key(r.s, r.n);
-  const chunks = splitNarrative(rowNarrative(r), stitchesOnNeedle(p, r)).chunks;
+  const chunks = labelParts(splitNarrative(rowNarrative(r), stitchesOnNeedle(p, r)).chunks, r.t);
   const wrap = h("div", { style: "display:flex;flex-direction:column;gap:6px" });
   if (r.auto) wrap.append(h("span", { class: "gen", text: "그린 배색에서 만든 서술 · " + (sideOf(p, r) === "RS" || p.secs[r.s]?.round ? "오른쪽부터 읽음" : "왼쪽부터 읽음") }));
   if (view.editing) {
@@ -984,7 +984,7 @@ function narrative(p: Pattern, r: Row) {
       if (!slot.isConnected) return;
       if (!txt) { slot.textContent = "차트에서 이 단을 읽지 못했어요. '이 단 차트를 글로 풀기'를 써 보세요."; if (chunks.length) slot.after(chunkBox(p, r, chunks)); return; }
       slot.replaceWith(
-        chunkBox(p, r, chunksOf(txt)),
+        chunkBox(p, r, labelParts(chunksOf(txt), r.t)),
         h("span", { class: "gen", text: "기기가 차트 그림을 읽은 거라 교차뜨기 방향(LC/RC)은 차트와 한 번 대조해 주세요." }),
         h("div", { class: "actions" }, h("button", { class: "btn ghost", type: "button", text: "이 서술을 이 단에 저장", on: { click: () => {
           r.t = withEnd(r, txt); r.span = null; p.rev++; commit(p); render(); toast("이 단 서술로 저장했어요.");
@@ -994,7 +994,7 @@ function narrative(p: Pattern, r: Row) {
     return wrap;
   }
   // 안내 문장은 위에 따로, 코 지시만 묶음으로
-  const nar = splitNarrative(rowNarrative(r), stitchesOnNeedle(p, r));
+  const nar0 = splitNarrative(rowNarrative(r), stitchesOnNeedle(p, r)), nar = { ...nar0, chunks: labelParts(nar0.chunks, r.t) };
   for (const n of nar.notes) wrap.append(h("p", { class: "instr note", text: n }));
   if (!nar.chunks.length) {
     if (!nar.notes.length) wrap.append(h("p", { class: "instr", text: "(서술 없음)" }));
@@ -1062,7 +1062,7 @@ function chunkBox(p: Pattern, r: Row, chunks: string[]) {
   chunks.forEach((c, i) => {
     const codes = colorsInText(c, p.colors);
     const dot = codes.length ? h("span", { class: "dot", style: { background: yarnHex(p.colors.find((y) => y.code === codes[0]), p.colors.findIndex((y) => y.code === codes[0])) } }) : null;
-    const b = h("button", { class: "chunk" + (REP_MARK.test(c) ? " rep-mark" : "") + (i <= at ? " done" : "") + (i === at ? " last" : ""), type: "button", role: "listitem", "aria-pressed": String(i <= at) }, dot, c);
+    const b = h("button", { class: "chunk" + (SHOW_MARK.test(c) ? " rep-mark" : "") + (i <= at ? " done" : "") + (i === at ? " last" : ""), type: "button", role: "listitem", "aria-pressed": String(i <= at) }, dot, c);
     b.onclick = () => {
       if (p.part[k] && p.part[k].i === i) {
         if (i === 0) delete p.part[k];
@@ -1233,7 +1233,7 @@ async function guideCanvas(p: Pattern, page: number, g: Guide, rowPx: number): P
 async function scrollToProgress(p: Pattern, r: Row, cv: HTMLElement, c: HTMLCanvasElement, res: { chart: any; x0: number; yTop: number; k: number }) {
   const prog = p.part[key(r.s, r.n)];
   if (!prog || !res.chart) return;
-  const chunks = wantsChartText(p, r) ? chunksOf((await chartRowText(p, r)) || "") : splitNarrative(rowNarrative(r), stitchesOnNeedle(p, r)).chunks;
+  const chunks = wantsChartText(p, r) ? labelParts(chunksOf((await chartRowText(p, r)) || ""), r.t) : labelParts(splitNarrative(rowNarrative(r), stitchesOnNeedle(p, r)).chunks, r.t);
   const count = stitchesThrough(chunks, prog.i);
   if (!count) return;
   const st = await chartRowStitches(p, r);

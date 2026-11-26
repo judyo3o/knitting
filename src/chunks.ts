@@ -39,6 +39,32 @@ export function splitTop(text: string): string[] {
 
 /** 반복 회차 표시 묶음 ("▸ 2/4회") — 코를 쓰지 않는다 */
 export const REP_MARK = /^▸\s*\d+\/\d+회$/;
+/** 표시용 묶음 (반복 회차 "▸ 2/4회", 조각 이름 "▸ 뒤판 110코") — 코를 쓰지 않는다 */
+export const SHOW_MARK = /^▸/;
+
+/**
+ * 차트에서 읽은 연결 단("왼쪽 앞판 …, 감아코 10코 만들기, 뒤판 …, 감아코 10코 만들기, 오른쪽 앞판 …"):
+ * 감아코 칸("+ ×10")은 "감아코 10코"로, 조각마다 앞에 "▸ 왼쪽 앞판 54코" 같은 이름 묶음을 넣는다.
+ */
+export function labelParts(chunks: string[], t: string): string[] {
+  const co = /^\+\s*(?:[×x]\s*(\d+))?$/;
+  const out = chunks.map((c) => { const m = c.trim().match(co); return m ? `감아코 ${m[1] || 1}코` : c; });
+  if (!/감아\s*코/.test(t || "")) return out;
+  const names = (t.split("\n")[0] || "").split(/,?\s*감아\s*코\s*\d+\s*코\s*(?:만들기|잡기)?\s*,?/).map((x) => x.match(/(?:(왼쪽|오른쪽)\s*)?(앞판|뒤판|뒷판|몸판|소매)/)?.[0] || null);
+  const isCo = (c: string) => /^감아코 \d+코$/.test(c);
+  const groups: string[][] = [[]];
+  for (const c of out) { if (isCo(c)) groups.push([c], []); else groups[groups.length - 1].push(c); }
+  const parts = groups.filter((g) => !(g.length === 1 && isCo(g[0])));
+  if (parts.length !== names.length || names.some((n) => !n)) return out;
+  const res: string[] = [];
+  let k = 0;
+  for (const g of groups) {
+    if (g.length === 1 && isCo(g[0])) { res.push(g[0]); continue; }
+    const n = g.reduce<number | null>((a, c) => { const v = countChunk(c); return a == null || v == null ? null : a + v; }, 0);
+    res.push(`▸ ${names[k++]}${n ? ` ${n}코` : ""}`, ...g);
+  }
+  return res;
+}
 const REP_RE = /^[\(\[（【](.*)[\)\]）】]\s*(?:을|를)?\s*(?:총\s*)?(\d+)\s*(?:번|회|x|times)\s*(?:반복)?$/i;
 
 /** "[겉6, 안2, 겉2, 안2]를 (단) 끝까지 반복" — 몇 번인지는 그 단 콧수로 */
@@ -202,7 +228,7 @@ export function stitchesThrough(chunks: string[], i: number): number | null {
     const c = countChunk(chunks[k]);
     if (c == null) {
       // "마커" "PM" 같은 코를 쓰지 않는 묶음은 0코
-      if (/^(?:마커\s*(?:옮기기|걸기|빼기)?|pm|sm|rm)$/i.test(chunks[k].trim()) || REP_MARK.test(chunks[k].trim())) continue;
+      if (/^(?:마커\s*(?:옮기기|걸기|빼기)?|pm|sm|rm)$/i.test(chunks[k].trim()) || SHOW_MARK.test(chunks[k].trim())) continue;
       return null;
     }
     sum += c;

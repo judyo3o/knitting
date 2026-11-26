@@ -518,6 +518,17 @@ describe("단 끝까지 반복 · 공통 단의 준비 문장", () => {
   });
 });
 
+describe("연결 단 조각 이름", () => {
+  it("감아코 칸을 '감아코 N코'로, 조각마다 이름과 콧수 묶음", async () => {
+    const { labelParts, stitchesThrough } = await import("../src/chunks");
+    const t = "왼쪽 앞판 무늬대로 진행하기, 감아코 10 코 만들기, 뒤판 무늬대로 진행하기, 감아코 10 코 만들기, 오른쪽 앞판 뜨기";
+    const c = labelParts(["겉4", "안2", "+ ×10", "겉6", "+ ×10", "겉3"], t);
+    expect(c).toEqual(["▸ 왼쪽 앞판 6코", "겉4", "안2", "감아코 10코", "▸ 뒤판 6코", "겉6", "감아코 10코", "▸ 오른쪽 앞판 3코", "겉3"]);
+    expect(stitchesThrough(c, 4)).toBe(16); // 이름 묶음은 세지 않고 감아코 칸은 센다
+    expect(labelParts(["겉4", "+"], "겉뜨기")).toEqual(["겉4", "감아코 1코"]);
+  });
+});
+
 describe("원본 쪽에서 이 단 자리", () => {
   it("한 쪽에 다른 사이즈가 섞여 있어도 내 사이즈 구역의 그 단", async () => {
     const { findRowSpot } = await import("../src/pdfgeom");
