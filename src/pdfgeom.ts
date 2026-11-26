@@ -160,7 +160,16 @@ export function stitchAxis(items: TItem[], c: Chart): { x0: number; x1: number; 
   const yBot = rowY(c, c.nMin) + h / 2, yTopC = rowY(c, c.nMax) - h / 2;
   const nearAxis = (x: number) => c.axes.some((a) => Math.abs(a - x) < h * 1.5);
   const pick = (lo: number, hi: number) => items.filter((i) => /^\s*\d{1,3}\s*$/.test(i.str) && i.y > lo && i.y < hi && i.x >= c.x0 - 2 && i.x + i.w <= c.x1 + 2 && !nearAxis(i.x + i.w / 2));
-  for (const nums of [pick(yBot, yBot + h * 3.5), pick(yTopC - h * 3, yTopC)]) {
+  // 같은 줄(높이)에 놓인 숫자만 — 바로 아래 쪽 번호("24") 같은 다른 숫자가 섞이면 코 번호 축을 못 찾는다
+  const sameLine = (arr: TItem[]) => {
+    const groups: TItem[][] = [];
+    for (const i of [...arr].sort((p, q) => p.y - q.y)) {
+      const g = groups.find((g) => Math.abs(g[0].y - i.y) < h * 0.5);
+      if (g) g.push(i); else groups.push([i]);
+    }
+    return groups.sort((p, q) => q.length - p.length)[0] || [];
+  };
+  for (const nums of [sameLine(pick(yBot, yBot + h * 3.5)), sameLine(pick(yTopC - h * 3, yTopC))]) {
     if (nums.length < 3) continue;
     const pts = nums.map((i) => ({ x: i.x + i.w / 2, v: +i.str.trim() })).sort((a, b) => a.x - b.x);
     // 숫자가 한 방향으로만 늘거나 줄어야 코 번호 축
