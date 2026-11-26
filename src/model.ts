@@ -628,7 +628,7 @@ export function timedAt(p: Pattern, t: number, now = Date.now()): boolean {
  * 스톱워치를 썼으면: 켜 둔 시간만 세고, 스톱워치 없이 뜬 것 같은 단(꺼져 있을 때 완료)은 단·콧수 모두 평균에서 뺀다 (skipped).
  * 안 썼으면: 시간을 모르므로 0 (스톱워치를 켠 시간만 반영).
  */
-export function partStats(p: Pattern, s: string): { ms: number; rest: number; rows: number; stitches: number | null; skipped: number } {
+export function partStats(p: Pattern, s: string): { ms: number; rest: number; rows: number; stitches: number | null; skipped: number; skippedStitches?: number | null } {
   const list = partRows(p, s).filter((r) => !r.castOn);
   const sts = rowStitchCounts(list);
   // 시각을 모르는 단(앞 단을 한꺼번에 뜬 것으로 표시)은 페이스에서 뺀다
@@ -645,7 +645,8 @@ export function partStats(p: Pattern, s: string): { ms: number; rest: number; ro
     const from = Math.max(before, ts[0] - 6 * 3600000);
     const on = workIn(p, from, ts[ts.length - 1]);
     const c = count(timed);
-    return { ms: on, rest: Math.max(0, ts[ts.length - 1] - from - on), ...c, skipped: doneIdx.length - timed.length };
+    const untimed = count(doneIdx.filter((i) => !timed.includes(i)));
+    return { ms: on, rest: Math.max(0, ts[ts.length - 1] - from - on), ...c, skipped: doneIdx.length - timed.length, skippedStitches: untimed.stitches };
   }
   // 스톱워치를 안 썼으면 뜬 시간을 모른다: 시간·페이스에 넣지 않는다 (단 완료 시각 간격으로 추정하지 않음)
   return { ms: 0, rest: 0, rows: 0, stitches: null, skipped: doneIdx.length };
@@ -770,7 +771,9 @@ export function finishText(p: Pattern, s: string): string | null {
   const st = partStats(p, s);
   if (!st.ms || st.ms < 30000) return null;
   const pace = st.stitches ? Math.round(st.stitches / (st.ms / 3600000)) : null;
-  return `실제 뜬 시간 ${fmtDur(st.ms)}` + (st.skipped ? ` (스톱워치 없이 뜬 ${st.skipped}단은 페이스에서 뺌)` : "") + (st.rest >= 60000 ? ` · 쉰 시간까지 ${fmtDur(st.ms + st.rest)}` : "") + (pace ? ` · 시간당 약 ${pace.toLocaleString()}코 페이스 (총 ${st.stitches!.toLocaleString()}코 · ${st.rows}단)` : ` · ${st.rows}단`);
+  // 스톱워치 없이 뜬 단: 잰 단들의 페이스(콧수를 알면 코당, 아니면 단당)로 걸린 시간을 어림해 전체 시간에 더한다
+  const est = st.skipped && st.rows ? (st.stitches && st.skippedStitches ? st.skippedStitches * (st.ms / st.stitches) : st.skipped * (st.ms / st.rows)) : 0;
+  return `실제 뜬 시간 ${fmtDur(st.ms)}` + (est >= 30000 ? ` (스톱워치 없이 뜬 ${st.skipped}단은 같은 페이스로 약 ${fmtDur(est)} → 전체 약 ${fmtDur(st.ms + est)})` : st.skipped ? ` (스톱워치 없이 뜬 ${st.skipped}단은 페이스에서 뺌)` : "") + (st.rest >= 60000 ? ` · 쉰 시간까지 ${fmtDur(st.ms + st.rest)}` : "") + (pace ? ` · 시간당 약 ${pace.toLocaleString()}코 페이스 (총 ${st.stitches!.toLocaleString()}코 · ${st.rows}단)` : ` · ${st.rows}단`);
 }
 
 /** 쉬지 않고 뜬 시간: 모든 파트의 단 완료 시각을 거꾸로 따라가며 10분 넘게 빈 곳에서 끊는다 */

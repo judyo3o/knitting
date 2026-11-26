@@ -713,6 +713,9 @@ describe("스톱워치 없이 뜬 단은 페이스에서 빼기 · 남은 시간
     expect(Math.round(st.ms / M)).toBe(20);
     // 남은 3단(120코), 페이스 80코/20분 → 30분
     expect(etaText(p, "a")).toBe("이 파트 남은 3단(120코) · 지금 페이스로 약 30분 · 시간당 약 240코");
+    // 완성 문구: 스톱워치 없이 뜬 1단(40코)도 같은 페이스로 어림해 전체 시간에
+    const { finishText } = await import("../src/model");
+    expect(finishText(p, "a")).toContain("스톱워치 없이 뜬 1단은 같은 페이스로 약 10분 → 전체 약 30분");
   });
 });
 
