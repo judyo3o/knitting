@@ -481,6 +481,11 @@ function narrSeq(p: Pattern, s: string): { items: { row: Row; label: string; tex
   return { items, cur, note: hasText && rp ? `${rp.from}~${rp.to}단을 한 번 더(${rp.from}′~${rp.to}′)` : "" };
 }
 
+/** 기장 줄이기로 건너뛰는 단들의 차트 단 번호 (차트에 연한 회색으로) */
+function skipOnPage(p: Pattern, s: string): Set<number> {
+  return new Set(partRows(p, s).filter((x) => isSkipped(p, s, x.n)).map(cn));
+}
+
 function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBox: HTMLElement) {
   const wrap = h("div", { class: "chart-col", style: "display:flex;flex-direction:column;gap:6px" });
   const d = p.draw[r.s];
@@ -615,11 +620,11 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
     const c = h("canvas", { "aria-label": `차트 p${page}, ${cn(r)}단 표시` });
     if (view.full) {
       const width = Math.max(cv.clientWidth, 320) * (view.rowPx / 22);
-      drawPdfFull(c, bmp, { n: cn(r), side, round, rowPx: view.rowPx, range, done: doneOnPage(p, page) }, width);
+      drawPdfFull(c, bmp, { n: cn(r), side, round, rowPx: view.rowPx, range, done: doneOnPage(p, page), skip: skipOnPage(p, r.s) }, width);
       cv.append(c);
       symbolTap(p, pdf, page, bmp, cv, c, { x0: 0, yTop: 0, k: width / bmp.w }, range);
     } else {
-      const vo: ViewOpts = { n: cn(r), side, round, rowPx: view.rowPx, range, done: doneOnPage(p, page), ...rowWindow(bmp, cn(r), view.rowPx) }; // 위아래로 스크롤해 볼 수 있게 여러 단
+      const vo: ViewOpts = { n: cn(r), side, round, rowPx: view.rowPx, range, done: doneOnPage(p, page), skip: skipOnPage(p, r.s), ...rowWindow(bmp, cn(r), view.rowPx) }; // 위아래로 스크롤해 볼 수 있게 여러 단
       const res = drawPdfRows(c, bmp, vo);
       // 먼저 빠르게 그리고, 보이는 단들만 선명하게 다시
       sharpRows(pdf, page, bmp, vo).then((hi) => { if (hi && seq === renderSeq && c.isConnected) drawPdfRows(c, bmp, vo, hi); }).catch(() => {});

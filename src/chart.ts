@@ -34,7 +34,7 @@ export function chartBitmap(pdf: Pdf, pdfKey: string, page: number): Promise<Bit
 }
 export const clearBitmaps = () => bmpCache.clear();
 
-export type ViewOpts = { n: number; side: Side; round: boolean; rowPx: number; below?: number; above?: number; dpr?: number; range?: [number, number] | null; done?: Set<number>; span?: [number, number] | null }; // span: 이 단에 실제로 있는 코의 왼쪽·오른쪽 끝 (pt) — 화살표를 첫 코 바로 옆에 // done: 실제로 뜬 단(없으면 지금 단 아래 전부) // range: 내 사이즈 차트 범위 (pt)
+export type ViewOpts = { n: number; side: Side; round: boolean; rowPx: number; below?: number; above?: number; dpr?: number; range?: [number, number] | null; done?: Set<number>; span?: [number, number] | null; skip?: Set<number> }; // skip: 기장 줄이기로 건너뛰는 단 (연한 회색) // span: 이 단에 실제로 있는 코의 왼쪽·오른쪽 끝 (pt) — 화살표를 첫 코 바로 옆에 // done: 실제로 뜬 단(없으면 지금 단 아래 전부) // range: 내 사이즈 차트 범위 (pt)
 
 /** 화살표가 단 번호를 가리지 않게: 바깥 경계에서 축 숫자 너머까지 (pt) */
 /** 왼쪽·오른쪽 축 숫자 너머 (축이 그쪽에 없으면 작게) */
@@ -127,6 +127,11 @@ function overlay(ctx: CanvasRenderingContext2D, w: number, band: (n: number) => 
     const [y0, y1] = band(n);
     ctx.fillStyle = DONE;
     ctx.fillRect(L, y0, R - L, y1 - y0);
+  }
+  // 기장 줄이기로 건너뛰는 단: 연한 회색으로 덮어 "안 뜨는 단"임을 보여 준다
+  if (o.skip?.size) {
+    ctx.fillStyle = "rgba(160,160,160,0.28)";
+    for (const n of o.skip) { const [y0, y1] = band(n); if (y1 > 0 && y0 < ctx.canvas.height) ctx.fillRect(0, y0, w, y1 - y0); }
   }
   if (xr) {
     ctx.fillStyle = "rgba(255,255,255,0.62)";
