@@ -1,4 +1,5 @@
 import "./style.css";
+import { cellsOf, drawNarrChart, type NRow } from "./narchart";
 import { chunksOf, labelParts, splitNarrative, stitchesThrough, SHOW_MARK } from "./chunks";
 import { MAX_TOKENS } from "./config";
 import { callAi, canCallDirect, errCopy } from "./ai";
@@ -30,6 +31,7 @@ const view = {
   full: false,
   legendOpen: true,
   useDrawing: {} as Record<string, boolean>, // 파트별: 그린 배색 보기 (기본: 그린 게 있으면 그것)
+  useNarr: {} as Record<string, boolean>, // 파트별: 바꾼 서술로 그린 차트 보기 (기본: 켜짐)
   editing: false,
   home: false, // 도안 목록 화면
   sub: null as null | "rows" | "log", // 진행 화면에서 연 단 목록 · 진행 기록 화면
@@ -40,7 +42,7 @@ try {
 } catch {}
 const saveView = () => {
   try {
-    localStorage.setItem("view", JSON.stringify({ rowPx: view.rowPx, chartH: view.chartH, legendOpen: view.legendOpen, useDrawing: view.useDrawing }));
+    localStorage.setItem("view", JSON.stringify({ rowPx: view.rowPx, chartH: view.chartH, legendOpen: view.legendOpen, useDrawing: view.useDrawing, useNarr: view.useNarr }));
   } catch {}
 };
 
@@ -455,6 +457,30 @@ function chartPage(p: Pattern, r: Row) {
   return r.ch || p.secs[r.s]?.ch || null;
 }
 
+/**
+ * 서술을 바꾼 파트면 뜨는 순서대로 단 목록 (반복 구간이 있으면 한 번 더 뜨는 단은 37′처럼).
+ * 바꾼 서술: 반복 구간에 단별 서술(rep.text)이 있거나, 직접 고친 단(ed)이 있는 파트.
+ */
+function narrSeq(p: Pattern, s: string): { items: { row: Row; label: string; text: string; extra: boolean }[]; cur: (r: Row) => number; note: string } | null {
+  const rows = partRows(p, s);
+  const rp = repOf(p, s);
+  const hasText = !!(rp && rp.times > 0 && rp.text && Object.keys(rp.text).length);
+  if (!hasText && !rows.some((x) => x.ed)) return null;
+  const items: { row: Row; label: string; text: string; extra: boolean }[] = [];
+  if (hasText && rp) {
+    const tx = rp.text!;
+    for (const r of rows.filter((x) => x.n <= rp.to)) items.push({ row: r, label: String(r.n), text: tx[String(r.n)] ?? r.t, extra: false });
+    for (let k = 0; k < rp.times; k++) for (const r of rows.filter((x) => x.n >= rp.from && x.n <= rp.to)) items.push({ row: r, label: `${r.n}′`, text: tx["x" + r.n] ?? tx[String(r.n)] ?? r.t, extra: true });
+    for (const r of rows.filter((x) => x.n > rp.to)) items.push({ row: r, label: String(r.n), text: tx[String(r.n)] ?? r.t, extra: false });
+  } else for (const r of rows) items.push({ row: r, label: String(r.n), text: r.t, extra: false });
+  const cur = (r: Row) => {
+    const extra = !!rp && inExtraPass(p, s) && r.n >= rp.from && r.n <= rp.to;
+    const i = items.findIndex((it) => it.row.n === r.n && it.extra === extra);
+    return i < 0 ? Math.max(0, items.findIndex((it) => it.row.n === r.n)) : i;
+  };
+  return { items, cur, note: hasText && rp ? `${rp.from}~${rp.to}단을 한 번 더(${rp.from}′~${rp.to}′)` : "" };
+}
+
 function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBox: HTMLElement) {
   const wrap = h("div", { class: "chart-col", style: "display:flex;flex-direction:column;gap:6px" });
   const d = p.draw[r.s];
@@ -500,6 +526,27 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
       showPop(cv, e.clientX, e.clientY, label, `${nTap}단 · ${fromLeft ? "왼쪽" : "오른쪽"}부터 ${st}번째 코`,
         { x: c.offsetLeft + geom.ox + hc.c * geom.cell, y: c.offsetTop + geom.oy + (geom.rows[1] - hc.r) * geom.ch, w: geom.cell, h: geom.ch }, v >= 0 ? yarnHex(y, v) : null);
     });
+    return wrap;
+  }
+  // 서술을 바꾼 파트(다이아 한 번 더 · 줄임 위치 바꾸기 · 끼워 넣은 단): 바뀐 서술로 차트를 그려 보여 준다
+  const narr = narrSeq(p, r.s);
+  const useNarr = !!narr && (view.useNarr[r.s] ?? true);
+  if (narr && page) t.append(h("button", { class: "btn ghost", type: "button", text: useNarr ? "PDF 차트 보기" : "바뀐 서술 차트 보기", on: { click: () => { view.useNarr[r.s] = !useNarr; saveView(); render(); } } }));
+  if (useNarr && narr) {
+    lg?.remove();
+    const cur = narr.cur(r);
+    const lo = view.full ? 0 : Math.max(0, cur - 6), hi = view.full ? narr.items.length - 1 : Math.min(narr.items.length - 1, cur + 10);
+    const rows: NRow[] = narr.items.slice(lo, hi + 1).map((it, i) => {
+      const ws = sideOf(p, { ...it.row, side: null }) === "WS" && !round;
+      return { label: it.label, cells: cellsOf(it.text, stitchesOnNeedle(p, it.row)), ws, done: lo + i < cur, cur: lo + i === cur, extra: it.extra, note: it.row.castOn ? "코잡기·코줍기 단" : undefined };
+    });
+    const c = h("canvas", { "aria-label": `${r.s} 바뀐 서술로 그린 차트, ${r.n}단 표시` });
+    cv.append(c);
+    drawNarrChart(c, rows, Math.max(12, Math.round(view.rowPx * 0.9)));
+    box.classList.add("narr");
+    box.after(h("span", { class: "gen narr-note", text: `✎ Claude가 바뀐 서술로 그린 차트 (보라색 · 원본 PDF 차트 아님)${narr.note ? " · " + narr.note + "은 연보라 바탕" : ""} — 겉뜨기 |, 안뜨기 빈칸, 교차는 사선(굵은 줄이 앞), 아래가 먼저 뜬 단` }));
+    scrollStart(cv, side === "RS" || round);
+    requestAnimationFrame(() => { const y = c.offsetTop + c.clientHeight - (cur - lo + 1) * Math.max(12, Math.round(view.rowPx * 0.9)); cv.scrollTop = Math.max(0, y - cv.clientHeight / 2); });
     return wrap;
   }
   const noChart = (why: string) => {
