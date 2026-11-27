@@ -1,4 +1,4 @@
-"""합성 테스트 도안 PDF (실제 리본 케이블 가디건 PDF 구조를 흉내). 사용: python3 scripts/make-fixture.py out.pdf"""
+"""합성 테스트 도안 PDF (실제 서술+차트 도안 PDF 구조를 흉내). 사용: python3 scripts/make-fixture.py out.pdf"""
 import sys, random
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics

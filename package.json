@@ -11,7 +11,8 @@
     "test": "vitest run",
     "typecheck": "tsc -p .",
     "check": "node scripts/chart-check.mjs",
-    "e2e": "node scripts/e2e.mjs"
+    "e2e": "node scripts/e2e.mjs",
+    "build:artifact": "node scripts/build-artifact.mjs"
   },
   "repository": {
     "type": "git",
