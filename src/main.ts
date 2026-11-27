@@ -4,7 +4,7 @@ import { chunksOf, labelParts, splitNarrative, stitchesThrough, SHOW_MARK } from
 import { MAX_TOKENS } from "./config";
 import { callAi, canCallDirect, errCopy } from "./ai";
 import { inArtifact, whenArtifact } from "./artifact";
-import { cellKeyColor, chartBitmap, chartKey, clearBitmaps, splitChartByGap, labelColor, sharpRows, rowWindow, sizeLabelColors, sizeLineRange, drawGrid, drawPdfFull, drawPdfRows, explainStrip, hitCell, legendCanvas, sampleRowColors, yarnHex } from "./chart";
+import { cellKeyColor, chartBitmap, chartKey, clearBitmaps, splitChartByGap, labelColor, sharpRows, rowWindow, sizeLabelColors, sizeLineRange, drawGrid, drawPdfFull, drawPdfRows, explainStrip, hitCell, legendCanvas, sampleRowColors, yarnHex, type ViewOpts } from "./chart";
 import { getFile, putFile } from "./db";
 import { getCell, longestFloat, rowColors } from "./drawing";
 import {
@@ -619,7 +619,7 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
       cv.append(c);
       symbolTap(p, pdf, page, bmp, cv, c, { x0: 0, yTop: 0, k: width / bmp.w }, range);
     } else {
-      const vo = { n: cn(r), side, round, rowPx: view.rowPx, range, done: doneOnPage(p, page), ...rowWindow(bmp, cn(r), view.rowPx) }; // 위아래로 스크롤해 볼 수 있게 여러 단
+      const vo: ViewOpts = { n: cn(r), side, round, rowPx: view.rowPx, range, done: doneOnPage(p, page), ...rowWindow(bmp, cn(r), view.rowPx) }; // 위아래로 스크롤해 볼 수 있게 여러 단
       const res = drawPdfRows(c, bmp, vo);
       // 먼저 빠르게 그리고, 보이는 단들만 선명하게 다시
       sharpRows(pdf, page, bmp, vo).then((hi) => { if (hi && seq === renderSeq && c.isConnected) drawPdfRows(c, bmp, vo, hi); }).catch(() => {});
@@ -637,6 +637,20 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
         const midY = (rowY(res.chart, cn(r)) - res.yTop) * res.k;
         requestAnimationFrame(() => { cv.scrollTop = midY - cv.clientHeight / 2; });
       }
+      // 이 단에 실제로 있는 코 범위를 읽어서: 화살표를 첫 코 바로 옆으로, 화면도 첫 코에서 시작 (아래쪽이 비어 있는 계단 차트)
+      chartRowStitches(p, r).then((st) => {
+        if (!st?.length || seq !== renderSeq || !c.isConnected) return;
+        const xs = st.flatMap((x) => [x.x0, x.x1]).filter((v): v is number => v != null);
+        if (!xs.length) return;
+        vo.span = [Math.min(...xs), Math.max(...xs)];
+        drawPdfRows(c, bmp, vo);
+        sharpRows(pdf, page, bmp, vo).then((hi) => { if (hi && seq === renderSeq && c.isConnected) drawPdfRows(c, bmp, vo, hi); }).catch(() => {});
+        if (!kept && !p.part[key(r.s, r.n)]) {
+          const startPt = res.startX === "right" ? vo.span[1] : vo.span[0];
+          const xPx = c.offsetLeft + (startPt - res.x0) * res.k;
+          cv.scrollLeft = res.startX === "right" ? xPx - cv.clientWidth + 40 : xPx - 40;
+        }
+      }).catch(() => {});
       scrollToProgress(p, r, cv, c, res).catch(() => {});
       symbolTap(p, pdf, page, bmp, cv, c, res, range);
       if (range) cv.append(h("div", { class: "size-note", text: `${p.size} 사이즈 범위만 표시 (점선 사이)` }));

@@ -34,7 +34,7 @@ export function chartBitmap(pdf: Pdf, pdfKey: string, page: number): Promise<Bit
 }
 export const clearBitmaps = () => bmpCache.clear();
 
-export type ViewOpts = { n: number; side: Side; round: boolean; rowPx: number; below?: number; above?: number; dpr?: number; range?: [number, number] | null; done?: Set<number> }; // done: 실제로 뜬 단(없으면 지금 단 아래 전부) // range: 내 사이즈 차트 범위 (pt)
+export type ViewOpts = { n: number; side: Side; round: boolean; rowPx: number; below?: number; above?: number; dpr?: number; range?: [number, number] | null; done?: Set<number>; span?: [number, number] | null }; // span: 이 단에 실제로 있는 코의 왼쪽·오른쪽 끝 (pt) — 화살표를 첫 코 바로 옆에 // done: 실제로 뜬 단(없으면 지금 단 아래 전부) // range: 내 사이즈 차트 범위 (pt)
 
 /** 화살표가 단 번호를 가리지 않게: 바깥 경계에서 축 숫자 너머까지 (pt) */
 /** 왼쪽·오른쪽 축 숫자 너머 (축이 그쪽에 없으면 작게) */
@@ -71,7 +71,8 @@ export function drawPdfRows(out: HTMLCanvasElement, bmp: Bitmap, o: ViewOpts, hi
   else ctx.drawImage(bmp.canvas, sx, sy, sw, sh, 0, 0, out.width, out.height);
   const toY = (y: number) => (y - yTop) * k * dpr;
   const xr = o.range ? (o.range.map((x) => (x - c.x0) * k * dpr) as [number, number]) : null;
-  overlay(ctx, out.width, (n) => [toY(rowY(c, n) - h / 2), toY(rowY(c, n) + h / 2)], o, Math.max(o.n - below, c.nMin - 1), dpr, axisInset(c).map((v) => v * k * dpr) as [number, number], xr);
+  const xs = o.span ? (o.span.map((x) => (x - c.x0) * k * dpr) as [number, number]) : null;
+  overlay(ctx, out.width, (n) => [toY(rowY(c, n) - h / 2), toY(rowY(c, n) + h / 2)], o, Math.max(o.n - below, c.nMin - 1), dpr, axisInset(c).map((v) => v * k * dpr) as [number, number], xr, xs);
   return { chart: c, startX: o.side === "RS" || o.round ? "right" : "left", x0: c.x0, yTop, k };
 }
 
@@ -118,7 +119,7 @@ export function drawPdfFull(out: HTMLCanvasElement, bmp: Bitmap, o: ViewOpts, wi
   ctx.restore();
 }
 
-function overlay(ctx: CanvasRenderingContext2D, w: number, band: (n: number) => [number, number], o: ViewOpts, fromN: number, dpr: number, inset: [number, number] = [4 * dpr, 4 * dpr], xr: [number, number] | null = null) {
+function overlay(ctx: CanvasRenderingContext2D, w: number, band: (n: number) => [number, number], o: ViewOpts, fromN: number, dpr: number, inset: [number, number] = [4 * dpr, 4 * dpr], xr: [number, number] | null = null, xs: [number, number] | null = null) {
   // 내 사이즈 범위가 있으면 띠·음영은 그 안에만, 바깥은 흐리게
   const L = xr ? Math.max(0, xr[0]) : 0, R = xr ? Math.min(w, xr[1]) : w;
   for (let n = Math.max(1, fromN); n < o.n; n++) {
@@ -148,7 +149,8 @@ function overlay(ctx: CanvasRenderingContext2D, w: number, band: (n: number) => 
   const rs = o.side === "RS" || o.round;
   const mid = (y0 + y1) / 2;
   const s = Math.max(6 * dpr, Math.min((y1 - y0) * 0.45, 14 * dpr));
-  const x = xr ? (rs ? R + s * 1.4 : L - s * 1.4) : rs ? w - inset[1] - s * 1.2 : inset[0] + s * 1.2;
+  // 이 단의 코가 있는 곳을 알면 첫 코 바로 옆에 (빈 칸 여백 없이), 아니면 사이즈 범위 끝 · 차트 끝
+  const x = xs ? (rs ? Math.min(w - s * 1.1, xs[1] + s * 1.3) : Math.max(s * 1.1, xs[0] - s * 1.3)) : xr ? (rs ? R + s * 1.4 : L - s * 1.4) : rs ? w - inset[1] - s * 1.2 : inset[0] + s * 1.2;
   ctx.fillStyle = MARK_LINE;
   ctx.beginPath();
   if (rs) {
