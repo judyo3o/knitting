@@ -7,7 +7,7 @@ import { migrateSettings, type AiSettings } from "./ai";
 import type { AiSection, Drawing, Pattern } from "./types";
 
 export const state = {
-  patterns: {} as Record<string, Pattern>,
+  patterns: Object.create(null) as Record<string, Pattern>,
   activeId: null as string | null,
   lastSaved: 0,
   dirty: false,
@@ -153,3 +153,4 @@ export async function importJson(text: string): Promise<number> {
   }
   return n;
 }
+

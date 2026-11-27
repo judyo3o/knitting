@@ -16,7 +16,7 @@ const rescueOf = new WeakMap<Pdf, Promise<Rescue | null>>();
 
 export async function openPdf(blob: Blob): Promise<Pdf> {
   const data = new Uint8Array(await blob.arrayBuffer());
-  const pdf = await pdfjs.getDocument({ data, cMapUrl: BASE + "cmaps/", cMapPacked: true, standardFontDataUrl: BASE + "standard_fonts/", wasmUrl: BASE + "wasm/" } as any).promise;
+  const pdf = await pdfjs.getDocument({ data, isEvalSupported: false, cMapUrl: BASE + "cmaps/", cMapPacked: true, standardFontDataUrl: BASE + "standard_fonts/", wasmUrl: BASE + "wasm/" } as any).promise;
   blobOf.set(pdf, blob);
   return pdf;
 }
@@ -109,3 +109,4 @@ export async function blobB64(blob: Blob) {
   return b64(new Uint8Array(await blob.arrayBuffer()));
 }
 export const canvasBlob = (c: HTMLCanvasElement, type = "image/jpeg", q = 0.9) => new Promise<Blob>((r) => c.toBlob((b) => r(b!), type, q));
+

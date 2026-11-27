@@ -34,7 +34,7 @@ export function mergeSections(base: AiSection[], add: AiSection[] | undefined): 
 /** Claude 결과 → 단마다 펼친 Row[] + 파트 정보 (§2) */
 export function expand(sections: AiSection[]): { rows: Row[]; secs: Record<string, SecInfo> } {
   const rows: Row[] = [];
-  const secs: Record<string, SecInfo> = {};
+  const secs: Record<string, SecInfo> = Object.create(null);
   for (const sec of sections || []) {
     const name = str(sec?.name) || "도안";
     const secCh = int(sec.chart) || null;
@@ -42,11 +42,12 @@ export function expand(sections: AiSection[]): { rows: Row[]; secs: Record<strin
     for (const r of sec.rows || []) {
       const a = int(r.from);
       let b = int(r.to) || a;
-      if (a < 1) continue;
+      if (!Number.isSafeInteger(a) || a < 1 || a > 1_000_000 || !Number.isSafeInteger(b) || b > 1_000_000) throw new Error("단 번호가 허용 범위를 벗어났어요.");
       if (b < a) b = a;
       if (b - a > 400) b = a + 400;
       const text = str(r.text);
       for (let n = a; n <= b; n++) {
+        if (rows.length + byN.size >= 50_000) throw new Error("도안의 단 수가 너무 많아요.");
         const row: Row = {
           s: name,
           n,
@@ -222,18 +223,18 @@ export function newPattern(init: Partial<Pattern> & { id: string; name: string }
     size: "",
     notes: "",
     rows: [],
-    secs: {},
+    secs: Object.create(null),
     tab: "",
-    pos: {},
-    done: {},
-    fin: {},
-    part: {},
+    pos: Object.create(null),
+    done: Object.create(null),
+    fin: Object.create(null),
+    part: Object.create(null),
     log: [],
     src: null,
     srcPages: null,
     readPages: [],
     colors: [],
-    draw: {},
+    draw: Object.create(null),
     gauges: [],
     rev: 1,
     updatedAt: Date.now(),
@@ -245,7 +246,10 @@ export function newPattern(init: Partial<Pattern> & { id: string; name: string }
 export function normalize(p: Partial<Pattern> & { id: string }): Pattern {
   const base = newPattern({ id: p.id, name: p.name || "도안" });
   const out = { ...base, ...p } as Pattern;
-  for (const k of ["secs", "pos", "done", "fin", "part", "draw"] as const) if (!out[k] || typeof out[k] !== "object") (out as any)[k] = {};
+  for (const k of ["secs", "pos", "done", "fin", "part", "draw"] as const) {
+    const value = out[k];
+    (out as any)[k] = Object.assign(Object.create(null), value && typeof value === "object" && !Array.isArray(value) ? value : {});
+  }
   if (!Array.isArray(out.log)) out.log = [];
   if (!Array.isArray(out.rows)) out.rows = [];
   if (!Array.isArray(out.readPages)) out.readPages = [];
@@ -324,3 +328,4 @@ export function applyDrawing(p: Pattern, s: string): number {
   p.rows = order.flatMap((name) => (name === s ? mine : others.filter((r) => r.s === name)));
   return changed;
 }
+
