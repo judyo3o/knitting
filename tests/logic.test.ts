@@ -535,7 +535,8 @@ describe("서술로 그린 차트", () => {
     const c = cellsOf("겉1, k2tog, 안2, 2/1 RPC, (겉1, 안1) 2번 반복, SSK, 겉1 (2코 줄음, 바늘에 86코)")!;
     expect(c.length).toBe(1 + 1 + 2 + 3 + 4 + 1 + 1);
     expect(c.filter((x) => x.k === "X").length).toBe(3);
-    expect(c[1]).toMatchObject({ k: "S", label: "/" });
+    expect(c[1]).toMatchObject({ k: "S", label: "K2tog" });
+    expect(c.find((x) => x.k === "X")!.name).toContain("2/1 RPC");
     expect(cellsOf("[안1, ktbl, 안1, k2togk 2번] 4번 반복")!.length).toBe(28);
     expect(cellsOf("모르는 기법 3코")).toBeNull();
   });

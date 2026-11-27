@@ -542,7 +542,17 @@ function chartArea(p: Pattern, r: Row, side: "RS" | "WS", round: boolean, yarnBo
     });
     const c = h("canvas", { "aria-label": `${r.s} 바뀐 서술로 그린 차트, ${r.n}단 표시` });
     cv.append(c);
-    drawNarrChart(c, rows, Math.max(12, Math.round(view.rowPx * 0.9)));
+    const ng = drawNarrChart(c, rows, Math.max(12, Math.round(view.rowPx * 0.9)));
+    // 칸을 누르면 어떤 코인지 (PDF 차트와 같은 말풍선)
+    c.addEventListener("click", (e) => {
+      const b = c.getBoundingClientRect();
+      const hc = ng.hit(e.clientX - b.left, e.clientY - b.top);
+      if (!hc) return closePop(cv);
+      const nr = rows[hc.row];
+      const from = nr.ws ? "왼쪽" : "오른쪽";
+      showPop(cv, e.clientX, e.clientY, hc.cell.name, `${nr.label}단 · ${from}부터 ${hc.fromStart}번째 코${nr.cells ? ` (이 단 ${nr.cells.length}코)` : ""}`,
+        { x: c.offsetLeft + hc.x, y: c.offsetTop + hc.y, w: hc.w, h: hc.h }, hc.cell.fill || null);
+    });
     box.classList.add("narr");
     box.after(h("span", { class: "gen narr-note", text: `✎ Claude가 바뀐 서술로 그린 차트 (보라색 · 원본 PDF 차트 아님)${narr.note ? " · " + narr.note + "은 연보라 바탕" : ""} — 겉뜨기 |, 안뜨기 빈칸, 교차는 사선(굵은 줄이 앞), 아래가 먼저 뜬 단` }));
     scrollStart(cv, side === "RS" || round);
