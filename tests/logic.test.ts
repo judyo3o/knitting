@@ -258,7 +258,7 @@ describe("gauge", () => {
   });
   it("finds gauges in pattern text", () => {
     expect(findGauges("게이지 : 20코 26단 (5.5mm 바늘, 10 x 10cm 메리야스뜨기) 42코 30단 (5.5mm 바늘, 19 x 13cm 무늬게이지)")).toEqual([
-      { label: "메리야스", st: 18, rows: 23, needle: "5.5mm" },
+      { label: "메리야스", st: 20, rows: 26, needle: "5.5mm" },
       { label: "무늬 (원문 42코 30단 / 19×13cm)", st: 22.1, rows: 23.1, needle: "5.5mm" }]);
     expect(findGauges("Knitting tension: 22 sts and 30 rows = 10 cm in stockinette").map((g) => [g.st, g.rows])).toEqual([[22, 30]]);
   });
@@ -392,3 +392,4 @@ describe("written swatch", () => {
     expect(merged[0].rows[1]).toMatchObject({ from: 2, to: 30, stitches: "30코" });
   });
 });
+
