@@ -1,7 +1,7 @@
 import { rowGaugeFor } from "./period";
 import { swatchFromLabel } from "./gauge";
 import { MAX_LOG, SESSION_GAP_MS } from "./config";
-import type { AiSection, Pattern, Row, SecInfo, Side } from "./types";
+import type { AiSection, Pattern, Rep, Row, SecInfo, Side } from "./types";
 
 export const int = (v: unknown): number => {
   const n = parseInt(String(v), 10);
@@ -652,6 +652,12 @@ export function partStats(p: Pattern, s: string): { ms: number; rest: number; ro
   return { ms: 0, rest: 0, rows: 0, stitches: null, skipped: doneIdx.length };
 }
 
+/** 한 번 더 뜨는 반복 구간 단의 평균 콧수 (그 구간 단들 콧수로 — 버튼밴드 13코처럼 도안 평균과 많이 다를 수 있다) */
+function repRowAvg(list: Row[], sts: (number | null)[], rp: Rep, fallback: number): number {
+  const v = list.map((r, i) => (r.n >= rp.from && r.n <= rp.to ? sts[i] : null)).filter((x): x is number => x != null);
+  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : fallback;
+}
+
 /** 이 도안에서 콧수를 아는 단들의 평균 콧수 (콧수를 모르는 파트에 대신 씀) */
 function avgRowStitches(p: Pattern): number | null {
   let t = 0, n = 0;
@@ -710,7 +716,7 @@ export function estimateFor(p: Pattern, pace: ReturnType<typeof averagePace>): {
     const sts = rowStitchCounts(list);
     list.forEach((r, i) => { if (isSkipped(p, part, r.n)) return; rows++; const v = sts[i] ?? avg; if (v == null) known = false; else st += v; });
     const rp = repOf(p, part);
-    if (rp && rp.times > 0) { const left = rp.times * (rp.to - rp.from + 1); rows += left; if (avg) st += left * avg; }
+    if (rp && rp.times > 0) { const left = rp.times * (rp.to - rp.from + 1); rows += left; const ra = repRowAvg(list, sts, rp, avg || 0); if (ra) st += left * ra; }
   }
   const stv = known && st ? st : null;
   const ms = pace ? (stv != null && pace.st ? stv / pace.st : pace.rows ? rows / pace.rows : null) : null;
@@ -728,7 +734,7 @@ export function remainingFor(p: Pattern, fallback: ReturnType<typeof averagePace
     const sts = rowStitchCounts(list);
     list.forEach((r, i) => { if (p.done[key(part, r.n)] || isSkipped(p, part, r.n)) return; rows++; st += sts[i] ?? avg; });
     const rp = repOf(p, part);
-    if (rp && rp.times > 0) { const left = rp.times * (rp.to - rp.from + 1) - repExtraDone(p, part); if (left > 0) { rows += left; st += left * avg; } }
+    if (rp && rp.times > 0) { const left = rp.times * (rp.to - rp.from + 1) - repExtraDone(p, part); if (left > 0) { rows += left; st += left * repRowAvg(list, sts, rp, avg); } }
   }
   const ms = own ? st / own : fallback ? (fallback.st && st ? st / fallback.st : fallback.rows ? rows / fallback.rows : null) : null;
   return { rows, st, ms, own: !!own };
@@ -748,7 +754,7 @@ export function etaText(p: Pattern, s: string): string | null {
     const rp = repOf(p, part);
     if (rp && rp.times > 0) {
       const left = rp.times * (rp.to - rp.from + 1) - repExtraDone(p, part);
-      if (left > 0) { rows += left; st += left * avg; }
+      if (left > 0) { rows += left; st += left * repRowAvg(list, sts, rp, avg); }
     }
     return { rows, st, ms: st / pace };
   };
