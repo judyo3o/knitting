@@ -45,10 +45,10 @@ const SYM: [RegExp, string, string, string][] = [
   [/^p3tog$/i, "P3tog", "#F8DF8E", "3코 모아 안뜨기 (P3tog)"],
   [/^(?:ktbl|k1?\s*tbl|겉1?\s*tbl)$/i, "Ktbl", "", "뒤쪽 실에 겉뜨기 (꼬아뜨기, K tbl)"],
   [/^(?:ptbl|p1?\s*tbl)$/i, "Ptbl", "", "뒤쪽 실에 안뜨기 (P tbl)"],
-  [/^M1Rp$/i, "Rp", "#C9C4F0", "오른코 안뜨기 늘림 (M1Rp)"],
-  [/^M1Lp$/i, "Lp", "#E7B3CF", "왼코 안뜨기 늘림 (M1Lp)"],
-  [/^M1R$/i, "R", "#F7C3EE", "오른코 늘림 (M1R)"],
-  [/^M1L$/i, "L", "#C9EFB1", "왼코 늘림 (M1L)"],
+  [/^(?:M1Rp|Rp)$/i, "Rp", "#C9C4F0", "오른코 안뜨기 늘림 (M1Rp)"],
+  [/^(?:M1Lp|Lp)$/i, "Lp", "#E7B3CF", "왼코 안뜨기 늘림 (M1Lp)"],
+  [/^(?:M1R|R)$/, "R", "#F7C3EE", "오른코 늘림 (M1R)"],
+  [/^(?:M1L|L)$/, "L", "#C9EFB1", "왼코 늘림 (M1L)"],
   [/^M1P$/i, "M1P", "#E7B3CF", "안뜨기 늘림 (M1P)"],
   [/^M1$/i, "M1", "#F7C3EE", "코 늘림 (M1)"],
   [/^(?:yo|바늘\s*비우기)$/i, "O", "", "바늘 비우기 (YO)"],
@@ -69,6 +69,8 @@ function cellsOfChunk(t0: string): Cell[] | null {
   if (m) return Array.from({ length: m[1] ? +m[1] : 1 }, () => ({ k: "K" as const, name: "겉뜨기" }));
   m = t.match(/^(?:안|p)\s*(?:뜨기)?\s*(\d*)$/i);
   if (m) return Array.from({ length: m[1] ? +m[1] : 1 }, () => ({ k: "P" as const, name: "안뜨기" }));
+  m = t.match(/^\+\s*(?:[×x]\s*(\d+))?$/);
+  if (m) return Array.from({ length: m[1] ? +m[1] : 1 }, () => ({ k: "CO" as const, name: "감아코", label: "+", fill: "#F6D776" }));
   m = t.match(/^감아\s*코\s*(\d+)\s*코?$/);
   if (m) return Array.from({ length: +m[1] }, () => ({ k: "CO" as const, name: "감아코", label: "+", fill: "#F6D776" }));
   // 교차뜨기: a/b LC·RC·LPC·RPC (앞으로 가는 코 a개), Ca/bL·R

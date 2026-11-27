@@ -298,11 +298,20 @@ function cellHasMark(R: RowCtx, k: number, items: { str: string; x: number; y: n
 
 /** 칸이 있나: 위·아래 테두리에 모두 선이 있으면 (경사뜨기로 안 뜨는 곳·모양 낸 가장자리 바깥은 아래 단의 윗선만 있다) */
 function cellExists(R: RowCtx, k: number): boolean {
-  const { B, S, h, yTop, dark } = R;
+  const { B, S, h, yTop, dark, img, OY } = R;
   const edge = (yy: number, x: number) => { for (let d = -2; d <= 2; d++) if (dark(x, yy + d)) return true; return false; };
+  // 색칠된 칸(Rp·R·감아코 등)이 맞닿으면 그 경계의 회색 선이 색에 덮여 안 보인다 → 경계 바로 안팎이 색칸이면 선이 있는 것으로
+  const colored = (px: number, py: number) => {
+    const i = (Math.round(py - OY) * img.width + Math.round(px)) * 4;
+    const r = img.data[i], g = img.data[i + 1], b = img.data[i + 2];
+    return r !== undefined && Math.max(r, g, b) - Math.min(r, g, b) >= 22 && r + g + b < 3 * 250;
+  };
+  const m = Math.max(2, Math.round(S * 0.6));
   const xs = [0.3, 0.5, 0.7].map((f) => B[k] + (B[k + 1] - B[k]) * f);
   const top = Math.round(yTop * S), bot = Math.round((yTop + h) * S);
-  return xs.filter((x) => edge(top, Math.round(x)) && edge(bot, Math.round(x))).length >= 2;
+  const topOk = (x: number) => edge(top, x) || colored(x, top - m) || colored(x, top + m);
+  const botOk = (x: number) => edge(bot, x) || colored(x, bot + m) || colored(x, bot - m);
+  return xs.filter((x) => topOk(Math.round(x)) && botOk(Math.round(x))).length >= 2;
 }
 
 /**
@@ -343,22 +352,43 @@ export async function readRow(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, n
     return cx >= span[0] - cw * 0.6 && cx <= span[1] + cw * 0.6;
   };
   const arrowIn = (k: number) => items.some((i) => ARROW.test(i.str) && i.x + i.w / 2 > B[k] / S && i.x + i.w / 2 < B[k + 1] / S && i.y - i.h / 2 > yTop - 1 && i.y - i.h / 2 < yTop + h + 1);
+  // 코 번호 밖(목·소매 늘림으로 넓어진 곳): 표시(|·Rp·+)가 있는 가장 바깥 칸까지는 빈칸(안뜨기)도 코다
+  // 코 번호 칸에서 바깥으로 격자가 끊기지 않고 이어지는 칸까지 (단 번호 칸·시작 화살표 칸은 제외)
+  const inSpanK = [...Array(M).keys()].filter((k) => inSpan(k));
+  const spanL = inSpanK.length ? inSpanK[0] : Infinity, spanR = inSpanK.length ? inSpanK[inSpanK.length - 1] : -Infinity;
+  const nearAxis = (k: number) => { const x0 = B[k] / S, x1 = B[k + 1] / S; return c.axes.some((a) => a > x0 - (x1 - x0) * 0.3 && a < x1 + (x1 - x0) * 0.3); };
+  const ok = (k: number) => exists(k) && !arrowIn(k) && !nearAxis(k);
+  let markL = spanL, markR = spanR;
+  if (span && !range && inSpanK.length) {
+    while (markL - 1 >= 0 && ok(markL - 1)) markL--;
+    while (markR + 1 < M && ok(markR + 1)) markR++;
+    // 가장 바깥 표시 칸(| · Rp · + …)까지: 한 단 안에 빈 코 자리는 없으니, 그 사이 칸은 격자선이 흐려도(색칸 옆) 코
+    for (let k = 0; k < spanL; k++) if (!arrowIn(k) && !nearAxis(k) && cellHasMark(R, k, items, c.axes)) { markL = Math.min(markL, k); break; }
+    for (let k = M - 1; k > spanR; k--) if (!arrowIn(k) && !nearAxis(k) && cellHasMark(R, k, items, c.axes)) { markR = Math.max(markR, k); break; }
+  }
+  const between = (k: number) => (k < spanL && k >= markL) || (k > spanR && k <= markR);
+  const outerOk = (k: number) => cellHasMark(R, k, items, c.axes) || between(k);
   const out: RowStitch[] = [];
   const order = [...Array(M).keys()];
   if (!fromLeft) order.reverse();
   const seen = new Set<number>();
   for (const k of order) {
     if (seen.has(k)) continue;
-    if ((!inSpan(k) && (range || !cellHasMark(R, k, items, c.axes))) || arrowIn(k) || !exists(k)) { seen.add(k); continue; } // 코 번호 밖이라도 감아코처럼 표시가 있으면 읽는다
+    if ((!inSpan(k) && (range || !outerOk(k))) || arrowIn(k) || (!exists(k) && !(!range && between(k)))) { seen.add(k); continue; } // 코 번호 밖이라도 감아코처럼 표시가 있으면 읽는다
     // 배색 차트(색 KEY가 있음): 칸 색 → 실 기호
     if (key.length) {
       seen.add(k);
       const code = cellKeyColor(bmp, { x0: B[k] / S, x1: B[k + 1] / S, y0: yTop, y1: yTop + h }, key);
       if (code) { out.push({ name: code, sym: code, cells: 1, yarn: true, x0: B[k] / S, x1: B[k + 1] / S }); continue; }
     }
-    const hit = await identify(p, pdf, page, bmp, (B[k] + B[k + 1]) / 2 / S, yMid, range);
+    const hit = await identify(p, pdf, page, bmp, (B[k] + B[k + 1]) / 2 / S, yMid, range, !range && !inSpan(k));
     let cells = 1, xa = B[k] / S, xb = B[k + 1] / S;
-    if (hit?.rect) {
+    // 한 칸짜리 기호(감아코 +, 늘림 R·L·Rp·Lp)는 옆 칸까지 묶지 않는다 (색칸 옆 빈칸을 한 기호로 먹어 코가 하나 빠지던 것)
+    let oneCell = !!hit && (/감아코|늘림|^\+$/.test(hit.name) || /^(?:\+|R|L|Rp|Lp)$/.test(hit.sym || ""));
+    // 옆 칸의 한 칸짜리 기호를 잡은 경우(기호 상자가 이 칸 가운데를 덮지 않음): 이 칸은 빈칸(안뜨기)
+    const cxk = (B[k] + B[k + 1]) / 2 / S;
+    if (oneCell && hit?.rect && (cxk < hit.rect.x0 || cxk > hit.rect.x1)) { out.push({ name: "안뜨기", sym: "", cells: 1, x0: B[k] / S, x1: B[k + 1] / S }); seen.add(k); continue; }
+    if (hit?.rect && !oneCell) {
       const near = (v: number) => B.reduce((bi, bv, i) => (Math.abs(bv - v * S) < Math.abs(B[bi] - v * S) ? i : bi), 0);
       const a = Math.min(k, near(hit.rect.x0)), b = Math.max(k, near(hit.rect.x1) - 1);
       for (let j = a; j <= b; j++) seen.add(j);
@@ -378,7 +408,7 @@ export async function debugTemplates(p: Pattern, pdf: Pdf) {
   return L.tmpls.map((t) => (t.canvas ? t.canvas.toDataURL("image/png") : ""));
 }
 
-export async function identify(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, x: number, y: number, range: [number, number] | null = null): Promise<SymHit | null> {
+export async function identify(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, x: number, y: number, range: [number, number] | null = null, outer = false): Promise<SymHit | null> {
   const c: Chart | undefined = bmp.charts.find((ch) => {
     const n = (y - ch.a) / ch.b;
     return n >= ch.nMin - 1.6 && n <= ch.nMax + 1.6 && x >= ch.x0 && x <= ch.x1; // 번호가 없는 끝 단(예: 코잡기 1단)까지
@@ -406,7 +436,7 @@ export async function identify(p: Pattern, pdf: Pdf, page: number, bmp: Bitmap, 
   } else if (ax && rect) {
     // 코 번호 밖 칸: 단 번호 상자·시작 화살표 같은 빈 칸은 코가 아니다. 다만 글자나 그림 기호가 있으면(가장자리 감아코 등) 읽는다
     const v = vAt((rect.x0 + rect.x1) / 2);
-    if ((v < 1 || v > ax.max) && !cellHasMark(R, k, items, c.axes)) return null;
+    if ((v < 1 || v > ax.max) && !outer && !cellHasMark(R, k, items, c.axes)) return null; // outer: 단 읽기에서 늘린 코 자리로 확인한 칸
   }
   if (lat && rect && !cellExists(R, k)) return null; // 이 단에 없는 칸 (경사뜨기로 안 뜨는 곳 등)
   const L = await legendData(p, pdf);
